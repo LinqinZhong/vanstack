@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document>
+    <title>Vanstack 入门</title>
+    <summary>用 XML 导入的示例文档</summary>
+    <content>这个仓库把 NestJS、React 19、TypeORM、i18n 和 OSS 放在同一个 monorepo 里。</content>
+    <locale>zh</locale>
+  </document>
+  <document>
+    <title>Vanstack Primer</title>
+    <summary>Sample document imported from XML</summary>
+    <content>This workspace combines NestJS, React 19, TypeORM, i18n, and OSS in one monorepo.</content>
+    <locale>en</locale>
+  </document>
+</documents>

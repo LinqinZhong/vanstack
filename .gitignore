@@ -1,0 +1,17 @@
+node_modules
+dist
+build
+coverage
+.turbo
+.DS_Store
+*.log
+.env
+.env.local
+apps/backend/data
+apps/backend/uploads
+*.sqlite
+*.sqlite-journal
+.idea
+.vscode/*
+!.vscode/extensions.json
+minio/*.exe

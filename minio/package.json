@@ -1,0 +1,20 @@
+{
+  "name": "minio",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "init:mac": "brew install minio/stable/minio",
+    "init:win": "",
+    "start:mac": "MINIO_ROOT_USER=neweb MINIO_ROOT_PASSWORD=Aa123456 minio server /mnt/data --console-address \":9000\"",
+    "start:win": "set MINIO_ROOT_PASSWORD=Aa123456 & set MINIO_ROOT_USER=neweb & minio.exe server .\\data --console-address \":9001\" --address \":9000\"",
+    "add-user:mac": "mc alias set minio http://localhost:9000 neweb Aa123456",
+    "add-user:win": ".\\mc.exe alias set minio http://localhost:9000 neweb Aa123456",
+    "set-public:mac": "mc anonymous set public minio/test",
+    "set-public:win": ".\\mc.exe anonymous set public minio/test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.33.0"
+}

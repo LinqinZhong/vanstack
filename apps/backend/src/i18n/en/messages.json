@@ -1,0 +1,17 @@
+{
+  "document": {
+    "created": "Document created",
+    "updated": "Document updated",
+    "deleted": "Document deleted",
+    "imported": "Imported {count} document(s) from XML",
+    "notFound": "Document not found"
+  },
+  "file": {
+    "uploaded": "File uploaded",
+    "deleted": "File deleted",
+    "notFound": "File not found"
+  },
+  "xml": {
+    "invalid": "Invalid XML payload"
+  }
+}

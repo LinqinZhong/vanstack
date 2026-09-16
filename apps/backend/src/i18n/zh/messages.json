@@ -1,0 +1,17 @@
+{
+  "document": {
+    "created": "文档已创建",
+    "updated": "文档已更新",
+    "deleted": "文档已删除",
+    "imported": "已从 XML 导入 {count} 篇文档",
+    "notFound": "文档不存在"
+  },
+  "file": {
+    "uploaded": "文件已上传",
+    "deleted": "文件已删除",
+    "notFound": "文件不存在"
+  },
+  "xml": {
+    "invalid": "XML 内容无效"
+  }
+}

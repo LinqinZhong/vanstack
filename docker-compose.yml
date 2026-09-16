@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: vanstack-postgres
+    environment:
+      POSTGRES_USER: vanstack
+      POSTGRES_PASSWORD: vanstack
+      POSTGRES_DB: vanstack
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vanstack -d vanstack"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: vanstack-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: vanstack
+      MINIO_ROOT_PASSWORD: vanstack_secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: vanstack-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 3;
+      mc alias set local http://minio:9000 vanstack vanstack_secret;
+      mc mb --ignore-existing local/vanstack;
+      exit 0;
+      "
+
+volumes:
+  pgdata:
+  miniodata:

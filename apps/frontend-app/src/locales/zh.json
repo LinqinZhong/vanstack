@@ -1,0 +1,42 @@
+{
+  "app": {
+    "name": "Vanstack",
+    "tagline": "文档工作台 · frontend-app",
+    "language": "语言"
+  },
+  "nav": {
+    "workspace": "工作台",
+    "xml": "XML",
+    "oss": "对象存储",
+    "admin": "管理后台"
+  },
+  "actions": {
+    "newDocument": "新建文档",
+    "save": "保存",
+    "delete": "删除",
+    "exportXml": "导出 XML",
+    "importXml": "导入 XML",
+    "upload": "上传附件",
+    "cancel": "取消",
+    "refresh": "刷新"
+  },
+  "document": {
+    "title": "标题",
+    "summary": "摘要",
+    "content": "正文",
+    "locale": "文档语言",
+    "empty": "还没有文档。创建一篇，或从 XML 导入。",
+    "attachments": "附件",
+    "updated": "更新于"
+  },
+  "xml": {
+    "hint": "粘贴 documents XML，或选择仓库里的 sample-documents.xml",
+    "placeholder": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<documents>\n  <document>\n    <title>标题</title>\n    <summary>摘要</summary>\n    <content>正文</content>\n    <locale>zh</locale>\n  </document>\n</documents>"
+  },
+  "status": {
+    "loading": "加载中…",
+    "saving": "保存中…",
+    "online": "后端正常",
+    "offline": "后端未连接"
+  }
+}

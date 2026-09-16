@@ -1,0 +1,36 @@
+{
+  "app": {
+    "name": "Vanstack Admin",
+    "tagline": "管理后台 · frontend-admin",
+    "language": "语言"
+  },
+  "nav": {
+    "overview": "总览",
+    "documents": "文档",
+    "files": "对象存储",
+    "app": "打开工作台"
+  },
+  "actions": {
+    "refresh": "刷新",
+    "delete": "删除",
+    "exportXml": "导出全部 XML"
+  },
+  "document": {
+    "title": "标题",
+    "locale": "语言",
+    "updated": "更新时间",
+    "attachments": "附件",
+    "empty": "暂无文档"
+  },
+  "file": {
+    "name": "文件名",
+    "size": "大小",
+    "empty": "暂无对象"
+  },
+  "status": {
+    "online": "后端正常",
+    "offline": "后端未连接",
+    "documents": "文档数",
+    "files": "对象数"
+  }
+}

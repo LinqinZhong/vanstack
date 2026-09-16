@@ -1,0 +1,36 @@
+{
+  "app": {
+    "name": "Vanstack Admin",
+    "tagline": "Admin console · frontend-admin",
+    "language": "Language"
+  },
+  "nav": {
+    "overview": "Overview",
+    "documents": "Documents",
+    "files": "Object storage",
+    "app": "Open workspace"
+  },
+  "actions": {
+    "refresh": "Refresh",
+    "delete": "Delete",
+    "exportXml": "Export all XML"
+  },
+  "document": {
+    "title": "Title",
+    "locale": "Locale",
+    "updated": "Updated",
+    "attachments": "Files",
+    "empty": "No documents"
+  },
+  "file": {
+    "name": "Name",
+    "size": "Size",
+    "empty": "No objects"
+  },
+  "status": {
+    "online": "Backend online",
+    "offline": "Backend offline",
+    "documents": "Documents",
+    "files": "Objects"
+  }
+}

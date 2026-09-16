@@ -1,0 +1,41 @@
+{
+  "name": "@vanstack/backend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "nest start --watch",
+    "start": "node dist/main.js",
+    "start:prod": "node dist/main.js",
+    "build": "nest build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.864.0",
+    "@nestjs/common": "^11.1.6",
+    "@nestjs/config": "^4.0.2",
+    "@nestjs/core": "^11.1.6",
+    "@nestjs/platform-express": "^11.1.6",
+    "@nestjs/typeorm": "^11.0.0",
+    "@vanstack/shared": "workspace:*",
+    "@vanstack/xml": "workspace:*",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.2",
+    "fast-xml-parser": "^5.2.5",
+    "multer": "^2.0.2",
+    "nestjs-i18n": "^10.5.1",
+    "pg": "^8.16.3",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "better-sqlite3": "^12.2.0",
+    "typeorm": "^0.3.26"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.10",
+    "@nestjs/schematics": "^11.0.7",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.3",
+    "@types/multer": "^1.4.13",
+    "@types/node": "^22.18.1",
+    "typescript": "^5.9.2"
+  }
+}

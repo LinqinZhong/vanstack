@@ -32,3 +32,80 @@ export interface AuthSessionDto {
   expiresIn: string;
   user: AuthUserDto;
 }
+
+export interface ProjectDto {
+  id: string;
+  name: string;
+  key: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateProjectInput {
+  name: string;
+  key: string;
+  description?: string;
+}
+
+export interface UpdateProjectInput {
+  name?: string;
+  key?: string;
+  description?: string;
+}
+
+export interface ProjectPageDto {
+  id: string;
+  projectId: string;
+  name: string;
+  key: string;
+  description: string;
+  currentVersionId: string | null;
+  xmlKey: string;
+  xmlUrl: string;
+  xml?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateProjectPageInput {
+  name: string;
+  key: string;
+  description?: string;
+}
+
+export interface UpdateProjectPageInput {
+  name?: string;
+  key?: string;
+  description?: string;
+}
+
+export const PAGE_VERSION_STATUSES = ['draft', 'published', 'in_use'] as const;
+export type PageVersionStatus = (typeof PAGE_VERSION_STATUSES)[number];
+
+export interface ProjectPageVersionDto {
+  id: string;
+  pageId: string;
+  versionNo: number;
+  status: PageVersionStatus;
+  description: string;
+  xmlKey: string;
+  xmlUrl: string;
+  xml?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateProjectPageVersionInput {
+  xml: string;
+  description?: string;
+}
+
+export interface UpdateProjectPageVersionInput {
+  xml?: string;
+  description?: string;
+}
+
+export interface ActivateProjectPageVersionInput {
+  versionId: string;
+}

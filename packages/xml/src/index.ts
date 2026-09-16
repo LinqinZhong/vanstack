@@ -1,6 +1,18 @@
 import { XMLBuilder, XMLParser, XMLValidator } from 'fast-xml-parser';
 import type { Locale } from '@vanstack/shared';
 import { isLocale } from '@vanstack/shared';
+import { XmlParseError } from './errors';
+
+export { XmlParseError } from './errors';
+export {
+  EMPTY_PAGE_XML,
+  compactWidgetStyle,
+  parsePageXml,
+  serializePageXml,
+  type PageWidget,
+  type PageXmlDocument,
+  type WidgetStyle,
+} from './page';
 
 type DocumentXmlPayload = {
   documents: Array<{
@@ -40,13 +52,6 @@ const builder = new XMLBuilder({
   indentBy: '  ',
   suppressEmptyNode: true,
 });
-
-export class XmlParseError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'XmlParseError';
-  }
-}
 
 function asArray<T>(value: T | T[] | undefined): T[] {
   if (!value) {

@@ -68,4 +68,35 @@ button {
 
 .h5-body {
   flex: 1;
+  padding: 16px;
+}
+
+.h5-hint {
+  margin: 0 0 12px;
+  color: #5d6b63;
+  font-size: 13px;
+}
+
+.h5-runtime .lowcode-page {
+  line-height: 1.6;
+}
+
+.h5-runtime .lowcode-text {
+  display: inline-block;
+  vertical-align: baseline;
+  box-sizing: border-box;
+  margin-right: 0.25em;
+}
+
+.h5-runtime .lowcode-button {
+  display: inline-block;
+  vertical-align: baseline;
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: 0 0.25em;
+  padding: 0 0.45em;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  appearance: none;
 }

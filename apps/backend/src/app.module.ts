@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AcceptLanguageResolver, HeaderResolver, I18nModule, QueryResolver } from 'nestjs-i18n';
 import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
+import { LowcodeModule } from './lowcode/lowcode.module';
 import { OssModule } from './oss/oss.module';
 
 @Module({
@@ -69,6 +70,7 @@ import { OssModule } from './oss/oss.module';
     OssModule,
     AuthModule,
     HealthModule,
+    LowcodeModule,
   ],
 })
 export class AppModule {}

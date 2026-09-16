@@ -3,5 +3,8 @@
     "name": "Vanstack",
     "tagline": "H5 client",
     "language": "Language"
+  },
+  "runtime": {
+    "hint": "Standalone runtime preview (text + button)"
   }
 }

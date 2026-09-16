@@ -11,6 +11,7 @@ export default defineConfig({
     alias: {
       '@vanstack/shared': path.resolve(rootDir, '../../packages/shared/src/index.ts'),
       '@vanstack/xml': path.resolve(rootDir, '../../packages/xml/src/index.ts'),
+      '@vanstack/lowcode-runtime': path.resolve(rootDir, '../../packages/lowcode-runtime/src/index.ts'),
     },
   },
   server: {

@@ -15,4 +15,8 @@ export abstract class OssStorage {
   abstract deleteObject(key: string): Promise<void>;
 
   abstract getPublicUrl(key: string): string;
+
+  ensureReady(): Promise<void> {
+    return Promise.resolve();
+  }
 }

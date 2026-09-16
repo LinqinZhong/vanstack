@@ -3,5 +3,8 @@
     "name": "Vanstack",
     "tagline": "H5 客户端",
     "language": "语言"
+  },
+  "runtime": {
+    "hint": "独立运行时预览（文本 + 按钮）"
   }
 }

@@ -2,7 +2,17 @@ html,
 body,
 #root {
   margin: 0;
+  height: 100%;
   min-height: 100%;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text !important;
+  user-select: text !important;
 }
 
 body {
@@ -13,10 +23,12 @@ body {
 
 .app-shell {
   min-height: 100vh;
+  height: 100vh;
 }
 
 .sidebar {
   padding: 24px 16px;
+  overflow: auto;
 }
 
 .brand {
@@ -39,6 +51,329 @@ body {
   gap: 16px;
 }
 
+.workspace-fill {
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-fill .editor-shell {
+  flex: 1;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.editor-shell {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+}
+
+.editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 300px 260px;
+  gap: 16px;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.editor-grid.is-versions-collapsed {
+  grid-template-columns: 260px minmax(0, 1fr) 300px;
+}
+
+.editor-versions {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.editor-versions .editor-panel {
+  flex: 1;
+}
+
+.versions-collapse {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: #1a232b;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition: opacity 0.15s ease;
+}
+
+.editor-versions:hover .versions-collapse,
+.versions-collapse:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.versions-collapse:hover {
+  color: #fff;
+  border-color: rgba(61, 186, 154, 0.55);
+  background: #22303a;
+}
+
+.version-list .ant-list-item {
+  display: block;
+  padding-inline: 0;
+}
+
+.version-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.version-item .ant-radio-wrapper {
+  margin-inline-end: 0;
+  min-width: 0;
+}
+
+.version-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-left: auto;
+}
+
+.editor-versions .editor-panel .ant-card-body {
+  overflow-x: hidden;
+}
+
+.editor-versions .ant-card-body > .ant-space {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.editor-left {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+.editor-panel,
+.editor-canvas-card {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-panel .ant-card-body,
+.editor-canvas-card .ant-card-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.editor-canvas-card .ant-card-body {
+  display: flex;
+  overflow: hidden;
+}
+
+.canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.canvas-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background-color: #151c22;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+  background-size: 20px 20px;
+  border-radius: 8px;
+  cursor: grab;
+  overscroll-behavior: none;
+}
+
+.canvas-stage.is-panning {
+  cursor: grabbing;
+}
+
+.canvas-stage.is-preview {
+  cursor: default;
+}
+
+.phone-screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  background: #fff;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.canvas-toolbar {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(21, 28, 34, 0.92);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.canvas-zoom {
+  min-width: 48px;
+  text-align: center;
+}
+
+.preview-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.is-selected {
+  background: rgba(61, 186, 154, 0.12);
+}
+
+.style-section {
+  margin: 4px 0 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.style-shadow-row,
+.style-border-row {
+  display: grid;
+  gap: 6px;
+  align-items: center;
+}
+
+.style-shadow-row {
+  grid-template-columns: 1fr 1fr 1fr auto;
+}
+
+.style-radius-fields {
+  display: grid;
+  gap: 6px;
+}
+
+.style-radius-fields > .ant-input-number,
+.style-radius-grid .ant-input-number {
+  width: 100%;
+}
+
+.style-radius-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.style-shadow-row .ant-input-number,
+.style-border-row .ant-input-number,
+.style-border-row .ant-select {
+  width: 100%;
+}
+
+body:has(.preview-host) {
+  background: #fff;
+}
+
+.preview-host {
+  box-sizing: border-box;
+  width: 375px;
+  height: 667px;
+  margin: 0;
+  padding: 12px;
+  background: #fff;
+  color: #1b2420;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+.preview-error {
+  color: #b42318;
+  margin: 0 0 12px;
+}
+
+.preview-mount .lowcode-page {
+  line-height: 1.6;
+}
+
+.preview-mount .lowcode-text {
+  display: inline-block;
+  vertical-align: baseline;
+  box-sizing: border-box;
+  margin-right: 0.25em;
+}
+
+.preview-mount .lowcode-button {
+  display: inline-block;
+  vertical-align: baseline;
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: 0 0.25em;
+  padding: 0 0.45em;
+  font: inherit;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  appearance: none;
+}
+
+.preview-host.is-editing [data-widget-id] {
+  cursor: pointer;
+}
+
+.preview-host.is-editing [data-widget-id]:hover:not(.is-widget-selected) {
+  outline: 2px dashed #ff7eb6 !important;
+  outline-offset: 2px;
+}
+
+.preview-host.is-editing [data-widget-id].is-widget-selected {
+  outline: 2px solid #ffd400 !important;
+  outline-offset: 2px;
+}
+
 .login-shell {
   min-height: 100vh;
   display: grid;
@@ -52,4 +387,33 @@ body {
 
 .login-lang {
   margin-bottom: 16px;
+}
+
+.version-create-modal .ant-modal-body {
+  overflow: hidden;
+}
+
+.version-create-form .ant-form-item {
+  margin-bottom: 16px;
+}
+
+.version-create-form .ant-form-item-row {
+  flex-wrap: nowrap;
+}
+
+.version-create-form .ant-form-item-label {
+  flex: 0 0 88px;
+  max-width: 88px;
+  white-space: nowrap;
+}
+
+.version-create-form .ant-form-item-control {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.version-create-form .ant-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }

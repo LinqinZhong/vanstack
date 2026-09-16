@@ -1,6 +1,8 @@
 import {
+  CreateBucketCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -28,6 +30,14 @@ export class S3OssStorage extends OssStorage {
         secretAccessKey: config.get<string>('OSS_SECRET_KEY', 'vanstack_secret'),
       },
     });
+  }
+
+  async ensureReady(): Promise<void> {
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+    } catch {
+      await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+    }
   }
 
   async putObject(key: string, body: Buffer, contentType: string): Promise<StoredObject> {

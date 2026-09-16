@@ -1,14 +1,29 @@
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { LOCALES, type Locale } from '@vanstack/shared';
+import { renderPageXml } from '@vanstack/lowcode-runtime';
 
 const localeLabel: Record<Locale, string> = {
   zh: '中文',
   en: 'English',
 };
 
+const DEMO_PAGE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<page>
+  <text id="t1" value="你好" />
+  <button id="b1" text="确定" />
+</page>`;
+
 export default function App() {
   const { t, i18n } = useTranslation();
   const current = LOCALES.find((locale) => i18n.language.startsWith(locale)) ?? 'zh';
+  const mountRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (mountRef.current) {
+      renderPageXml(mountRef.current, DEMO_PAGE_XML);
+    }
+  }, []);
 
   return (
     <div className="h5-frame">
@@ -27,7 +42,10 @@ export default function App() {
           ))}
         </div>
       </header>
-      <main className="h5-body" />
+      <main className="h5-body">
+        <p className="h5-hint">{t('runtime.hint')}</p>
+        <div ref={mountRef} className="h5-runtime" />
+      </main>
     </div>
   );
 }

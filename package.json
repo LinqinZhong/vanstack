@@ -14,6 +14,9 @@
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck"
   },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  },
   "engines": {
     "node": ">=20"
   },

@@ -81,6 +81,16 @@ button {
   line-height: 1.6;
 }
 
+.h5-runtime .lowcode-flex {
+  box-sizing: border-box;
+}
+
+.h5-runtime .lowcode-flex > .lowcode-text,
+.h5-runtime .lowcode-flex > .lowcode-button,
+.h5-runtime .lowcode-flex > .lowcode-flex {
+  margin: 0;
+}
+
 .h5-runtime .lowcode-text {
   display: inline-block;
   vertical-align: baseline;

@@ -5,6 +5,6 @@
     "language": "Language"
   },
   "runtime": {
-    "hint": "Standalone runtime preview (text + button)"
+    "hint": "Standalone runtime preview (flex + text + button)"
   }
 }

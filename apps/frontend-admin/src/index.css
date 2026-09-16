@@ -273,6 +273,27 @@ body {
   background: rgba(61, 186, 154, 0.12);
 }
 
+.widget-tree-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.widget-tree.ant-tree {
+  background: transparent;
+  color: inherit;
+}
+
+.widget-type-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.widget-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+  background: rgba(61, 186, 154, 0.12);
+}
+
 .style-section {
   margin: 4px 0 12px;
   padding-top: 10px;
@@ -280,6 +301,18 @@ body {
   color: rgba(255, 255, 255, 0.65);
   font-size: 12px;
   font-weight: 600;
+}
+
+.style-size-row {
+  display: grid;
+  grid-template-columns: 1fr 96px;
+  gap: 6px;
+  align-items: center;
+}
+
+.style-size-row .ant-input-number,
+.style-size-row .ant-select {
+  width: 100%;
 }
 
 .style-shadow-row,
@@ -337,6 +370,20 @@ body:has(.preview-host) {
 
 .preview-mount .lowcode-page {
   line-height: 1.6;
+}
+
+.preview-mount .lowcode-flex {
+  box-sizing: border-box;
+}
+
+.preview-host.is-editing .lowcode-flex {
+  min-height: 32px;
+}
+
+.preview-mount .lowcode-flex > .lowcode-text,
+.preview-mount .lowcode-flex > .lowcode-button,
+.preview-mount .lowcode-flex > .lowcode-flex {
+  margin: 0;
 }
 
 .preview-mount .lowcode-text {

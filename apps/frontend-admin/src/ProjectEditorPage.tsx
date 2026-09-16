@@ -1,8 +1,13 @@
 import {
   ArrowLeftOutlined,
+  CopyOutlined,
+  DeleteOutlined,
   ExpandOutlined,
   PlusOutlined,
+  RedoOutlined,
   RightOutlined,
+  SnippetsOutlined,
+  UndoOutlined,
   ZoomInOutlined,
   ZoomOutOutlined,
 } from '@ant-design/icons';
@@ -22,20 +27,56 @@ import {
   Space,
   Spin,
   Tag,
+  Tooltip,
+  Tree,
   Typography,
   message,
 } from 'antd';
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FocusEvent,
+  type MouseEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import type { ProjectDto, ProjectPageDto, ProjectPageVersionDto } from '@vanstack/shared';
-import { EMPTY_PAGE_XML, parsePageXml, serializePageXml, type PageWidget, type WidgetStyle } from '@vanstack/xml';
+import { EMPTY_PAGE_XML, parsePageXml, serializePageXml, type PageWidget } from '@vanstack/xml';
 import { api } from './api';
+import { FlexContainerFields, FlexItemFields } from './FlexStyleFields';
 import { isLowcodeMessage, LOWCODE_MESSAGE_SOURCE } from './lowcode-protocol';
 import { WidgetStyleFields } from './WidgetStyleFields';
+import {
+  isEditableKeyboardTarget,
+  matchWidgetShortcut,
+  modifierShortcutLabel,
+  type WidgetShortcut,
+} from './widgetShortcuts';
+import {
+  addWidgetToTree,
+  cloneWidget,
+  collectExpandableKeys,
+  findParentWidget,
+  findWidget,
+  insertWidget,
+  nextWidgetId,
+  patchWidget,
+  removeWidget,
+  toWidgetTreeData,
+  updateWidgetById,
+  type WidgetPatch,
+} from './widgetTree';
 
 const KEY_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 const SCREEN_HEIGHT = 667;
+const HISTORY_LIMIT = 100;
+
+type HistoryEntry = { widgets: PageWidget[]; selectedWidgetId: string | null };
 const FIT_PADDING_X = 32;
 const FIT_PADDING_TOP = 24;
 const FIT_PADDING_BOTTOM = 64;
@@ -90,6 +131,7 @@ export function ProjectEditorPage() {
   const [editingPage, setEditingPage] = useState<ProjectPageDto | null>(null);
   const [pageForm] = Form.useForm<{ name: string; key: string; description?: string }>();
   const [versionModalOpen, setVersionModalOpen] = useState(false);
+  const [widgetModalOpen, setWidgetModalOpen] = useState(false);
   const [versionForm] = Form.useForm<{ source: 'blank' | 'copy'; copyFromId?: string }>();
   const createVersionSource = Form.useWatch('source', versionForm);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -106,6 +148,17 @@ export function ProjectEditorPage() {
   const modeRef = useRef<CanvasMode>('edit');
   const [versionsOpen, setVersionsOpen] = useState(true);
   const dragRef = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number } | null>(null);
+  const widgetsRef = useRef(widgets);
+  const selectedWidgetIdRef = useRef(selectedWidgetId);
+  const readOnlyRef = useRef(false);
+  const clipboardRef = useRef<PageWidget | null>(null);
+  const pastRef = useRef<HistoryEntry[]>([]);
+  const futureRef = useRef<HistoryEntry[]>([]);
+  const coalesceKeyRef = useRef<string | null>(null);
+  const selectWidgetRef = useRef<(id: string | null) => void>(() => undefined);
+  const dispatchShortcutRef = useRef<(shortcut: WidgetShortcut) => void>(() => undefined);
+  const [clipboardTick, setClipboardTick] = useState(0);
+  const [historyTick, setHistoryTick] = useState(0);
 
   const xml = useMemo(() => serializePageXml({ widgets }), [widgets]);
   xmlRef.current = xml;
@@ -116,6 +169,9 @@ export function ProjectEditorPage() {
   const previewing = mode === 'preview';
   const versionLocked = selectedVersion?.status !== 'draft';
   const readOnly = previewing || versionLocked;
+  widgetsRef.current = widgets;
+  selectedWidgetIdRef.current = selectedWidgetId;
+  readOnlyRef.current = readOnly;
 
   const applyView = useCallback((next: ViewTransform, fromUser = true) => {
     viewRef.current = next;
@@ -201,7 +257,14 @@ export function ProjectEditorPage() {
         return;
       }
       if (event.data.type === 'select') {
-        setSelectedWidgetId(event.data.widgetId);
+        selectWidgetRef.current(event.data.widgetId);
+        return;
+      }
+      if (event.data.type === 'keydown') {
+        const shortcut = matchWidgetShortcut(event.data);
+        if (shortcut) {
+          dispatchShortcutRef.current(shortcut);
+        }
         return;
       }
       if (event.data.type === 'canvas-wheel') {
@@ -279,6 +342,25 @@ export function ProjectEditorPage() {
     stage.addEventListener('wheel', onWheel, { passive: false });
     return () => stage.removeEventListener('wheel', onWheel);
   }, [loading, missing, zoomAt]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (isEditableKeyboardTarget(event.target)) {
+        return;
+      }
+      const shortcut = matchWidgetShortcut(event);
+      if (!shortcut) {
+        return;
+      }
+      if (readOnlyRef.current && shortcut !== 'copy') {
+        return;
+      }
+      event.preventDefault();
+      dispatchShortcutRef.current(shortcut);
+    }
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, []);
 
   function onCanvasPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button === 1) {
@@ -365,24 +447,187 @@ export function ProjectEditorPage() {
   }
 
   useEffect(() => {
+    clipboardRef.current = null;
+    setClipboardTick((tick) => tick + 1);
+    resetHistory();
     if (selectedPageId) {
       void loadPage(selectedPageId);
     } else {
       setVersions([]);
       setSelectedVersionId(null);
-      setWidgets([]);
+      resetWidgetSession([]);
     }
   }, [selectedPageId]);
+
+  function resetHistory() {
+    pastRef.current = [];
+    futureRef.current = [];
+    coalesceKeyRef.current = null;
+    setHistoryTick((tick) => tick + 1);
+  }
+
+  function resetWidgetSession(nextWidgets: PageWidget[], nextSelectedId?: string | null) {
+    const selectedId = nextSelectedId === undefined ? (nextWidgets[0]?.id ?? null) : nextSelectedId;
+    widgetsRef.current = nextWidgets;
+    selectedWidgetIdRef.current = selectedId;
+    setWidgets(nextWidgets);
+    setSelectedWidgetId(selectedId);
+    resetHistory();
+  }
 
   function applyXml(nextXml: string) {
     try {
       const parsed = parsePageXml(nextXml);
-      setWidgets(parsed.widgets);
-      setSelectedWidgetId(parsed.widgets[0]?.id ?? null);
+      resetWidgetSession(parsed.widgets);
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.invalidXml'));
     }
   }
+
+  function endCoalesce() {
+    coalesceKeyRef.current = null;
+  }
+
+  function selectWidget(id: string | null) {
+    if (id !== selectedWidgetIdRef.current) {
+      endCoalesce();
+    }
+    selectedWidgetIdRef.current = id;
+    setSelectedWidgetId(id);
+  }
+  selectWidgetRef.current = selectWidget;
+
+  function commitWidgets(nextWidgets: PageWidget[], nextSelectedId: string | null, coalesceKey?: string) {
+    const coalescing = Boolean(coalesceKey && coalesceKey === coalesceKeyRef.current);
+    if (!coalescing) {
+      pastRef.current = [
+        ...pastRef.current,
+        { widgets: widgetsRef.current, selectedWidgetId: selectedWidgetIdRef.current },
+      ].slice(-HISTORY_LIMIT);
+      futureRef.current = [];
+      setHistoryTick((tick) => tick + 1);
+    }
+    coalesceKeyRef.current = coalesceKey ?? null;
+    widgetsRef.current = nextWidgets;
+    selectedWidgetIdRef.current = nextSelectedId;
+    setWidgets(nextWidgets);
+    setSelectedWidgetId(nextSelectedId);
+  }
+
+  function addWidget(type: PageWidget['type']) {
+    if (readOnlyRef.current) {
+      return;
+    }
+    const nextId = nextWidgetId();
+    const widget: PageWidget =
+      type === 'text'
+        ? { type: 'text', id: nextId, value: t('lowcode.defaultText') }
+        : type === 'button'
+          ? { type: 'button', id: nextId, text: t('lowcode.defaultButton'), style: { background: '#ffffff' } }
+          : { type: 'flex', id: nextId, children: [] };
+    commitWidgets(addWidgetToTree(widgetsRef.current, selectedWidgetIdRef.current, widget), nextId);
+  }
+
+  function updateWidget(widgetId: string, patch: WidgetPatch, coalesceKey: string) {
+    if (readOnlyRef.current) {
+      return;
+    }
+    commitWidgets(
+      updateWidgetById(widgetsRef.current, widgetId, (widget) => patchWidget(widget, patch)),
+      selectedWidgetIdRef.current,
+      coalesceKey,
+    );
+  }
+
+  function copySelectedWidget() {
+    const selected = findWidget(widgetsRef.current, selectedWidgetIdRef.current);
+    if (!selected) {
+      return;
+    }
+    clipboardRef.current = cloneWidget(selected);
+    setClipboardTick((tick) => tick + 1);
+  }
+
+  function pasteClipboard() {
+    if (readOnlyRef.current || !clipboardRef.current) {
+      return;
+    }
+    const copy = cloneWidget(clipboardRef.current);
+    commitWidgets(insertWidget(widgetsRef.current, selectedWidgetIdRef.current, copy), copy.id);
+  }
+
+  function deleteSelectedWidget() {
+    if (readOnlyRef.current || !selectedWidgetIdRef.current) {
+      return;
+    }
+    if (!findWidget(widgetsRef.current, selectedWidgetIdRef.current)) {
+      return;
+    }
+    const result = removeWidget(widgetsRef.current, selectedWidgetIdRef.current);
+    commitWidgets(result.widgets, result.nextSelectedId);
+  }
+
+  function undoWidgetEdit() {
+    if (readOnlyRef.current || pastRef.current.length === 0) {
+      return;
+    }
+    coalesceKeyRef.current = null;
+    const current: HistoryEntry = {
+      widgets: widgetsRef.current,
+      selectedWidgetId: selectedWidgetIdRef.current,
+    };
+    const previous = pastRef.current[pastRef.current.length - 1];
+    pastRef.current = pastRef.current.slice(0, -1);
+    futureRef.current = [...futureRef.current, current].slice(-HISTORY_LIMIT);
+    widgetsRef.current = previous.widgets;
+    selectedWidgetIdRef.current = previous.selectedWidgetId;
+    setWidgets(previous.widgets);
+    setSelectedWidgetId(previous.selectedWidgetId);
+    setHistoryTick((tick) => tick + 1);
+  }
+
+  function redoWidgetEdit() {
+    if (readOnlyRef.current || futureRef.current.length === 0) {
+      return;
+    }
+    coalesceKeyRef.current = null;
+    const current: HistoryEntry = {
+      widgets: widgetsRef.current,
+      selectedWidgetId: selectedWidgetIdRef.current,
+    };
+    const next = futureRef.current[futureRef.current.length - 1];
+    futureRef.current = futureRef.current.slice(0, -1);
+    pastRef.current = [...pastRef.current, current].slice(-HISTORY_LIMIT);
+    widgetsRef.current = next.widgets;
+    selectedWidgetIdRef.current = next.selectedWidgetId;
+    setWidgets(next.widgets);
+    setSelectedWidgetId(next.selectedWidgetId);
+    setHistoryTick((tick) => tick + 1);
+  }
+
+  function dispatchShortcut(shortcut: WidgetShortcut) {
+    if (readOnlyRef.current && shortcut !== 'copy') {
+      return;
+    }
+    if (shortcut === 'copy') {
+      copySelectedWidget();
+      return;
+    }
+    if (shortcut === 'paste') {
+      pasteClipboard();
+      return;
+    }
+    if (shortcut === 'delete') {
+      deleteSelectedWidget();
+      return;
+    }
+    if (shortcut === 'undo') {
+      undoWidgetEdit();
+      return;
+    }
+    redoWidgetEdit();
+  }
+  dispatchShortcutRef.current = dispatchShortcut;
 
   function openCreatePage() {
     setEditingPage(null);
@@ -433,32 +678,6 @@ export function ProjectEditorPage() {
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.deleteFailed'));
     }
-  }
-
-  function addWidget(type: PageWidget['type']) {
-    const nextId = `n${Date.now()}`;
-    const widget: PageWidget =
-      type === 'text'
-        ? { type: 'text', id: nextId, value: t('lowcode.defaultText') }
-        : { type: 'button', id: nextId, text: t('lowcode.defaultButton'), style: { background: '#ffffff' } };
-    setWidgets((current) => [...current, widget]);
-    setSelectedWidgetId(nextId);
-  }
-
-  function updateWidget(widgetId: string, patch: { value?: string; text?: string; style?: WidgetStyle }) {
-    setWidgets((current) =>
-      current.map((widget) => {
-        if (widget.id !== widgetId) {
-          return widget;
-        }
-        const next = { ...widget, ...patch };
-        if (!('style' in patch) || patch.style) {
-          return next;
-        }
-        delete next.style;
-        return next;
-      }),
-    );
   }
 
   function openCreateVersion() {
@@ -564,7 +783,29 @@ export function ProjectEditorPage() {
     );
   }
 
-  const selectedWidget = widgets.find((widget) => widget.id === selectedWidgetId) ?? null;
+  const selectedWidget = findWidget(widgets, selectedWidgetId);
+  const selectedParent = findParentWidget(widgets, selectedWidgetId);
+  const widgetTreeData = toWidgetTreeData(widgets, (widget) => {
+    if (widget.type === 'text') {
+      return `${t('lowcode.defaultText')} · ${widget.value}`;
+    }
+    if (widget.type === 'button') {
+      return `${t('lowcode.defaultButton')} · ${widget.text}`;
+    }
+    return t('lowcode.defaultFlex');
+  });
+  const selectedTypeLabel =
+    selectedWidget?.type === 'text'
+      ? t('lowcode.defaultText')
+      : selectedWidget?.type === 'button'
+        ? t('lowcode.defaultButton')
+        : t('lowcode.defaultFlex');
+  const modifier = modifierShortcutLabel();
+  const canUndo = historyTick >= 0 && !readOnly && pastRef.current.length > 0;
+  const canRedo = historyTick >= 0 && !readOnly && futureRef.current.length > 0;
+  const canDelete = !readOnly && Boolean(selectedWidget);
+  const canCopy = Boolean(selectedWidget);
+  const canPaste = clipboardTick >= 0 && !readOnly && Boolean(clipboardRef.current);
 
   return (
     <div className="editor-shell">
@@ -630,30 +871,65 @@ export function ProjectEditorPage() {
             className="editor-panel"
             title={t('lowcode.widgetTree')}
             extra={
-              <Space>
-                <Button size="small" onClick={() => addWidget('text')} disabled={!selectedPage || readOnly}>
-                  {t('lowcode.addText')}
-                </Button>
-                <Button size="small" onClick={() => addWidget('button')} disabled={!selectedPage || readOnly}>
-                  {t('lowcode.addButton')}
-                </Button>
-              </Space>
+              <div className="widget-tree-actions">
+                <TreeActionButton
+                  title={`${t('lowcode.undo')} (${modifier}+Z)`}
+                  icon={<UndoOutlined />}
+                  disabled={!canUndo}
+                  onClick={undoWidgetEdit}
+                />
+                <TreeActionButton
+                  title={`${t('lowcode.redo')} (${modifier}+Shift+Z)`}
+                  icon={<RedoOutlined />}
+                  disabled={!canRedo}
+                  onClick={redoWidgetEdit}
+                />
+                <TreeActionButton
+                  title={`${t('lowcode.copyWidget')} (${modifier}+C)`}
+                  icon={<CopyOutlined />}
+                  disabled={!canCopy}
+                  onClick={copySelectedWidget}
+                />
+                <TreeActionButton
+                  title={`${t('lowcode.pasteWidget')} (${modifier}+V)`}
+                  icon={<SnippetsOutlined />}
+                  disabled={!canPaste}
+                  onClick={pasteClipboard}
+                />
+                <TreeActionButton
+                  title={`${t('lowcode.deleteWidget')} (Del)`}
+                  icon={<DeleteOutlined />}
+                  disabled={!canDelete}
+                  danger
+                  onClick={deleteSelectedWidget}
+                />
+                <Tooltip title={t('lowcode.addWidget')}>
+                  <Button
+                    size="small"
+                    icon={<PlusOutlined />}
+                    disabled={!selectedPage || readOnly}
+                    onClick={() => setWidgetModalOpen(true)}
+                  />
+                </Tooltip>
+              </div>
             }
           >
-            <List
-              dataSource={widgets}
-              locale={{ emptyText: t('lowcode.emptyWidgets') }}
-              renderItem={(widget) => (
-                <List.Item
-                  className={widget.id === selectedWidgetId ? 'is-selected' : undefined}
-                  onClick={() => setSelectedWidgetId(widget.id)}
-                >
-                  {widget.type === 'text'
-                    ? `${t('lowcode.defaultText')} · ${widget.value}`
-                    : `${t('lowcode.defaultButton')} · ${widget.text}`}
-                </List.Item>
-              )}
-            />
+            {widgets.length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('lowcode.emptyWidgets')} />
+            ) : (
+              <Tree
+                className="widget-tree"
+                blockNode
+                expandedKeys={collectExpandableKeys(widgets)}
+                selectedKeys={selectedWidgetId ? [selectedWidgetId] : []}
+                treeData={widgetTreeData}
+                onSelect={(keys) => {
+                  if (keys[0]) {
+                    selectWidget(String(keys[0]));
+                  }
+                }}
+              />
+            )}
           </Card>
         </div>
 
@@ -736,10 +1012,7 @@ export function ProjectEditorPage() {
           {selectedWidget ? (
             <Form layout="vertical">
               <Form.Item label={t('lowcode.widgetType')}>
-                <Input
-                  value={selectedWidget.type === 'text' ? t('lowcode.defaultText') : t('lowcode.defaultButton')}
-                  disabled
-                />
+                <Input value={selectedTypeLabel} disabled />
               </Form.Item>
               <Form.Item label={t('lowcode.widgetId')}>
                 <Input value={selectedWidget.id} disabled />
@@ -749,25 +1022,52 @@ export function ProjectEditorPage() {
                   <Input
                     value={selectedWidget.value}
                     disabled={readOnly}
-                    onChange={(event) => updateWidget(selectedWidget.id, { value: event.target.value })}
+                    onChange={(event) =>
+                      updateWidget(selectedWidget.id, { value: event.target.value }, `edit:${selectedWidget.id}:value`)
+                    }
+                    onBlur={endCoalesce}
                   />
                 </Form.Item>
-              ) : (
+              ) : null}
+              {selectedWidget.type === 'button' ? (
                 <Form.Item label={t('lowcode.widgetLabel')}>
                   <Input
                     value={selectedWidget.text}
                     disabled={readOnly}
-                    onChange={(event) => updateWidget(selectedWidget.id, { text: event.target.value })}
+                    onChange={(event) =>
+                      updateWidget(selectedWidget.id, { text: event.target.value }, `edit:${selectedWidget.id}:text`)
+                    }
+                    onBlur={endCoalesce}
                   />
                 </Form.Item>
-              )}
-              <WidgetStyleFields
-                widgetId={selectedWidget.id}
-                widgetType={selectedWidget.type}
-                style={selectedWidget.style}
-                disabled={readOnly}
-                onChange={(style) => updateWidget(selectedWidget.id, { style })}
-              />
+              ) : null}
+              {selectedWidget.type === 'flex' ? (
+                <CoalesceField onLeave={endCoalesce}>
+                  <FlexContainerFields
+                    style={selectedWidget.flex}
+                    disabled={readOnly}
+                    onChange={(flex) => updateWidget(selectedWidget.id, { flex }, `edit:${selectedWidget.id}:flex`)}
+                  />
+                </CoalesceField>
+              ) : null}
+              {selectedParent?.type === 'flex' ? (
+                <CoalesceField onLeave={endCoalesce}>
+                  <FlexItemFields
+                    style={selectedWidget.item}
+                    disabled={readOnly}
+                    onChange={(item) => updateWidget(selectedWidget.id, { item }, `edit:${selectedWidget.id}:item`)}
+                  />
+                </CoalesceField>
+              ) : null}
+              <CoalesceField onLeave={endCoalesce}>
+                <WidgetStyleFields
+                  widgetId={selectedWidget.id}
+                  widgetType={selectedWidget.type}
+                  style={selectedWidget.style}
+                  disabled={readOnly}
+                  onChange={(style) => updateWidget(selectedWidget.id, { style }, `edit:${selectedWidget.id}:style`)}
+                />
+              </CoalesceField>
             </Form>
           ) : (
             <Empty description={t('lowcode.noWidgetSelected')} />
@@ -863,6 +1163,33 @@ export function ProjectEditorPage() {
       </div>
 
       <Modal
+        open={widgetModalOpen}
+        title={t('lowcode.addWidget')}
+        footer={null}
+        onCancel={() => setWidgetModalOpen(false)}
+        destroyOnHidden
+      >
+        <div className="widget-type-picker">
+          {(['text', 'button', 'flex'] as const).map((type) => (
+            <Button
+              key={type}
+              block
+              onClick={() => {
+                addWidget(type);
+                setWidgetModalOpen(false);
+              }}
+            >
+              {type === 'text'
+                ? t('lowcode.defaultText')
+                : type === 'button'
+                  ? t('lowcode.defaultButton')
+                  : t('lowcode.defaultFlex')}
+            </Button>
+          ))}
+        </div>
+      </Modal>
+
+      <Modal
         open={pageModalOpen}
         title={editingPage ? t('lowcode.editPage') : t('lowcode.createPage')}
         onOk={() => void submitPage()}
@@ -927,6 +1254,44 @@ export function ProjectEditorPage() {
           ) : null}
         </Form>
       </Modal>
+    </div>
+  );
+}
+
+function TreeActionButton({
+  title,
+  icon,
+  disabled,
+  danger,
+  onClick,
+}: {
+  title: string;
+  icon: ReactNode;
+  disabled?: boolean;
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Tooltip title={title}>
+      <span>
+        <Button size="small" icon={icon} disabled={disabled} danger={danger} onClick={onClick} />
+      </span>
+    </Tooltip>
+  );
+}
+
+function CoalesceField({ onLeave, children }: { onLeave: () => void; children: ReactNode }) {
+  return (
+    <div
+      onBlur={(event: FocusEvent<HTMLDivElement>) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && event.currentTarget.contains(next)) {
+          return;
+        }
+        onLeave();
+      }}
+    >
+      {children}
     </div>
   );
 }

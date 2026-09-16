@@ -10,8 +10,10 @@ const localeLabel: Record<Locale, string> = {
 
 const DEMO_PAGE_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <page>
-  <text id="t1" value="你好" />
-  <button id="b1" text="确定" />
+  <flex id="f1" flex-direction="row" justify-content="space-between" gap="8">
+    <text id="t1" value="左" />
+    <button id="b1" text="右" />
+  </flex>
 </page>`;
 
 export default function App() {

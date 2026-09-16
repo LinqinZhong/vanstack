@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { renderPageXml } from '@vanstack/lowcode-runtime';
 import { isLowcodeMessage, LOWCODE_MESSAGE_SOURCE } from './lowcode-protocol';
+import { matchWidgetShortcut } from './widgetShortcuts';
 
 function applyViewport(host: HTMLElement, scale: number, width: number, height: number) {
   host.style.width = `${width}px`;
@@ -149,6 +150,27 @@ export function PreviewPage() {
       }
     }
 
+    function onKeyDown(event: KeyboardEvent) {
+      if (!editingRef.current) {
+        return;
+      }
+      const shortcut = matchWidgetShortcut(event);
+      if (!shortcut) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      postToParent({
+        type: 'keydown',
+        key: event.key,
+        code: event.code,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+      });
+    }
+
     root.addEventListener('click', onClick);
     root.addEventListener('wheel', onWheel, { passive: false });
     root.addEventListener('pointerdown', onPointerDown);
@@ -156,6 +178,7 @@ export function PreviewPage() {
     root.addEventListener('pointerup', onPointerUp);
     root.addEventListener('pointercancel', onPointerUp);
     root.addEventListener('auxclick', onAuxClick);
+    window.addEventListener('keydown', onKeyDown, true);
     return () => {
       root.removeEventListener('click', onClick);
       root.removeEventListener('wheel', onWheel);
@@ -164,6 +187,7 @@ export function PreviewPage() {
       root.removeEventListener('pointerup', onPointerUp);
       root.removeEventListener('pointercancel', onPointerUp);
       root.removeEventListener('auxclick', onAuxClick);
+      window.removeEventListener('keydown', onKeyDown, true);
     };
   }, []);
 

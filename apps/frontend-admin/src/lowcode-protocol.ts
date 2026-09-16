@@ -39,14 +39,26 @@ export type LowcodeCanvasPointerMessage = {
   clientY: number;
 };
 
+export type LowcodeKeydownMessage = {
+  source: typeof LOWCODE_MESSAGE_SOURCE;
+  type: 'keydown';
+  key: string;
+  code: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+};
+
 export type LowcodeMessage =
   | LowcodeReadyMessage
   | LowcodePreviewMessage
   | LowcodeSelectMessage
   | LowcodeCanvasWheelMessage
-  | LowcodeCanvasPointerMessage;
+  | LowcodeCanvasPointerMessage
+  | LowcodeKeydownMessage;
 
-const MESSAGE_TYPES = new Set(['ready', 'preview', 'select', 'canvas-wheel', 'canvas-pointer']);
+const MESSAGE_TYPES = new Set(['ready', 'preview', 'select', 'canvas-wheel', 'canvas-pointer', 'keydown']);
 
 export function isLowcodeMessage(value: unknown): value is LowcodeMessage {
   if (!value || typeof value !== 'object') {

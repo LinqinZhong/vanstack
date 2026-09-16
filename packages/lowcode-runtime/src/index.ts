@@ -1,14 +1,39 @@
-import { createElement, type CSSProperties } from 'react';
+import { createElement, type CSSProperties, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { parsePageXml, XmlParseError, type PageWidget, type WidgetStyle } from '@vanstack/xml';
+import {
+  parsePageXml,
+  XmlParseError,
+  type FlexContainerStyle,
+  type FlexItemStyle,
+  type PageWidget,
+  type SizeValue,
+  type WidgetStyle,
+} from '@vanstack/xml';
 
 const roots = new WeakMap<Element, Root>();
 
 export type RenderPageXmlResult = { ok: true } | { ok: false; error: string };
 
+function sizeCss(size: SizeValue | undefined): string {
+  if (!size) {
+    return 'fit-content';
+  }
+  return size.mode === '%' ? `${size.value}%` : `${size.value}px`;
+}
+
+function mergeCss(...parts: Array<CSSProperties | undefined>): CSSProperties | undefined {
+  const css: CSSProperties = {};
+  for (const part of parts) {
+    if (part) {
+      Object.assign(css, part);
+    }
+  }
+  return Object.keys(css).length > 0 ? css : undefined;
+}
+
 function widgetCss(style: WidgetStyle | undefined): CSSProperties | undefined {
   if (!style) {
-    return undefined;
+    return { width: 'fit-content', height: 'fit-content' };
   }
 
   const css: CSSProperties = {};
@@ -68,11 +93,92 @@ function widgetCss(style: WidgetStyle | undefined): CSSProperties | undefined {
     css.boxShadow = style.boxShadow;
   }
 
+  css.width = sizeCss(style.width);
+  css.height = sizeCss(style.height);
+  if (style.marginTop != null) {
+    css.marginTop = `${style.marginTop}px`;
+  }
+  if (style.marginRight != null) {
+    css.marginRight = `${style.marginRight}px`;
+  }
+  if (style.marginBottom != null) {
+    css.marginBottom = `${style.marginBottom}px`;
+  }
+  if (style.marginLeft != null) {
+    css.marginLeft = `${style.marginLeft}px`;
+  }
+  if (style.paddingTop != null) {
+    css.paddingTop = `${style.paddingTop}px`;
+  }
+  if (style.paddingRight != null) {
+    css.paddingRight = `${style.paddingRight}px`;
+  }
+  if (style.paddingBottom != null) {
+    css.paddingBottom = `${style.paddingBottom}px`;
+  }
+  if (style.paddingLeft != null) {
+    css.paddingLeft = `${style.paddingLeft}px`;
+  }
+
   return Object.keys(css).length > 0 ? css : undefined;
 }
 
-function widgetElement(widget: PageWidget) {
-  const style = widgetCss(widget.style);
+function flexContainerCss(style: FlexContainerStyle | undefined): CSSProperties {
+  const css: CSSProperties = {
+    display: style?.display ?? 'flex',
+  };
+  if (style?.flexDirection) {
+    css.flexDirection = style.flexDirection;
+  }
+  if (style?.flexWrap) {
+    css.flexWrap = style.flexWrap;
+  }
+  if (style?.justifyContent) {
+    css.justifyContent = style.justifyContent;
+  }
+  if (style?.alignItems) {
+    css.alignItems = style.alignItems;
+  }
+  if (style?.alignContent) {
+    css.alignContent = style.alignContent;
+  }
+  if (style?.rowGap != null) {
+    css.rowGap = `${style.rowGap}px`;
+  }
+  if (style?.columnGap != null) {
+    css.columnGap = `${style.columnGap}px`;
+  }
+  return css;
+}
+
+function flexItemCss(style: FlexItemStyle | undefined): CSSProperties | undefined {
+  if (!style) {
+    return undefined;
+  }
+
+  const css: CSSProperties = {};
+  if (style.order != null) {
+    css.order = style.order;
+  }
+  if (style.flexGrow != null) {
+    css.flexGrow = style.flexGrow;
+  }
+  if (style.flexShrink != null) {
+    css.flexShrink = style.flexShrink;
+  }
+  if (style.flexBasis === 'auto') {
+    css.flexBasis = 'auto';
+  } else if (typeof style.flexBasis === 'number') {
+    css.flexBasis = `${style.flexBasis}px`;
+  }
+  if (style.alignSelf) {
+    css.alignSelf = style.alignSelf;
+  }
+  return Object.keys(css).length > 0 ? css : undefined;
+}
+
+function widgetElement(widget: PageWidget): ReactElement {
+  const itemStyle = flexItemCss(widget.item);
 
   if (widget.type === 'text') {
     return createElement(
@@ -82,23 +188,37 @@ function widgetElement(widget: PageWidget) {
         className: 'lowcode-text',
         'data-widget-id': widget.id,
         'data-widget-type': 'text',
-        style,
+        style: mergeCss(widgetCss(widget.style), itemStyle),
       },
       widget.value,
     );
   }
 
+  if (widget.type === 'button') {
+    return createElement(
+      'button',
+      {
+        key: widget.id,
+        className: 'lowcode-button',
+        type: 'button',
+        'data-widget-id': widget.id,
+        'data-widget-type': 'button',
+        style: mergeCss(widgetCss(widget.style), itemStyle),
+      },
+      widget.text,
+    );
+  }
+
   return createElement(
-    'button',
+    'div',
     {
       key: widget.id,
-      className: 'lowcode-button',
-      type: 'button',
+      className: 'lowcode-flex',
       'data-widget-id': widget.id,
-      'data-widget-type': 'button',
-      style,
+      'data-widget-type': 'flex',
+      style: mergeCss(widgetCss(widget.style), flexContainerCss(widget.flex), itemStyle),
     },
-    widget.text,
+    widget.children.map((child) => widgetElement(child)),
   );
 }
 

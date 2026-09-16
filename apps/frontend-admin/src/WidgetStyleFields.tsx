@@ -1,7 +1,7 @@
 import { ColorPicker, Form, InputNumber, Select, Switch } from 'antd';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { compactWidgetStyle, type WidgetStyle } from '@vanstack/xml';
+import { compactSize, compactWidgetStyle, type SizeMode, type SizeValue, type WidgetStyle } from '@vanstack/xml';
 
 type ShadowValue = {
   x: number;
@@ -54,6 +54,65 @@ function unifiedRadius(style: WidgetStyle) {
   return first;
 }
 
+function unifiedEdges(top?: number, right?: number, bottom?: number, left?: number) {
+  if (top == null || top !== right || right !== bottom || bottom !== left) {
+    return undefined;
+  }
+  return top;
+}
+
+function SizeField({
+  label,
+  size,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  size?: SizeValue;
+  disabled?: boolean;
+  onChange: (size: SizeValue | undefined) => void;
+}) {
+  const { t } = useTranslation();
+  const mode: SizeMode = size?.mode ?? 'fit-content';
+  const numeric = mode === 'fit-content' ? undefined : size?.value;
+
+  return (
+    <Form.Item label={label}>
+      <div className="style-size-row">
+        <InputNumber
+          size="small"
+          min={0}
+          disabled={disabled || mode === 'fit-content'}
+          value={numeric}
+          onChange={(value) => {
+            if (mode === 'fit-content') {
+              return;
+            }
+            onChange(compactSize({ mode, value: value ?? 0 }));
+          }}
+        />
+        <Select
+          size="small"
+          disabled={disabled}
+          value={mode}
+          onChange={(next: SizeMode) => {
+            if (next === 'fit-content') {
+              onChange(undefined);
+              return;
+            }
+            onChange({ mode: next, value: numeric ?? 100 });
+          }}
+          options={[
+            { value: 'px', label: 'px' },
+            { value: '%', label: '%' },
+            { value: 'fit-content', label: t('lowcode.styleSizeFit') },
+          ]}
+        />
+      </div>
+    </Form.Item>
+  );
+}
+
 const DEFAULT_BUTTON_BACKGROUND = '#ffffff';
 
 export function WidgetStyleFields({
@@ -64,7 +123,7 @@ export function WidgetStyleFields({
   onChange,
 }: {
   widgetId: string;
-  widgetType: 'text' | 'button';
+  widgetType: 'text' | 'button' | 'flex';
   style?: WidgetStyle;
   disabled?: boolean;
   onChange: (style: WidgetStyle | undefined) => void;
@@ -97,6 +156,8 @@ export function WidgetStyleFields({
 
   return (
     <>
+      {widgetType !== 'flex' ? (
+        <>
       <div className="style-section">{t('lowcode.styleFont')}</div>
       <Form.Item label={t('lowcode.styleColor')}>
         <ColorPicker
@@ -180,8 +241,136 @@ export function WidgetStyleFields({
           onChange={(lineThrough) => patch({ lineThrough })}
         />
       </Form.Item>
+        </>
+      ) : null}
 
       <div className="style-section">{t('lowcode.styleBox')}</div>
+      <SizeField
+        label={t('lowcode.styleWidth')}
+        size={current.width}
+        disabled={disabled}
+        onChange={(width) => patch({ width })}
+      />
+      <SizeField
+        label={t('lowcode.styleHeight')}
+        size={current.height}
+        disabled={disabled}
+        onChange={(height) => patch({ height })}
+      />
+      <Form.Item label={t('lowcode.styleMargin')}>
+        <div className="style-radius-fields">
+          <InputNumber
+            size="small"
+            disabled={disabled}
+            value={unifiedEdges(current.marginTop, current.marginRight, current.marginBottom, current.marginLeft)}
+            onChange={(value) =>
+              patch({
+                marginTop: value ?? undefined,
+                marginRight: value ?? undefined,
+                marginBottom: value ?? undefined,
+                marginLeft: value ?? undefined,
+              })
+            }
+            addonAfter="px"
+          />
+          <div className="style-radius-grid">
+            <InputNumber
+              size="small"
+              disabled={disabled}
+              value={current.marginTop}
+              onChange={(marginTop) => patch({ marginTop: marginTop ?? undefined })}
+              addonAfter="px"
+              placeholder={t('lowcode.styleEdgeTop')}
+            />
+            <InputNumber
+              size="small"
+              disabled={disabled}
+              value={current.marginRight}
+              onChange={(marginRight) => patch({ marginRight: marginRight ?? undefined })}
+              addonAfter="px"
+              placeholder={t('lowcode.styleEdgeRight')}
+            />
+            <InputNumber
+              size="small"
+              disabled={disabled}
+              value={current.marginBottom}
+              onChange={(marginBottom) => patch({ marginBottom: marginBottom ?? undefined })}
+              addonAfter="px"
+              placeholder={t('lowcode.styleEdgeBottom')}
+            />
+            <InputNumber
+              size="small"
+              disabled={disabled}
+              value={current.marginLeft}
+              onChange={(marginLeft) => patch({ marginLeft: marginLeft ?? undefined })}
+              addonAfter="px"
+              placeholder={t('lowcode.styleEdgeLeft')}
+            />
+          </div>
+        </div>
+      </Form.Item>
+      <Form.Item label={t('lowcode.stylePadding')}>
+        <div className="style-radius-fields">
+          <InputNumber
+            size="small"
+            min={0}
+            disabled={disabled}
+            value={unifiedEdges(
+              current.paddingTop,
+              current.paddingRight,
+              current.paddingBottom,
+              current.paddingLeft,
+            )}
+            onChange={(value) =>
+              patch({
+                paddingTop: value ?? undefined,
+                paddingRight: value ?? undefined,
+                paddingBottom: value ?? undefined,
+                paddingLeft: value ?? undefined,
+              })
+            }
+            addonAfter="px"
+          />
+          <div className="style-radius-grid">
+            <InputNumber
+              size="small"
+              min={0}
+              disabled={disabled}
+              value={current.paddingTop}
+              onChange={(paddingTop) => patch({ paddingTop: paddingTop ?? undefined })}
+              addonAfter="px"
+              placeholder={t('lowcode.styleEdgeTop')}
+            />
+            <InputNumber
+              size="small"
+              min={0}
+              disabled={disabled}
+              value={current.paddingRight}
+              onChange={(paddingRight) => patch({ paddingRight: paddingRight ?? undefined })}
+              addonAfter="px"
+              placeholder={t('lowcode.styleEdgeRight')}
+            />
+            <InputNumber
+              size="small"
+              min={0}
+              disabled={disabled}
+              value={current.paddingBottom}
+              onChange={(paddingBottom) => patch({ paddingBottom: paddingBottom ?? undefined })}
+              addonAfter="px"
+              placeholder={t('lowcode.styleEdgeBottom')}
+            />
+            <InputNumber
+              size="small"
+              min={0}
+              disabled={disabled}
+              value={current.paddingLeft}
+              onChange={(paddingLeft) => patch({ paddingLeft: paddingLeft ?? undefined })}
+              addonAfter="px"
+              placeholder={t('lowcode.styleEdgeLeft')}
+            />
+          </div>
+        </div>
+      </Form.Item>
       <Form.Item label={t('lowcode.styleBackground')}>
         <ColorPicker
           size="small"

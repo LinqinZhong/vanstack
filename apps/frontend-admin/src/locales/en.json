@@ -6,31 +6,22 @@
   },
   "nav": {
     "overview": "Overview",
-    "documents": "Documents",
-    "files": "Object storage",
-    "app": "Open workspace"
+    "app": "Open client"
   },
   "actions": {
-    "refresh": "Refresh",
-    "delete": "Delete",
-    "exportXml": "Export all XML"
+    "logout": "Log out"
   },
-  "document": {
-    "title": "Title",
-    "locale": "Locale",
-    "updated": "Updated",
-    "attachments": "Files",
-    "empty": "No documents"
-  },
-  "file": {
-    "name": "Name",
-    "size": "Size",
-    "empty": "No objects"
+  "login": {
+    "subtitle": "Sign in to the admin console",
+    "username": "Username",
+    "password": "Password",
+    "submit": "Sign in",
+    "submitting": "Signing in…",
+    "failed": "Invalid username or password",
+    "checking": "Checking session…"
   },
   "status": {
     "online": "Backend online",
-    "offline": "Backend offline",
-    "documents": "Documents",
-    "files": "Objects"
+    "offline": "Backend offline"
   }
 }

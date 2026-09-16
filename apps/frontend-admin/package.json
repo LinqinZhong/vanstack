@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.3.4",
     "@vanstack/shared": "workspace:*",
+    "antd": "^6.6.4",
     "i18next": "^25.5.2",
     "i18next-browser-languagedetector": "^8.2.0",
     "react": "^19.1.1",

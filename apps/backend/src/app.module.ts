@@ -3,8 +3,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AcceptLanguageResolver, HeaderResolver, I18nModule, QueryResolver } from 'nestjs-i18n';
-import { DocumentsModule } from './documents/documents.module';
-import { FilesModule } from './files/files.module';
+import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 import { OssModule } from './oss/oss.module';
 
@@ -30,6 +29,10 @@ import { OssModule } from './oss/oss.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
         const dbType = config.get<string>('DB_TYPE', 'sqlite');
+        const common = {
+          autoLoadEntities: true,
+          synchronize: config.get<string>('NODE_ENV') !== 'production',
+        };
 
         if (dbType === 'postgres') {
           return {
@@ -39,8 +42,19 @@ import { OssModule } from './oss/oss.module';
             username: config.get<string>('DB_USER', 'vanstack'),
             password: config.get<string>('DB_PASSWORD', 'vanstack'),
             database: config.get<string>('DB_NAME', 'vanstack'),
-            autoLoadEntities: true,
-            synchronize: config.get<string>('NODE_ENV') !== 'production',
+            ...common,
+          };
+        }
+
+        if (dbType === 'mysql') {
+          return {
+            type: 'mysql' as const,
+            host: config.get<string>('DB_HOST', '127.0.0.1'),
+            port: Number(config.get('DB_PORT', 3306)),
+            username: config.get<string>('DB_USER', 'root'),
+            password: config.get<string>('DB_PASSWORD', 'vanstack'),
+            database: config.get<string>('DB_NAME', 'vanstack'),
+            ...common,
           };
         }
 
@@ -53,9 +67,8 @@ import { OssModule } from './oss/oss.module';
       },
     }),
     OssModule,
+    AuthModule,
     HealthModule,
-    DocumentsModule,
-    FilesModule,
   ],
 })
 export class AppModule {}

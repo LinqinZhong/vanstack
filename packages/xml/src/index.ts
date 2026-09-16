@@ -1,6 +1,32 @@
 import { XMLBuilder, XMLParser, XMLValidator } from 'fast-xml-parser';
-import type { DocumentDto, DocumentXmlPayload, Locale } from '@vanstack/shared';
+import type { Locale } from '@vanstack/shared';
 import { isLocale } from '@vanstack/shared';
+
+type DocumentXmlPayload = {
+  documents: Array<{
+    title: string;
+    summary?: string;
+    content?: string;
+    locale?: Locale;
+  }>;
+};
+
+type DocumentRecord = {
+  id: string;
+  title: string;
+  summary: string;
+  content: string;
+  locale: Locale;
+  createdAt: string;
+  updatedAt: string;
+  files: Array<{
+    id: string;
+    originalName: string;
+    mimeType: string;
+    size: number;
+    url: string;
+  }>;
+};
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -67,7 +93,7 @@ export function parseDocumentsXml(xml: string): DocumentXmlPayload {
   return { documents };
 }
 
-export function serializeDocumentsXml(documents: DocumentDto[]): string {
+export function serializeDocumentsXml(documents: DocumentRecord[]): string {
   const payload = {
     '?xml': { '@_version': '1.0', '@_encoding': 'UTF-8' },
     documents: {

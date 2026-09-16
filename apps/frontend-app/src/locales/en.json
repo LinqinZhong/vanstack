@@ -1,42 +1,7 @@
 {
   "app": {
     "name": "Vanstack",
-    "tagline": "Document workspace · frontend-app",
+    "tagline": "H5 client",
     "language": "Language"
-  },
-  "nav": {
-    "workspace": "Workspace",
-    "xml": "XML",
-    "oss": "Object storage",
-    "admin": "Admin"
-  },
-  "actions": {
-    "newDocument": "New document",
-    "save": "Save",
-    "delete": "Delete",
-    "exportXml": "Export XML",
-    "importXml": "Import XML",
-    "upload": "Upload file",
-    "cancel": "Cancel",
-    "refresh": "Refresh"
-  },
-  "document": {
-    "title": "Title",
-    "summary": "Summary",
-    "content": "Content",
-    "locale": "Document locale",
-    "empty": "No documents yet. Create one, or import from XML.",
-    "attachments": "Attachments",
-    "updated": "Updated"
-  },
-  "xml": {
-    "hint": "Paste documents XML, or use packages/xml/fixtures/sample-documents.xml",
-    "placeholder": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<documents>\n  <document>\n    <title>Title</title>\n    <summary>Summary</summary>\n    <content>Body</content>\n    <locale>en</locale>\n  </document>\n</documents>"
-  },
-  "status": {
-    "loading": "Loading…",
-    "saving": "Saving…",
-    "online": "Backend online",
-    "offline": "Backend offline"
   }
 }

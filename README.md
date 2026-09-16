@@ -8,7 +8,7 @@ NestJS、React 19、TypeScript、i18n、XML、TypeORM、OSS 的 pnpm monorepo。
 
 ```text
 apps/backend         NestJS 后端（TypeORM、nestjs-i18n、XML、OSS）
-apps/frontend-app    React 19 工作台
+apps/frontend-app    React 19 H5 客户端
 apps/frontend-admin  React 19 管理后台
 packages/shared      共享类型与语言常量
 packages/xml         XML 解析 / 序列化
@@ -25,7 +25,7 @@ pnpm dev
 
 启动后：
 
-- 工作台：http://127.0.0.1:5173
+- H5 客户端：http://127.0.0.1:5173
 - 管理后台：http://127.0.0.1:5174
 - 后端：http://127.0.0.1:3000/api/health
 
@@ -35,15 +35,14 @@ pnpm dev
 | --- | --- |
 | `pnpm dev` | 并行启动共享包、backend、frontend-app、frontend-admin |
 | `pnpm dev:backend` | 只启动 NestJS |
-| `pnpm dev:app` | 只启动工作台 |
+| `pnpm dev:app` | 只启动 H5 客户端 |
 | `pnpm dev:admin` | 只启动管理后台 |
 | `pnpm build` | 构建全部包和应用 |
 
 ## 能力
 
 - **I18n**：前端 `zh` / `en` 切换；后端通过 `x-lang` 或 `Accept-Language` 返回对应文案。
-- **XML**：`POST /api/documents/import.xml` 导入，`GET /api/documents/export.xml` 导出；请求头 `Accept: application/xml` 也可把 JSON 响应序列化成 XML。
-- **TypeORM**：默认 SQLite（`apps/backend/data/vanstack.sqlite`），设置 `DB_TYPE=postgres` 后使用 PostgreSQL。
+- **TypeORM**：默认 SQLite（`apps/backend/data/vanstack.sqlite`），也可使用 MySQL / PostgreSQL。
 - **OSS**：默认写入本地 `apps/backend/uploads/`；设置 `OSS_DRIVER=s3` 后走 MinIO / S3 / 兼容对象存储。
 
 ## PostgreSQL + MinIO
@@ -64,7 +63,3 @@ OSS_BUCKET=vanstack
 ```
 
 MinIO 控制台：http://127.0.0.1:9001
-
-## 示例 XML
-
-见 `packages/xml/fixtures/sample-documents.xml`，可直接粘到工作台导入。

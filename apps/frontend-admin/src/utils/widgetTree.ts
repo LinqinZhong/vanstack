@@ -1,16 +1,21 @@
 import type { TreeDataNode } from 'antd';
 import {
+  compactLoop,
+  compactStateFn,
   sanitizeWidgetStyle,
   type FlexContainerStyle,
   type FlexItemStyle,
   type PageWidget,
   type SwiperStyle,
+  type WidgetLoop,
   type WidgetStyle,
 } from '@vanstack/xml';
 
 export type WidgetPatch = {
   value?: string;
   text?: string;
+  loop?: WidgetLoop | undefined;
+  stateFn?: string | undefined;
   style?: WidgetStyle | undefined;
   flex?: FlexContainerStyle | undefined;
   swiper?: SwiperStyle | undefined;
@@ -41,9 +46,15 @@ function cloneStateFields(widget: PageWidget) {
   return {
     ...(widget.states?.length ? { states: cloneStateList(widget.states) } : {}),
     ...(widget.stateOverrides?.length ? { stateOverrides: cloneStateList(widget.stateOverrides) } : {}),
+    ...(widget.stateFn ? { stateFn: widget.stateFn } : {}),
     ...(widget.appliedState ? { appliedState: widget.appliedState } : {}),
     ...(widget.transition != null ? { transition: widget.transition } : {}),
   };
+}
+
+function cloneLoop(widget: PageWidget): { loop?: WidgetLoop } {
+  const loop = compactLoop(widget.loop);
+  return loop ? { loop: { ...loop } } : {};
 }
 
 type ContainerWidget = Extract<PageWidget, { children: PageWidget[] }>;
@@ -175,6 +186,22 @@ function applyCommon<T extends PageWidget>(widget: T, patch: WidgetPatch): T {
       withItem.item = patch.item;
     } else {
       delete withItem.item;
+    }
+  }
+  if ('loop' in patch) {
+    const loop = compactLoop(patch.loop);
+    if (loop) {
+      next.loop = loop;
+    } else {
+      delete next.loop;
+    }
+  }
+  if ('stateFn' in patch) {
+    const stateFn = compactStateFn(patch.stateFn);
+    if (stateFn) {
+      next.stateFn = stateFn;
+    } else {
+      delete next.stateFn;
     }
   }
   return next;
@@ -388,6 +415,7 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
       style: cloneOptional(widget.style),
       item: cloneOptional(widget.item),
       ...states,
+      ...cloneLoop(widget),
     };
   }
   if (widget.type === 'button') {
@@ -398,6 +426,7 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
       style: cloneOptional(widget.style),
       item: cloneOptional(widget.item),
       ...states,
+      ...cloneLoop(widget),
     };
   }
   if (widget.type === 'flex') {
@@ -409,6 +438,7 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
       flex: cloneOptional(widget.flex),
       item: cloneOptional(widget.item),
       ...states,
+      ...cloneLoop(widget),
     };
   }
   if (widget.type === 'swiper') {
@@ -420,6 +450,7 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
       swiper: cloneOptional(widget.swiper),
       item: cloneOptional(widget.item),
       ...states,
+      ...cloneLoop(widget),
     };
   }
   return {
@@ -428,6 +459,7 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
     children: widget.children.map((child) => cloneWidget(child, nextId)),
     style: cloneOptional(widget.style),
     ...states,
+    ...cloneLoop(widget),
   };
 }
 

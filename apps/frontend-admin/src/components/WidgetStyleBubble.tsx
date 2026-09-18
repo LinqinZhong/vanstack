@@ -4,6 +4,7 @@ import {
   BorderOutlined,
   BorderOuterOutlined,
   ColumnWidthOutlined,
+  ControlOutlined,
   DragOutlined,
   EditOutlined,
   HighlightOutlined,
@@ -11,16 +12,33 @@ import {
   RadiusSettingOutlined,
   RotateRightOutlined,
   SettingOutlined,
+  UnorderedListOutlined,
   StrikethroughOutlined,
   UnderlineOutlined,
 } from '@ant-design/icons';
-import { Button, ColorPicker, ConfigProvider, Input, InputNumber, Select, theme, Tooltip } from 'antd';
+import { Button, ColorPicker, ConfigProvider, Input, InputNumber, Modal, Select, theme, Tooltip } from 'antd';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { DEFAULT_SWIPER_HEIGHT, DEFAULT_SWIPER_WIDTH, POSITION_MODES, sanitizeWidgetStyle, type PageI18n, type PageWidget, type PositionMode, type WidgetStyle } from '@vanstack/xml';
+import {
+  DEFAULT_SWIPER_HEIGHT,
+  DEFAULT_SWIPER_WIDTH,
+  POSITION_MODES,
+  isCopyBinding,
+  isLoopConfigured,
+  isStateFnConfigured,
+  sanitizeWidgetStyle,
+  type PageI18n,
+  type PageVariable,
+  type PageWidget,
+  type PositionMode,
+  type WidgetLoop,
+  type WidgetStyle,
+} from '@vanstack/xml';
 import { CopyI18nPicker } from './CopyI18nPicker';
 import { StyleBoxEdges, pxFromLength } from './StyleBoxEdges';
 import { AngleField, SizeField, fontFamilyOptions } from './WidgetStyleFields';
+import { WidgetLoopPanel } from './WidgetLoopPanel';
+import { WidgetStateFnModal } from './WidgetStateFnModal';
 import { modifierShortcutLabel } from '../utils/widgetShortcuts';
 
 type ShadowValue = {
@@ -33,9 +51,12 @@ type ShadowValue = {
 const DEFAULT_SHADOW: ShadowValue = { x: 0, y: 0, blur: 4, color: '' };
 const DEFAULT_BUTTON_BACKGROUND = '#ffffff';
 
-export type BoxGroup = 'content' | 'margin' | 'padding' | 'radius' | 'border' | 'size' | 'position' | 'rotate';
+export type BoxGroup = 'content' | 'margin' | 'padding' | 'radius' | 'border' | 'size' | 'position' | 'rotate' | 'loop';
 
 export function isBoxGroupAllowed(type: PageWidget['type'], group: BoxGroup) {
+  if (group === 'loop') {
+    return true;
+  }
   if (
     type === 'swiper-item' &&
     (group === 'size' || group === 'margin' || group === 'radius' || group === 'border' || group === 'position')
@@ -78,7 +99,52 @@ function formatCssShadow(shadow: ShadowValue) {
 }
 
 function colorValue(value: string | undefined) {
-  return value || null;
+  if (!value || isCopyBinding(value)) {
+    return null;
+  }
+  return value;
+}
+
+function BindingLock({
+  bound,
+  resetKey,
+  children,
+  onContinue,
+}: {
+  bound?: string;
+  resetKey?: string;
+  children: ReactNode;
+  onContinue?: () => void;
+}) {
+  const { t } = useTranslation();
+  const [released, setReleased] = useState(false);
+  const locked = isCopyBinding(bound ?? '') && !released;
+
+  useEffect(() => {
+    setReleased(false);
+  }, [resetKey, bound]);
+
+  function confirm(event: { preventDefault(): void; stopPropagation(): void }) {
+    event.preventDefault();
+    event.stopPropagation();
+    Modal.confirm({
+      title: t('lowcode.styleBindingOverwrite'),
+      onOk: () => {
+        setReleased(true);
+        onContinue?.();
+      },
+    });
+  }
+
+  return (
+    <span
+      className="widget-style-binding"
+      data-bound={locked ? '' : undefined}
+      onMouseDownCapture={locked ? confirm : undefined}
+    >
+      {children}
+    </span>
+  );
 }
 
 function ToggleButton({
@@ -111,6 +177,8 @@ function ColorIconPicker({
   getPopupContainer,
   onOpenChange,
   onChange,
+  resetKey,
+  bound,
 }: {
   title: string;
   color?: string;
@@ -120,8 +188,10 @@ function ColorIconPicker({
   getPopupContainer: () => HTMLElement;
   onOpenChange?: (open: boolean) => void;
   onChange: (css: string | undefined, cleared: boolean) => void;
+  resetKey?: string;
+  bound?: string;
 }) {
-  return (
+  const picker = (
     <Tooltip title={title} open={open ? false : undefined}>
       <span>
         <ColorPicker
@@ -142,13 +212,19 @@ function ColorIconPicker({
             )}
             <span
               className="widget-style-bubble-color-bar"
-              style={color ? { backgroundColor: color } : undefined}
-              data-empty={!color || undefined}
+              style={colorValue(color) ? { backgroundColor: color } : undefined}
+              data-empty={!colorValue(color) || undefined}
             />
           </button>
         </ColorPicker>
       </span>
     </Tooltip>
+  );
+
+  return (
+    <BindingLock bound={bound ?? color} resetKey={resetKey} onContinue={() => onOpenChange?.(true)}>
+      {picker}
+    </BindingLock>
   );
 }
 
@@ -159,8 +235,12 @@ export function WidgetStyleBubble({
   onOpenGroupChange,
   onChange,
   onTextChange,
+  onLoopChange,
+  onStateFnChange,
   onOpenInspector,
   i18nCatalog,
+  variables,
+  disabled,
   onToolbarPopupChange,
 }: {
   widget: PageWidget;
@@ -169,8 +249,12 @@ export function WidgetStyleBubble({
   onOpenGroupChange: (group: BoxGroup | null) => void;
   onChange: (style: WidgetStyle | undefined) => void;
   onTextChange?: (text: string) => void;
+  onLoopChange?: (loop: WidgetLoop | undefined) => void;
+  onStateFnChange?: (stateFn: string | undefined) => void;
   onOpenInspector: () => void;
   i18nCatalog?: PageI18n;
+  variables?: PageVariable[];
+  disabled?: boolean;
   onToolbarPopupChange?: (open: boolean) => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -181,6 +265,7 @@ export function WidgetStyleBubble({
   const content = widget.type === 'text' ? widget.value : widget.type === 'button' ? widget.text : '';
   const [textShadow, setTextShadow] = useState(() => parseCssShadow(current.textShadow));
   const [openPopup, setOpenPopup] = useState<string | null>(null);
+  const [stateFnOpen, setStateFnOpen] = useState(false);
 
   const onToolbarPopupChangeRef = useRef(onToolbarPopupChange);
   onToolbarPopupChangeRef.current = onToolbarPopupChange;
@@ -219,6 +304,9 @@ export function WidgetStyleBubble({
   }
 
   function patch(next: Partial<WidgetStyle>) {
+    if (disabled) {
+      return;
+    }
     const merged = { ...current, ...next };
     onChange(sanitizeWidgetStyle(widget.type, merged));
   }
@@ -243,7 +331,12 @@ export function WidgetStyleBubble({
         <div className="widget-style-bubble-toolbar">
           {showText ? (
             <>
-              <Select
+              <BindingLock
+                bound={current.fontFamily}
+                resetKey={widget.id}
+                onContinue={() => popupProps('font-family').onOpenChange(true)}
+              >
+                <Select
                 size="small"
                 className="widget-style-bubble-font"
                 allowClear
@@ -256,6 +349,7 @@ export function WidgetStyleBubble({
                 options={fontFamilyOptions(i18n.language)}
                 onChange={(fontFamily) => patch({ fontFamily: fontFamily || undefined })}
               />
+              </BindingLock>
               <Tooltip title={`${t('lowcode.styleFontSize')} (${modifier}+. / ${modifier}+-)`}>
                 <InputNumber
                   size="small"
@@ -280,11 +374,19 @@ export function WidgetStyleBubble({
               </Tooltip>
               <Tooltip title={`${t('lowcode.styleBold')} (${modifier}+B)`}>
                 <span>
-                  <ToggleButton
-                    label={<BoldOutlined />}
-                    active={current.fontWeight === '700'}
-                    onClick={() => patch({ fontWeight: current.fontWeight === '700' ? undefined : '700' })}
-                  />
+                  <BindingLock
+                    bound={current.fontWeight}
+                    resetKey={widget.id}
+                    onContinue={() =>
+                      patch({ fontWeight: current.fontWeight === '700' ? undefined : '700' })
+                    }
+                  >
+                    <ToggleButton
+                      label={<BoldOutlined />}
+                      active={current.fontWeight === '700'}
+                      onClick={() => patch({ fontWeight: current.fontWeight === '700' ? undefined : '700' })}
+                    />
+                  </BindingLock>
                 </span>
               </Tooltip>
               <Tooltip title={`${t('lowcode.styleItalic')} (${modifier}+I)`}>
@@ -318,13 +420,21 @@ export function WidgetStyleBubble({
                 title={t('lowcode.styleColor')}
                 kind="font"
                 color={current.color}
+                resetKey={widget.id}
                 getPopupContainer={popupContainer}
                 {...popupProps('font-color')}
                 onChange={(css) => patch({ color: css })}
               />
               <Tooltip title={t('lowcode.styleTextShadow')}>
                 <span>
-                  <ColorPicker
+                  <BindingLock
+                    bound={current.textShadow}
+                    resetKey={widget.id}
+                    onContinue={() =>
+                      popupProps('text-shadow').onOpenChange(true)
+                    }
+                  >
+                    <ColorPicker
                     size="small"
                     allowClear
                     destroyOnHidden
@@ -333,6 +443,7 @@ export function WidgetStyleBubble({
                     {...popupProps('text-shadow')}
                     onChange={(value, css) => patchTextShadow({ color: value.cleared ? '' : css })}
                   />
+                  </BindingLock>
                 </span>
               </Tooltip>
             </>
@@ -342,6 +453,8 @@ export function WidgetStyleBubble({
             kind="fill"
             allowClear={widget.type !== 'button'}
             color={current.background || (widget.type === 'button' ? DEFAULT_BUTTON_BACKGROUND : undefined)}
+            bound={current.background}
+            resetKey={widget.id}
             getPopupContainer={popupContainer}
             {...popupProps('background')}
             onChange={(css, cleared) =>
@@ -420,6 +533,24 @@ export function WidgetStyleBubble({
               />
             </Tooltip>
           ) : null}
+          {onStateFnChange ? (
+            <Tooltip title={t('lowcode.styleState')}>
+              <Button
+                size="small"
+                type={isStateFnConfigured(widget.stateFn) ? 'primary' : 'text'}
+                icon={<ControlOutlined />}
+                onClick={() => setStateFnOpen(true)}
+              />
+            </Tooltip>
+          ) : null}
+          <Tooltip title={t('lowcode.styleLoop')}>
+            <Button
+              size="small"
+              type={isLoopConfigured(widget.loop) ? 'primary' : 'text'}
+              icon={<UnorderedListOutlined />}
+              onClick={() => toggleGroup('loop')}
+            />
+          </Tooltip>
           <Tooltip title={t('lowcode.styleSettings')}>
             <Button
               size="small"
@@ -437,8 +568,14 @@ export function WidgetStyleBubble({
                   autoFocus
                   className="widget-style-bubble-text"
                   rows={5}
+                  disabled={disabled}
                   value={content}
-                  onChange={(event) => onTextChange(event.target.value)}
+                  onChange={(event) => {
+                    if (disabled) {
+                      return;
+                    }
+                    onTextChange(event.target.value);
+                  }}
                 />
                 <CopyI18nPicker catalog={i18nCatalog} onPick={onTextChange} />
               </div>
@@ -590,7 +727,8 @@ export function WidgetStyleBubble({
                   }}
                 />
                 <div className="style-border-meta">
-                  <Select
+                  <BindingLock bound={current.borderStyle} resetKey={widget.id}>
+                    <Select
                     size="small"
                     allowClear
                     value={current.borderStyle}
@@ -603,7 +741,13 @@ export function WidgetStyleBubble({
                       { value: 'dotted', label: t('lowcode.styleBorderDotted') },
                     ]}
                   />
-                  <ColorPicker
+                  </BindingLock>
+                  <BindingLock
+                    bound={current.borderColor}
+                    resetKey={widget.id}
+                    onContinue={() => popupProps('border-color').onOpenChange(true)}
+                  >
+                    <ColorPicker
                     size="small"
                     allowClear
                     destroyOnHidden
@@ -612,6 +756,7 @@ export function WidgetStyleBubble({
                     {...popupProps('border-color')}
                     onChange={(value, css) => patch({ borderColor: value.cleared ? undefined : css })}
                   />
+                  </BindingLock>
                 </div>
               </div>
             ) : null}
@@ -660,7 +805,29 @@ export function WidgetStyleBubble({
                 />
               </div>
             ) : null}
+            {openGroup === 'loop' && onLoopChange ? (
+              <WidgetLoopPanel
+                widget={widget}
+                variables={variables ?? []}
+                disabled={disabled}
+                popupContainer={popupContainer}
+                onChange={onLoopChange}
+              />
+            ) : null}
           </div>
+        ) : null}
+        {onStateFnChange ? (
+          <WidgetStateFnModal
+            open={stateFnOpen}
+            widget={widget}
+            variables={variables ?? []}
+            disabled={disabled}
+            onCancel={() => setStateFnOpen(false)}
+            onChange={(stateFn) => {
+              onStateFnChange(stateFn);
+              setStateFnOpen(false);
+            }}
+          />
         ) : null}
       </div>
     </ConfigProvider>

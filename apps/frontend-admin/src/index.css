@@ -537,13 +537,6 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   color: rgba(236, 239, 244, 0.62);
 }
 
-.canvas-state-list-check {
-  flex: none;
-  margin-right: 4px;
-  font-size: 12px;
-  color: #3dba9a;
-}
-
 .canvas-state-list-row-add {
   flex: none;
   width: 18px;
@@ -632,12 +625,60 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 
 .widget-tree-drag-title {
   display: block;
-  width: 100%;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: grab;
 }
 
 .widget-tree-drag-title:active {
   cursor: grabbing;
+}
+
+.widget-tree .ant-tree-title {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.widget-tree-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+.widget-tree-title-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.widget-tree-loop {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.72;
+  cursor: pointer;
+}
+
+.widget-tree-loop:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .style-section {
@@ -928,6 +969,48 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   gap: 2px;
 }
 
+.widget-style-binding {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  border-radius: 4px;
+}
+
+.widget-style-binding[data-bound] {
+  background: #1677ff;
+  color: #fff;
+}
+
+.widget-style-binding[data-bound] .widget-style-bubble-color,
+.widget-style-binding[data-bound] .widget-style-bubble-color .anticon,
+.widget-style-binding[data-bound] .widget-style-bubble-color-letter,
+.widget-style-binding[data-bound] .ant-btn,
+.widget-style-binding[data-bound] .ant-btn .anticon {
+  color: #fff;
+}
+
+.widget-style-binding[data-bound] .widget-style-bubble-color:hover,
+.widget-style-binding[data-bound] .ant-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.widget-style-binding[data-bound] .widget-style-bubble-color-bar {
+  background: #fff;
+  box-shadow: none;
+}
+
+.widget-style-binding[data-bound] .widget-style-bubble-color-bar[data-empty] {
+  background: #fff;
+}
+
+.widget-style-binding[data-bound] .ant-select-selector,
+.widget-style-binding[data-bound] .ant-color-picker-trigger {
+  color: #fff;
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
 .widget-style-bubble-font {
   width: 108px;
 }
@@ -1015,6 +1098,52 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 .widget-style-bubble-panel .style-size-panel {
   display: grid;
   gap: 6px;
+}
+
+.widget-loop-panel {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.widget-loop-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.widget-loop-label {
+  font-size: 12px;
+  line-height: 22px;
+  color: rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+}
+
+.widget-loop-source {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.widget-loop-from {
+  flex: none;
+  width: 6.25em;
+}
+
+.widget-loop-from .ant-select-selector {
+  padding-inline: 7px !important;
+}
+
+.widget-loop-var {
+  flex: 1;
+  min-width: 0;
+}
+
+.widget-loop-panel .ant-input,
+.widget-loop-panel .ant-btn,
+.widget-loop-panel .ant-select {
+  font-size: 12px;
 }
 
 .widget-style-bubble-panel .style-size-panel .ant-form-item {
@@ -1419,19 +1548,14 @@ body:has(.preview-host.is-editing) #root {
   padding: var(--editor-select, 2px);
   background: conic-gradient(
     from var(--select-angle, 0deg),
-    #ff3b3b,
-    #7a1010,
-    #ffd400,
-    #7a5a00,
-    #3bff6a,
-    #0b5c2e,
-    #3bd4ff,
-    #0a4e6e,
-    #6b8cff,
-    #1a237e,
-    #ff3bd4,
-    #6e0a52,
-    #ff3b3b
+    #ff4d4f,
+    #ffc53d,
+    #73d13d,
+    #36cfc9,
+    #4096ff,
+    #9254de,
+    #f759ab,
+    #ff4d4f
   );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,

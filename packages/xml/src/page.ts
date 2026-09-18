@@ -1,5 +1,6 @@
 import { XMLBuilder, XMLParser, XMLValidator } from 'fast-xml-parser';
 import { XmlParseError } from './errors';
+import { copyWidgetRuntimeMeta } from './runtime-meta';
 
 export const SIZE_MODES = ['px', '%', 'fit-content'] as const;
 export type SizeMode = (typeof SIZE_MODES)[number];
@@ -166,12 +167,28 @@ type WidgetStates = {
   states?: WidgetStateDelta[];
   stateOverrides?: WidgetStateDelta[];
   appliedState?: string;
+  stateFn?: string;
   transition?: number;
 };
 
+export const LOOP_FROMS = ['data', 'literal'] as const;
+export type WidgetLoopFrom = (typeof LOOP_FROMS)[number];
+export const DEFAULT_LOOP_ITEM = 'item';
+export const DEFAULT_LOOP_INDEX = 'index';
+
+export type WidgetLoop = {
+  from: WidgetLoopFrom;
+  source: string;
+  key: string;
+  item?: string;
+  index?: string;
+};
+
+type WidgetCommon = WidgetStates & { loop?: WidgetLoop };
+
 export type PageWidget =
-  | ({ type: 'text'; id: string; value: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetStates)
-  | ({ type: 'button'; id: string; text: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetStates)
+  | ({ type: 'text'; id: string; value: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
+  | ({ type: 'button'; id: string; text: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({
       type: 'flex';
       id: string;
@@ -179,7 +196,7 @@ export type PageWidget =
       style?: WidgetStyle;
       flex?: FlexContainerStyle;
       item?: FlexItemStyle;
-    } & WidgetStates)
+    } & WidgetCommon)
   | ({
       type: 'swiper';
       id: string;
@@ -187,13 +204,13 @@ export type PageWidget =
       style?: WidgetStyle;
       swiper?: SwiperStyle;
       item?: FlexItemStyle;
-    } & WidgetStates)
+    } & WidgetCommon)
   | ({
       type: 'swiper-item';
       id: string;
       children: PageWidget[];
       style?: WidgetStyle;
-    } & WidgetStates);
+    } & WidgetCommon);
 
 type WidgetParent = 'page' | 'flex' | 'swiper' | 'swiper-item';
 
@@ -245,6 +262,93 @@ const I18N_COPY_EXPR = /^\s*\$t\("([^".]+)\.([^".]+)"\)\s*$/;
 export function isI18nKey(value: string): boolean {
   const key = value.trim();
   return key.length > 0 && !key.includes('.') && !key.includes('"');
+}
+
+export function isI18nCopyExpr(raw: string): boolean {
+  return I18N_COPY_EXPR.test(raw);
+}
+
+export function isJsIdentifier(name: string): boolean {
+  if (!/^[\p{ID_Start}$_][\p{ID_Continue}$]*$/u.test(name)) {
+    return false;
+  }
+  try {
+    new Function(`function ${name}(){}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isLoopAliasName(name: string): boolean {
+  return isJsIdentifier(name) && name !== 'data' && name !== 't';
+}
+
+function loopAliasOrDefault(raw: string | undefined, fallback: string): string {
+  const name = raw?.trim() ?? '';
+  return name && isLoopAliasName(name) ? name : fallback;
+}
+
+export function compactLoop(loop: WidgetLoop | undefined | null): WidgetLoop | undefined {
+  if (!loop) {
+    return undefined;
+  }
+  const from = LOOP_FROMS.includes(loop.from) ? loop.from : undefined;
+  const source = loop.source?.trim() ?? '';
+  const key = loop.key?.trim() ?? '';
+  if (!from || !source || !key) {
+    return undefined;
+  }
+  let item = loopAliasOrDefault(loop.item, DEFAULT_LOOP_ITEM);
+  let index = loopAliasOrDefault(loop.index, DEFAULT_LOOP_INDEX);
+  if (item === index) {
+    if (item !== DEFAULT_LOOP_INDEX) {
+      index = DEFAULT_LOOP_INDEX;
+    } else {
+      item = DEFAULT_LOOP_ITEM;
+    }
+  }
+  return {
+    from,
+    source,
+    key,
+    ...(item !== DEFAULT_LOOP_ITEM ? { item } : {}),
+    ...(index !== DEFAULT_LOOP_INDEX ? { index } : {}),
+  };
+}
+
+export function isLoopConfigured(loop: WidgetLoop | undefined | null): loop is WidgetLoop {
+  return compactLoop(loop) != null;
+}
+
+const STATE_NAME_IDENT = /^[\p{ID_Start}$_][\p{ID_Continue}$]*$/u;
+
+export function compactStateFn(source: string | undefined | null): string | undefined {
+  const body = source?.trim();
+  return body || undefined;
+}
+
+export function isStateFnConfigured(source: string | undefined | null): boolean {
+  return compactStateFn(source) != null;
+}
+
+function parseHostStateFn(raw: string, ownedNames: string[]): string | undefined {
+  const value = raw.trim();
+  if (!value) {
+    return undefined;
+  }
+  if (ownedNames.includes(value) && STATE_NAME_IDENT.test(value)) {
+    return `return ${JSON.stringify(value)}`;
+  }
+  return value;
+}
+
+export function loopItemName(loop: WidgetLoop): string {
+  return loop.item ?? DEFAULT_LOOP_ITEM;
+}
+
+export function loopIndexName(loop: WidgetLoop): string {
+  return loop.index ?? DEFAULT_LOOP_INDEX;
 }
 
 export function formatI18nCopy(groupKey: string, entryKey: string): string {
@@ -446,6 +550,31 @@ const STYLE_KEYS = [
 function attr(node: OrderedNode, name: string): string {
   const raw = node[':@']?.[`@_${name}`];
   return raw == null ? '' : String(raw);
+}
+
+function parseWidgetLoop(node: OrderedNode): { loop?: WidgetLoop } {
+  const loop = compactLoop({
+    from: attr(node, 'loop-from') as WidgetLoopFrom,
+    source: attr(node, 'loop-src'),
+    key: attr(node, 'loop-key'),
+    item: attr(node, 'loop-item') || undefined,
+    index: attr(node, 'loop-index') || undefined,
+  });
+  return loop ? { loop } : {};
+}
+
+function loopAttrs(loop: WidgetLoop | undefined): Record<string, string> {
+  const compact = compactLoop(loop);
+  if (!compact) {
+    return {};
+  }
+  return {
+    '@_loop-from': compact.from,
+    '@_loop-src': compact.source,
+    '@_loop-key': compact.key,
+    ...(compact.item ? { '@_loop-item': compact.item } : {}),
+    ...(compact.index ? { '@_loop-index': compact.index } : {}),
+  };
 }
 
 function isTrue(value: string) {
@@ -1787,6 +1916,7 @@ function withResolvedFields(
   transition?: number,
 ): PageWidget {
   const next = { ...widget } as PageWidget;
+  copyWidgetRuntimeMeta(widget, next);
   if (fields.style) {
     next.style = fields.style;
   } else {
@@ -1829,10 +1959,21 @@ function normalizeViewing(
   return Array.isArray(viewing) ? viewing : [viewing];
 }
 
-function ownerActiveName(widget: PageWidget, viewing: WidgetStateViewing[]): string | null {
+export type ResolveWidgetTreeOptions = {
+  appliedNameFor?: (widget: PageWidget) => string | null;
+};
+
+function ownerActiveName(
+  widget: PageWidget,
+  viewing: WidgetStateViewing[],
+  appliedNameFor?: (widget: PageWidget) => string | null,
+): string | null {
   const hit = viewing.find((item) => item.ownerId === widget.id);
   if (hit) {
     return hit.state;
+  }
+  if (appliedNameFor) {
+    return appliedNameFor(widget);
   }
   return appliedStateName(widget);
 }
@@ -1861,21 +2002,14 @@ function resolveWidgetNode(
   widget: PageWidget,
   inheritedNames: string[],
   viewing: WidgetStateViewing[],
-  inheritedTransition?: number,
+  inheritedTransition: number | undefined,
+  appliedNameFor?: (widget: PageWidget) => string | null,
 ): PageWidget {
-  const ownName = ownerActiveName(widget, viewing);
-  const viewingThis = viewing.find((item) => item.ownerId === widget.id);
-  const applyNestedDefaults = !(viewingThis && viewingThis.state == null);
+  const ownName = ownerActiveName(widget, viewing, appliedNameFor);
   const layers: WidgetStateLayer[] = [];
   for (const name of inheritedNames) {
     const role = layerRole(widget, name);
     layers.push({ name, role });
-    if (applyNestedDefaults && role === 'descendant') {
-      const nested = nestedAppliedStateName(widget.stateOverrides?.find((item) => item.name === name));
-      if (nested) {
-        layers.push({ name: nested, role: 'owner' });
-      }
-    }
   }
   if (ownName) {
     layers.push({ name: ownName, role: layerRole(widget, ownName) });
@@ -1889,7 +2023,7 @@ function resolveWidgetNode(
     const childNames = ownName && !inheritedNames.includes(ownName) ? [...inheritedNames, ownName] : inheritedNames;
     const childTransition = transition;
     next.children = next.children.map((child) =>
-      resolveWidgetNode(child, childNames, viewing, childTransition),
+      resolveWidgetNode(child, childNames, viewing, childTransition, appliedNameFor),
     );
   }
   return next;
@@ -1898,9 +2032,10 @@ function resolveWidgetNode(
 export function resolveWidgetTree(
   widgets: PageWidget[],
   viewing?: WidgetStateViewing | WidgetStateViewing[] | null,
+  options?: ResolveWidgetTreeOptions,
 ): PageWidget[] {
   const list = normalizeViewing(viewing);
-  return widgets.map((widget) => resolveWidgetNode(widget, [], list));
+  return widgets.map((widget) => resolveWidgetNode(widget, [], list, undefined, options?.appliedNameFor));
 }
 
 function parseStateDelta(node: OrderedNode): WidgetStateDelta | undefined {
@@ -1936,9 +2071,6 @@ function parseStateDelta(node: OrderedNode): WidgetStateDelta | undefined {
     ...(item ? { item } : {}),
     ...(swiper ? { swiper } : {}),
     ...(nested.length > 0 ? { states: nested } : {}),
-    ...(tag === '__' && nested.some((item) => item.name === attr(node, 'state').trim())
-      ? { appliedState: attr(node, 'state').trim() }
-      : {}),
   };
 }
 
@@ -1997,11 +2129,9 @@ function serializeDeltaNode(
   base?: WidgetStateFields,
 ): OrderedNode | null {
   const compact = compactDeltaForWrite(widget, delta, base);
-  const nestedApplied = tag === '__' ? nestedAppliedStateName(delta) : undefined;
   const attrs: Record<string, string> = {
     '@_name': compact.name,
     ...(tag === '_' && compact.transition != null ? { '@_transition': String(compact.transition) } : {}),
-    ...(nestedApplied ? { '@_state': nestedApplied } : {}),
     ...styleAttrs(compact.style),
     ...(widget.type === 'flex' ? flexAttrs(compact.flex) : {}),
     ...(asItem && widget.type !== 'swiper-item' ? itemAttrs(compact.item) : {}),
@@ -2047,12 +2177,6 @@ function uniqueOverrideStates(widget: PageWidget): WidgetStateDelta[] {
     } else {
       delete next.states;
     }
-    const applied = nestedAppliedStateName(next);
-    if (applied) {
-      next.appliedState = applied;
-    } else {
-      delete next.appliedState;
-    }
     return next;
   });
 }
@@ -2085,7 +2209,7 @@ function widgetStateSpread(
   widgetNode: OrderedNode,
   inner: OrderedNode[],
   ancestorNames: string[],
-): Pick<WidgetStates, 'states' | 'stateOverrides' | 'appliedState' | 'transition'> & { rest: OrderedNode[] } {
+): Pick<WidgetStates, 'states' | 'stateOverrides' | 'stateFn' | 'transition'> & { rest: OrderedNode[] } {
   const { states, overrides, rest } = splitStateNodes(inner);
   const known = new Set(ancestorNames);
   const used = new Set(states.map((item) => item.name));
@@ -2099,28 +2223,26 @@ function widgetStateSpread(
         used.add(state.name);
         return true;
       });
-      const applied = nestedAppliedStateName({ ...item, states: nested.length ? nested : undefined });
       const next: WidgetStateDelta = { ...item };
       if (nested.length > 0) {
         next.states = nested;
       } else {
         delete next.states;
       }
-      if (applied) {
-        next.appliedState = applied;
-      } else {
-        delete next.appliedState;
-      }
+      delete next.appliedState;
       return next;
     });
-  const applied = attr(widgetNode, 'state').trim();
-  const appliedState = states.some((item) => item.name === applied) ? applied : undefined;
+  const ownedNames = [
+    ...states.map((item) => item.name),
+    ...stateOverrides.flatMap((item) => item.states?.map((state) => state.name) ?? []),
+  ];
+  const stateFn = parseHostStateFn(attr(widgetNode, 'state'), ownedNames);
   const transition = compactTransition(parseNonNegativeInteger(attr(widgetNode, 'transition')));
   return {
     rest,
     ...(states.length > 0 ? { states } : {}),
     ...(stateOverrides.length > 0 ? { stateOverrides } : {}),
-    ...(appliedState ? { appliedState } : {}),
+    ...(stateFn ? { stateFn } : {}),
     ...(transition ? { transition } : {}),
   };
 }
@@ -2148,9 +2270,10 @@ function parseWidgets(
         value: attr(child, 'value'),
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
-        ...(extra.appliedState ? { appliedState: extra.appliedState } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -2166,9 +2289,10 @@ function parseWidgets(
         text: attr(child, 'text'),
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
-        ...(extra.appliedState ? { appliedState: extra.appliedState } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -2187,9 +2311,10 @@ function parseWidgets(
         ...(style ? { style } : {}),
         ...(flex ? { flex } : {}),
         ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
-        ...(extra.appliedState ? { appliedState: extra.appliedState } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -2208,9 +2333,10 @@ function parseWidgets(
         ...(style ? { style } : {}),
         ...(swiper ? { swiper } : {}),
         ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
-        ...(extra.appliedState ? { appliedState: extra.appliedState } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -2225,9 +2351,10 @@ function parseWidgets(
         id: attr(child, 'id') || `n${ids.n}`,
         children: parseWidgets(extra.rest, ids, 'swiper-item', nextNames),
         ...(style ? { style } : {}),
+        ...parseWidgetLoop(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
-        ...(extra.appliedState ? { appliedState: extra.appliedState } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
     }
@@ -2242,12 +2369,13 @@ function widgetHostAttrs(
   style: Record<string, string>,
   extra: Record<string, string>,
 ): Record<string, string> {
-  const applied = appliedStateName(widget);
+  const applied = compactStateFn(widget.stateFn);
   const transition = compactTransition(widget.transition);
   return {
     '@_id': id,
     ...style,
     ...extra,
+    ...loopAttrs(widget.loop),
     ...(applied ? { '@_state': applied } : {}),
     ...(transition ? { '@_transition': String(transition) } : {}),
   };

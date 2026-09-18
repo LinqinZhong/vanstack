@@ -1,9 +1,6 @@
 import {
-  appliedStateName,
   diffWidgetState,
   findOwnedDelta,
-  hasOwnedStates,
-  nestedAppliedStateName,
   ownedStateNames,
   resolveWidgetState,
   resolveWidgetStateStack,
@@ -146,7 +143,7 @@ export function ownerActiveName(widget: PageWidget, viewing: ViewingByOwner): st
   if (Object.prototype.hasOwnProperty.call(viewing, widget.id)) {
     return viewing[widget.id];
   }
-  return appliedStateName(widget);
+  return null;
 }
 
 function ancestorChain(widgets: PageWidget[], id: string): PageWidget[] {
@@ -185,8 +182,6 @@ export function stateLayersForWidget(
     return [];
   }
   const layers: WidgetStateLayer[] = [];
-  const skipNested =
-    Object.prototype.hasOwnProperty.call(viewing, selected.id) && viewing[selected.id] == null;
   for (const widget of ancestorChain(widgets, widgetId)) {
     const name = ownerActiveName(widget, viewing);
     if (!name) {
@@ -194,45 +189,8 @@ export function stateLayersForWidget(
     }
     const role = layerRoleFor(selected, name);
     layers.push({ name, role });
-    if (widget.id === selected.id || role !== 'descendant' || skipNested) {
-      continue;
-    }
-    const nested = nestedAppliedStateName(selected.stateOverrides?.find((item) => item.name === name));
-    if (nested) {
-      layers.push({ name: nested, role: 'owner' });
-    }
   }
   return layers;
-}
-
-export type AppliedGroupState = {
-  ownerId: string;
-  name: string | null;
-  scopeName?: string | null;
-  scopeOwnerId?: string | null;
-};
-
-export function collectGroupDefaults(
-  widgets: PageWidget[],
-  id: string | null | undefined,
-): AppliedGroupState[] {
-  const selected = findWidget(widgets, id);
-  if (!selected) {
-    return [];
-  }
-  const rows: AppliedGroupState[] = [{ ownerId: selected.id, name: appliedStateName(selected) }];
-  for (const node of collectStateTree(widgets, id)) {
-    if (!node.children?.length || !node.name) {
-      continue;
-    }
-    rows.push({
-      ownerId: selected.id,
-      name: nestedAppliedStateName(selected.stateOverrides?.find((item) => item.name === node.name)),
-      scopeName: node.name,
-      scopeOwnerId: node.ownerId,
-    });
-  }
-  return rows;
 }
 
 export function viewingAfterSelect(
@@ -246,14 +204,6 @@ export function viewingAfterSelect(
     return { ownerId: selectedId, name: null, viewing };
   }
   const visible = collectVisibleStates(widgets, selectedId);
-  const ownApplied = hasOwnedStates(selected) ? appliedStateName(selected) : null;
-  if (ownApplied) {
-    return {
-      ownerId: selected.id,
-      name: ownApplied,
-      viewing: { ...viewing, [selected.id]: ownApplied },
-    };
-  }
   if (sticky.name != null) {
     const row = visible.find((item) => item.ownerId === sticky.ownerId && item.name === sticky.name) ?? visible.find((item) => item.name === sticky.name);
     if (row) {
@@ -807,6 +757,12 @@ export function patchResolvedWidget(
   if (patch.text != null) {
     content.text = patch.text;
   }
+  if ('loop' in patch) {
+    content.loop = patch.loop;
+  }
+  if ('stateFn' in patch) {
+    content.stateFn = patch.stateFn;
+  }
   let next = Object.keys(content).length > 0 ? patchWidget(widget, content) : widget;
   const hasVisual = 'style' in patch || 'flex' in patch || 'item' in patch || 'swiper' in patch;
   if (!hasVisual) {
@@ -911,6 +867,12 @@ export function patchWidgetInState(
   if (patch.text != null) {
     content.text = patch.text;
   }
+  if ('loop' in patch) {
+    content.loop = patch.loop;
+  }
+  if ('stateFn' in patch) {
+    content.stateFn = patch.stateFn;
+  }
   let next = Object.keys(content).length > 0 ? patchWidget(widget, content) : widget;
   const hasVisual = 'style' in patch || 'flex' in patch || 'item' in patch || 'swiper' in patch;
   if (!hasVisual) {
@@ -947,5 +909,3 @@ export function patchWidgetInState(
   };
   return writeDelta(next, stateName, role, diffWidgetState(next, merged));
 }
-
-export { appliedStateName };

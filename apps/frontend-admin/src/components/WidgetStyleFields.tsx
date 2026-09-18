@@ -1,7 +1,7 @@
 import { ColorPicker, Form, InputNumber, Select, Switch } from 'antd';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { compactSize, convertAngle, compactAngle, DEFAULT_SWIPER_HEIGHT, DEFAULT_SWIPER_WIDTH, sanitizeWidgetStyle, ANGLE_UNITS, type AngleUnit, type AngleValue, type PageWidget, type SizeMode, type SizeValue, type WidgetStyle } from '@vanstack/xml';
+import { compactSize, convertAngle, compactAngle, DEFAULT_SWIPER_HEIGHT, DEFAULT_SWIPER_WIDTH, isCopyBinding, sanitizeWidgetStyle, ANGLE_UNITS, type AngleUnit, type AngleValue, type PageWidget, type SizeMode, type SizeValue, type WidgetStyle } from '@vanstack/xml';
 import { StyleBoxEdges, pxFromLength } from './StyleBoxEdges';
 
 type ShadowValue = {
@@ -43,7 +43,10 @@ function formatCssShadow(shadow: ShadowValue) {
 }
 
 function colorValue(value: string | undefined) {
-  return value || null;
+  if (!value || isCopyBinding(value)) {
+    return null;
+  }
+  return value;
 }
 
 export const FONT_FAMILY_OPTIONS = [

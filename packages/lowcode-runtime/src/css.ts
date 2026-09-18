@@ -1,9 +1,36 @@
 import type { CSSProperties } from 'react';
-import { angleCss, boxLengthCss, type FlexContainerStyle, type FlexItemStyle, type PageStyle, type SizeValue, type WidgetStyle } from '@vanstack/xml';
+import {
+  angleCss,
+  boxLengthCss,
+  isCopyBinding,
+  resolveCopyBinding,
+  type BindingScope,
+  type FlexContainerStyle,
+  type FlexItemStyle,
+  type PageStyle,
+  type SizeValue,
+  type WidgetStyle,
+} from '@vanstack/xml';
 
 export type WidgetCssOptions = {
   animate?: boolean;
+  evaluateBindings?: boolean;
+  bindingScope?: BindingScope;
 };
+
+function cssText(raw: string | undefined, options?: WidgetCssOptions): string | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  if (!isCopyBinding(raw)) {
+    return raw;
+  }
+  if (!options?.evaluateBindings) {
+    return undefined;
+  }
+  const resolved = resolveCopyBinding(raw, options.bindingScope ?? { data: Object.create(null) as Record<string, unknown> });
+  return resolved || undefined;
+}
 
 export function sizeCss(size: SizeValue | undefined): string {
   if (!size) {
@@ -48,23 +75,31 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
   }
 
   const css: CSSProperties = {};
-  if (style.color) {
-    css.color = style.color;
+  const color = cssText(style.color, options);
+  if (color) {
+    css.color = color;
   }
-  if (style.textShadow) {
-    css.textShadow = style.textShadow;
+  const textShadow = cssText(style.textShadow, options);
+  if (textShadow) {
+    css.textShadow = textShadow;
   }
   if (style.italic) {
     css.fontStyle = 'italic';
   }
   if (style.fontFamily) {
-    css.fontFamily = style.fontFamily;
+    const fontFamily = cssText(style.fontFamily, options);
+    if (fontFamily) {
+      css.fontFamily = fontFamily;
+    }
   }
   if (style.fontSize != null) {
     css.fontSize = `${style.fontSize}px`;
   }
   if (style.fontWeight) {
-    css.fontWeight = style.fontWeight;
+    const fontWeight = cssText(style.fontWeight, options);
+    if (fontWeight) {
+      css.fontWeight = fontWeight;
+    }
   }
 
   const decorations: string[] = [];
@@ -78,27 +113,30 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
     css.textDecoration = decorations.join(' ');
   }
 
-  if (style.background) {
-    css.background = style.background;
+  const background = cssText(style.background, options);
+  if (background) {
+    css.background = background;
   }
 
+  const borderColor = cssText(style.borderColor, options);
+  const borderStyle = cssText(style.borderStyle, options);
   const hasBorderWidth =
     style.borderTopWidth != null ||
     style.borderRightWidth != null ||
     style.borderBottomWidth != null ||
     style.borderLeftWidth != null;
-  const hasBorder = hasBorderWidth || style.borderStyle || style.borderColor;
+  const hasBorder = hasBorderWidth || borderStyle || borderColor;
   if (hasBorder) {
     const unsetWidth = hasBorderWidth ? 0 : 1;
     css.borderTopWidth = `${style.borderTopWidth ?? unsetWidth}px`;
     css.borderRightWidth = `${style.borderRightWidth ?? unsetWidth}px`;
     css.borderBottomWidth = `${style.borderBottomWidth ?? unsetWidth}px`;
     css.borderLeftWidth = `${style.borderLeftWidth ?? unsetWidth}px`;
-    css.borderStyle = style.borderStyle || 'solid';
-    if (style.borderColor) {
-      css.borderColor = style.borderColor;
+    css.borderStyle = borderStyle || 'solid';
+    if (borderColor) {
+      css.borderColor = borderColor;
     }
-  } else if (style.background) {
+  } else if (background) {
     css.border = 'none';
   }
 
@@ -115,8 +153,9 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
     css.borderBottomLeftRadius = `${style.radiusBottomLeft}px`;
   }
 
-  if (style.boxShadow) {
-    css.boxShadow = style.boxShadow;
+  const boxShadow = cssText(style.boxShadow, options);
+  if (boxShadow) {
+    css.boxShadow = boxShadow;
   }
 
   css.width = sizeCss(style.width);

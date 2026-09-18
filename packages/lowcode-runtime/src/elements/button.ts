@@ -1,7 +1,7 @@
 import { createElement, type ReactElement } from 'react';
-import { resolveI18nCopy, type PageWidget } from '@vanstack/xml';
+import type { PageWidget } from '@vanstack/xml';
 import { flexItemCss, mergeCss, widgetCss } from '../css';
-import type { WidgetRenderContext } from '../widget-render';
+import { resolveWidgetCopy, widgetCssOptions, type WidgetRenderContext } from '../widget-render';
 
 export function renderButton(
   widget: Extract<PageWidget, { type: 'button' }>,
@@ -10,15 +10,15 @@ export function renderButton(
   return createElement(
     'button',
     {
-      key: widget.id,
+      key: ctx.instanceKey,
       className: 'lowcode-button',
       type: 'button',
       'data-widget-id': widget.id,
       'data-widget-type': 'button',
-      style: mergeCss(widgetCss(widget.style, { animate: ctx.animate }), flexItemCss(widget.item)),
+      style: mergeCss(widgetCss(widget.style, widgetCssOptions(ctx)), flexItemCss(widget.item)),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,
     },
-    resolveI18nCopy(widget.text, ctx.catalog, ctx.locale),
+    resolveWidgetCopy(widget.text, ctx),
   );
 }

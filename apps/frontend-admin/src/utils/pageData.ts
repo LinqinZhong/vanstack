@@ -1,4 +1,21 @@
 import type { PageDataType, PageVariable } from '@vanstack/xml';
+import {
+  buildPageDataScope,
+  defaultPageDataValue,
+  evaluateDataExpression,
+  isJsIdentifier,
+  readVariableValue,
+  validateDataLiteral,
+} from '@vanstack/xml';
+
+export {
+  buildPageDataScope,
+  defaultPageDataValue,
+  evaluateDataExpression,
+  isJsIdentifier,
+  readVariableValue,
+  validateDataLiteral,
+};
 
 export const PAGE_DATA_TYPE_OPTIONS: Array<{ value: PageDataType; label: string }> = [
   { value: 'num', label: 'Number' },
@@ -33,22 +50,6 @@ export function isWidgetDrag(dataTransfer: DataTransfer): boolean {
   return Array.from(dataTransfer.types).includes(WIDGET_DATA_DRAG_TYPE);
 }
 
-export function defaultPageDataValue(type: PageDataType): string {
-  if (type === 'num') {
-    return '0';
-  }
-  if (type === 'str' || type === 'widget') {
-    return '';
-  }
-  if (type === 'bool') {
-    return '0';
-  }
-  if (type === 'arr') {
-    return '[]';
-  }
-  return '{}';
-}
-
 export function nextVariableName(variables: PageVariable[]): string {
   const used = new Set(variables.map((variable) => variable.name));
   let index = 1;
@@ -56,19 +57,6 @@ export function nextVariableName(variables: PageVariable[]): string {
     index += 1;
   }
   return `var${index}`;
-}
-
-export function isJsIdentifier(name: string): boolean {
-  if (!/^[\p{ID_Start}$_][\p{ID_Continue}$]*$/u.test(name)) {
-    return false;
-  }
-  try {
-    // Reserved words are IdentifierName but cannot wrap `function name(){}`.
-    new Function(`function ${name}(){}`);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export function parseReturnExpression(source: string): string | null {
@@ -79,69 +67,6 @@ export function parseReturnExpression(source: string): string | null {
   }
   const expr = match[1].trim().replace(/;+\s*$/, '');
   return expr || null;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-export function evaluateDataExpression(expr: string, data: Record<string, unknown>): unknown {
-  const scope = new Proxy(data, {
-    get(target, prop) {
-      if (typeof prop !== 'string') {
-        return undefined;
-      }
-      if (!Object.prototype.hasOwnProperty.call(target, prop)) {
-        throw new Error(`Unknown data variable: ${prop}`);
-      }
-      return target[prop];
-    },
-  });
-  return new Function('$data', `"use strict"; return (${expr});`)(scope);
-}
-
-export function readVariableValue(variable: PageVariable, data: Record<string, unknown>): unknown {
-  if (variable.type === 'num') {
-    const parsed = Number(variable.value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  if (variable.type === 'str' || variable.type === 'widget') {
-    return variable.value;
-  }
-  if (variable.type === 'bool') {
-    return variable.value === '1';
-  }
-  try {
-    return evaluateDataExpression(variable.value || defaultPageDataValue(variable.type), data);
-  } catch {
-    return variable.type === 'arr' ? [] : {};
-  }
-}
-
-export function buildPageDataScope(variables: PageVariable[], untilIndex: number): Record<string, unknown> {
-  const data: Record<string, unknown> = Object.create(null);
-  const end = Math.max(0, Math.min(untilIndex, variables.length));
-  for (let i = 0; i < end; i += 1) {
-    const variable = variables[i];
-    data[variable.name] = readVariableValue(variable, data);
-  }
-  return data;
-}
-
-export function validateDataLiteral(
-  expr: string,
-  type: 'arr' | 'obj',
-  data: Record<string, unknown> = {},
-): boolean {
-  try {
-    const result = evaluateDataExpression(expr, data);
-    if (type === 'arr') {
-      return Array.isArray(result);
-    }
-    return isPlainObject(result);
-  } catch {
-    return false;
-  }
 }
 
 export function moveVariable(variables: PageVariable[], from: number, to: number): PageVariable[] {

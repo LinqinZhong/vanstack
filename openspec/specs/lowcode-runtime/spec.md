@@ -182,7 +182,7 @@
 - **THEN** 这两个字段视为未设置，整页 XML 仍合法，其余合法属性仍生效
 
 ### Requirement: Widget named states in page xml
-可选中控件 SHALL 具有隐式默认状态，其属性即该控件元素自身的已识别属性（`id`、文案与现有样式 / 弹性 / 滑动器属性）。默认状态 MUST NOT 写成子元素。控件 MAY 声明一个或多个命名自定义状态：每个自定义状态 MUST 是该控件的直接子元素 `<_>`，MUST 带非空属性 `name`，MUST NOT 被当作可渲染控件。`<_>` 上 MAY 携带与宿主控件相同的外观与布局属性（样式、弹性容器、弹性项目、滑动器属性），MAY 携带非负整数属性 `transition`（毫秒，进入该状态时的 CSS 过渡时长）；MUST NOT 携带 `id`、`value`、`text` 或子控件。默认状态的过渡时长 MUST 写在宿主元素自身的 `transition` 属性上（例如 `<flex transition="1000">`），MUST NOT 写成 `<_>`。`transition` 为 0 或省略时 MUST NOT 写出，且 MUST NOT 产生过渡。`name` MUST 在同一宿主控件的全部 `<_>` 中唯一（含顶层与所有 `<__>` 内的子状态）；无法识别或重名的 `<_>` MUST 被忽略且 MUST NOT 使整页 XML 非法。无 `<_>` 的既有页面 XML MUST 仍合法。页面根下的 `<_>` MUST 被忽略。
+可选中控件 SHALL 具有隐式默认状态，其属性即该控件元素自身的已识别属性（`id`、文案、循环与现有样式 / 弹性 / 滑动器属性）。默认状态 MUST NOT 写成子元素。控件 MAY 声明一个或多个命名自定义状态：每个自定义状态 MUST 是该控件的直接子元素 `<_>`，MUST 带非空属性 `name`，MUST NOT 被当作可渲染控件。`<_>` 上 MAY 携带与宿主控件相同的外观与布局属性（样式、弹性容器、弹性项目、滑动器属性），MAY 携带非负整数属性 `transition`（毫秒，进入该状态时的 CSS 过渡时长）；MUST NOT 携带 `id`、`value`、`text`、循环属性或子控件。默认状态的过渡时长 MUST 写在宿主元素自身的 `transition` 属性上（例如 `<flex transition="1000">`），MUST NOT 写成 `<_>`。`transition` 为 0 或省略时 MUST NOT 写出，且 MUST NOT 产生过渡。`name` MUST 在同一宿主控件的全部 `<_>` 中唯一（含顶层与所有 `<__>` 内的子状态）；无法识别或重名的 `<_>` MUST 被忽略且 MUST NOT 使整页 XML 非法。无 `<_>` 的既有页面 XML MUST 仍合法。页面根下的 `<_>` MUST 被忽略。
 
 #### Scenario: Named state round-trips on text
 - **WHEN** 页面 XML 含 `<text id="t1" value="内容" color="red" background="white" font-size="12"><_ name="active" color="blue" background="red" /></text>`
@@ -212,8 +212,12 @@
 - **WHEN** 系统解析一份不含 `<_>`、`<__>` 与 `state` 属性的既有页面 XML
 - **THEN** 解析成功，每个控件只有默认状态
 
+#### Scenario: Loop is not stored on named states
+- **WHEN** 某弹性盒已配置循环，管理员在 `active` 状态下改背景色
+- **THEN** `<_ name="active">` 只写出背景差异，不写出任何 `loop-*` 属性
+
 ### Requirement: Custom state properties inherit default
-命名自定义状态的属性 SHALL 叠加在默认状态之上。自定义状态未设置的属性 MUST 使用默认状态的对应值；已设置的属性 MUST 覆盖默认值。序列化自定义状态时，与默认状态相同的属性 MUST NOT 写入 `<_>`。控件身份与结构（`id`、类型、子控件树、文本 `value` / 按钮 `text`）MUST 在各状态间共享，MUST NOT 按状态分叉。
+命名自定义状态的属性 SHALL 叠加在默认状态之上。自定义状态未设置的属性 MUST 使用默认状态的对应值；已设置的属性 MUST 覆盖默认值。序列化自定义状态时，与默认状态相同的属性 MUST NOT 写入 `<_>`。控件身份与结构（`id`、类型、子控件树、循环、文本 `value` / 按钮 `text`）MUST 在各状态间共享，MUST NOT 按状态分叉。
 
 #### Scenario: Unset custom property uses default
 - **WHEN** 某文本默认 `color` 为红、`font-size` 为 12，其 `active` 状态只设置 `color` 为蓝
@@ -227,10 +231,14 @@
 - **WHEN** 已登录管理员在 `active` 状态下修改某文本的展示文案
 - **THEN** 默认状态与所有自定义状态都使用这份文案，XML 不把文案写进 `<_>`
 
+#### Scenario: Loop is not per-state
+- **WHEN** 已登录管理员在 `active` 状态下为某文本配置循环
+- **THEN** 默认状态与所有自定义状态共用这份循环，XML 把循环属性写在宿主元素上而不是 `<_>`
+
 ### Requirement: Descendant state overrides
 若某控件声明了自定义状态，其所有后代在工作台中 SHALL 具有同一组状态名称（含 `initial`）。后代若在某一祖先命名状态下有自己的属性差异，MUST 用该后代的直接子元素 `<__>` 表示，MUST 带与祖先状态相同的 `name`，MUST 使用两个下划线（任意深度 MUST NOT 使用三个或更多下划线）。`<__>` MUST NOT 被当作可渲染控件。后代没有差异且没有子状态时 MUST NOT 写出 `<__>`。`<__>` 未设置的属性 MUST 使用该后代自己的默认状态；已设置的 MUST 覆盖。`name` 对不上任何祖先命名状态的 `<__>` MUST 被忽略。祖先的 `<_>` 与后代的 `<__>` MUST 一起往返。
 
-后代 MAY 在某个继承态下声明子状态：每个子状态 MUST 是对应 `<__>` 的直接子元素 `<_>`，MUST 带非空 `name`，MAY 带 `transition`。子状态相对该 `<__>`（继承态下的 `initial`）只写差异。仅有子状态、没有属性差异的 `<__>` MUST 仍写出，以便容纳内部的 `<_>`。该组的选用默认 MUST 写在 `<__>` 的 `state` 属性上；省略则该组默认是 `initial`。
+后代 MAY 在某个继承态下声明子状态：每个子状态 MUST 是对应 `<__>` 的直接子元素 `<_>`，MUST 带非空 `name`，MAY 带 `transition`。子状态相对该 `<__>`（继承态下的 `initial`）只写差异。仅有子状态、没有属性差异的 `<__>` MUST 仍写出，以便容纳内部的 `<_>`。`<__>` MUST NOT 写出选用 `state`。运行时该组用哪一个子状态，MUST 由该控件自己的 `state()` 返回名决定。
 
 #### Scenario: Child override round-trips with double underscore
 - **WHEN** 页面 XML 为 `<flex id="box" color="red" width="100px" height="100px"><_ name="active" /><text id="t1" value="hello" font-size="20"><__ name="active" underline="true" /></text><text id="t2" value="hello" font-size="20" /></flex>`
@@ -238,7 +246,7 @@
 
 #### Scenario: Nested sub-state lives inside the inherited override
 - **WHEN** 页面 XML 为 `<flex><_ name="state"/><text><__ name="state"><_ name="subState"/></__></text></flex>`
-- **THEN** 解析结果中该文本在继承的 `state` 下拥有子状态 `subState`；再次序列化仍把 `<_ name="subState"/>` 写在 `<__ name="state">` 内部
+- **THEN** 解析结果中该文本在继承的 `state` 下拥有子状态 `subState`；再次序列化仍把 `<_ name="subState"/>` 写在 `<__ name="state">` 内部且 `<__>` 不带 `state`
 
 #### Scenario: Child without override has no xml node
 - **WHEN** 已登录管理员给某弹性盒添加 `active` 状态，但不改其某个子文本的任何属性
@@ -253,21 +261,43 @@
 - **THEN** 解析忽略该 `<__>`，文本仍成功解析
 
 ### Requirement: Applied state for preview and runtime
-声明了自定义状态的控件 SHALL 可设置选用状态，用于预览模式与 H5 运行。选用状态 MUST 写在该控件元素的 `state` 属性上，值为该控件拥有的某个 `<_>` 的 `name`（顶层，或当前继承 `<__>` 内的子状态）。未设置、空值、或指向不存在的名称时 MUST 使用默认状态，且默认选用 MUST NOT 写出 `state`。预览模式与 H5 MUST 按选用状态合并该控件及其后代的属性后渲染。后代 MUST 同时处于祖先链上所有当前命名状态：祖先选用的命名状态对该后代用 `<__>` 叠加，该后代若自己也有选用的命名状态则再叠加自己的 `<_>`（顶层或该 `<__>` 内的子状态）。同一属性的优先级 MUST 为：该控件当前自己的状态 > 更近祖先的当前状态 > 更远祖先的当前状态 > 默认。无自定义状态的控件 MUST NOT 写出 `state`。
+声明了自定义状态的控件 SHALL 用宿主元素的 `state` 属性存放 `state()` 函数体，用于预览模式与 H5 运行。函数体 MUST 作为 `function state(): string { ... }` 的内部语句执行，MUST 能读取 `$data`（页面变量池）、`$item` 与 `$index`（当前循环作用域；无循环则为空）。返回值转成字符串后，若等于该控件拥有的某个 `<_>` 的 `name`（顶层或任意 `<__>` 内子状态，且不是 `hover`），MUST 使用该状态；若等于 `initial`、为空、抛错、或对不上任何拥有的名称，MUST 回落 `initial` 且不得使整页失败。未设置或空函数 MUST 视为 `initial`，MUST NOT 写出 `state`。旧 XML 中裸标识符且恰好是拥有的状态名（例如 `state="active"`）MUST 解析为 `return "active"`。
 
-若控件拥有名为 `hover` 的状态（顶层 `<_ name="hover">`，或当前生效的继承 `<__>` 内的 `<_ name="hover">`），则在预览模式与 H5 中，鼠标悬停该控件时 MUST 临时将该拥有者的当前状态切到 `hover`（覆盖其选用状态，并照常叠加后代对应的 `<__ name="hover">`）；鼠标离开后 MUST 回落到选用状态。编辑模式 MUST NOT 因悬停自动切换。`hover` 仍是普通命名状态：可在工作台查看、编辑与选用。
+预览模式与 H5 MUST 先按循环展开实例，再对每个实例求值 `state()`。后代 MUST 同时处于祖先链上所有当前命名状态。同一属性的优先级 MUST 为：该控件当前自己的状态 > 更近祖先的当前状态 > 更远祖先的当前状态 > 默认。运行时该控件自己的状态优先级 MUST 为：其它具名状态 > `hover` > `initial`。
 
-#### Scenario: Omitted state uses default at runtime
+若控件拥有名为 `hover` 的状态（顶层 `<_ name="hover">`，或当前生效的继承 `<__>` 内的 `<_ name="hover">`），则在预览模式与 H5 中，鼠标悬停该控件实例且当前不是其它具名状态时 MUST 使用 `hover`；离开后 MUST 回落到 `state()` 的结果（未命中则 `initial`）。循环展开后的多个实例 MUST 各自命中：悬停其中一项 MUST NOT 让同模板其它项进入 `hover`。编辑模式 MUST NOT 因悬停自动切换。`hover` 仍是普通命名状态：可在工作台查看与编辑。
+
+#### Scenario: Omitted state uses initial at runtime
 - **WHEN** 某文本声明了 `active` 状态但没有 `state` 属性，H5 渲染该页
-- **THEN** 该文本按默认状态的属性绘制
+- **THEN** 该文本按 `initial` 的属性绘制
 
-#### Scenario: Applied custom state renders at runtime
-- **WHEN** 页面 XML 为 `<text id="t1" value="内容" color="red" background="white" font-size="12" state="active"><_ name="active" color="blue" background="red" /></text>`，工作台处于预览模式或 H5 打开该页
+#### Scenario: State function selects a named state
+- **WHEN** 页面 XML 为 `<text id="t1" value="内容" color="red" background="white" font-size="12" state="return 'active'"><_ name="active" color="blue" background="red" /></text>`，工作台处于预览模式或 H5 打开该页
 - **THEN** 该文本按蓝色字、红色背景绘制，字号仍为 12
 
-#### Scenario: Hover state activates on pointer enter in preview
-- **WHEN** 某弹性盒含 `<_ name="hover" background="blue" />`，工作台处于预览模式或 H5，鼠标移入该弹性盒
-- **THEN** 该弹性盒按 `hover` 状态绘制；鼠标移出后回落其选用状态（未选用则默认）
+#### Scenario: Unmatched function falls back to initial
+- **WHEN** 某控件 `state` 为 `return 'missing'`，没有名为 `missing` 的 `<_>`
+- **THEN** 预览与 H5 按 `initial` 绘制
+
+#### Scenario: Legacy bare name wraps to a return
+- **WHEN** 页面 XML 含 `<flex id="box" state="active"><_ name="active" /></flex>`
+- **THEN** 解析后该弹性盒的状态函数为 `return "active"`；再次序列化写出该函数体而不是裸名称
+
+#### Scenario: Loop item can pick state from item data
+- **WHEN** 某循环项配置 `state` 为 `return $item.ok ? 'active' : 'initial'`，预览中一项 `ok` 为真、另一项为假
+- **THEN** 第一项按 `active` 绘制，第二项按 `initial` 绘制
+
+#### Scenario: Named state wins over hover
+- **WHEN** 某弹性盒 `state()` 返回 `active`，且拥有 `hover`，工作台处于预览模式，鼠标移入该弹性盒
+- **THEN** 该弹性盒仍按 `active` 绘制，MUST NOT 切到 `hover`
+
+#### Scenario: Hover activates only when initial
+- **WHEN** 某弹性盒含 `<_ name="hover" background="blue" />` 且 `state()` 回落 `initial`，工作台处于预览模式或 H5，鼠标移入该弹性盒
+- **THEN** 该弹性盒按 `hover` 状态绘制；鼠标移出后回落 `initial`
+
+#### Scenario: Hover hits only the hovered loop instance
+- **WHEN** 某控件被循环展开为三份且拥有 `hover`，工作台处于预览模式，鼠标移入其中第二份
+- **THEN** 只有第二份按 `hover` 绘制，第一份与第三份保持各自的 `state()` 结果
 
 #### Scenario: Hover does not auto-activate while editing
 - **WHEN** 同上弹性盒，工作台处于编辑模式，鼠标移入该弹性盒且当前查看不是 `hover`
@@ -281,52 +311,42 @@
 - **WHEN** 某控件带过渡时长，管理员在编辑模式拖动定位、尺寸、边距或旋转
 - **THEN** 这些属性立刻生效，MUST NOT 按过渡时长缓动
 
-#### Scenario: Unknown applied state falls back to default
-- **WHEN** 某控件写有 `state="missing"`，但没有名为 `missing` 的 `<_>`
-- **THEN** 预览与 H5 按默认状态绘制，序列化 MUST NOT 再写出该非法 `state`
-
 #### Scenario: Ancestor applied state reaches descendants
-- **WHEN** 某弹性盒 `state="active"`，其子文本带 `<__ name="active" underline="true" />`，H5 渲染该页
+- **WHEN** 某弹性盒 `state()` 返回 `active`，其子文本带 `<__ name="active" underline="true" />`，H5 渲染该页
 - **THEN** 弹性盒按自身 `active` 属性绘制，该子文本带下划线，另一没有 `<__>` 的子文本仍用自己的默认属性
 
 #### Scenario: Nested owner stacks own state over ancestor state
-- **WHEN** 父弹性盒选用 `state2` 且其 `<_ name="state2">` 把颜色设为红，子文本选用 `state4` 且 `<_ name="state4">` 把颜色设为蓝
+- **WHEN** 父弹性盒 `state()` 返回 `state2` 且其 `<_ name="state2">` 把颜色设为红，子文本 `state()` 返回 `state4` 且 `<_ name="state4">` 把颜色设为蓝
 - **THEN** 该子文本按蓝色绘制
 
 #### Scenario: Nested owner inherits unset property from ancestor state
-- **WHEN** 父弹性盒选用 `state2` 且其 `<_ name="state2">` 把颜色设为红，子文本选用 `state4` 但 `<_ name="state4">` 未设颜色
+- **WHEN** 父弹性盒 `state()` 返回 `state2` 且其 `<_ name="state2">` 把颜色设为红，子文本 `state()` 返回 `state4` 但 `<_ name="state4">` 未设颜色
 - **THEN** 该子文本按红色绘制（来自父级当前状态；子级未覆盖该属性）
 
 ### Requirement: Workbench state list and edit viewing
 工作台处于编辑模式且选中某一控件时，画布网格左侧 SHALL 显示可折叠的状态树。每一级 MUST 以 `initial` 开头（控件隐式默认状态的显示名），其后为本级命名状态。根级 MUST 先列出选中控件自己的 `initial` 与顶层 `<_>`（叶子），再列出祖先拥有的命名状态。只有继承态 MUST 作为非叶子节点：其下 MUST 再列出该继承上下文中的 `initial`（对应 `<__>` 自身）以及写在该 `<__>` 内的子状态 `<_>`。同一控件的命名 `<_>` MUST 在整棵状态树中唯一（`initial` 除外，每组可各有一个）；已占用的名称 MUST NOT 再作为顶层或某个继承态下的子状态出现。拥有态 MUST 使用白色字体；继承态 MUST 使用灰白色字体。树 MUST 可折叠、可滚动；滚动条 MUST 不占布局宽度，仅在鼠标悬停时显示。
 
-当前运行选用的叶子节点 MUST 在名称后显示绿色对勾；非叶子节点 MUST NOT 显示对勾。每一组同级叶子 MUST 可以各自选用一个默认：根级叶子的默认写在宿主元素的 `state` 上；某个继承态下叶子的默认写在对应 `<__>` 的 `state` 上（值为该 `<__>` 内某个 `<_>` 的 `name`；选用该组 `initial` 则 MUST NOT 在 `<__>` 上写出 `state`）。各组默认互相独立，可同时打勾。左键点击 MUST 只切换编辑态查看，MUST NOT 改写 `state`。只有叶子节点的右键菜单 MUST 提供「编辑」「删除」（`initial` 不可删除、不可重命名；根级 `initial` 可编辑过渡时长）。继承态（非叶子）的右键菜单 MUST 提供「添加状态」，行尾 MUST 另有添加图标按钮，二者行为相同。根级 `initial` 的菜单 MUST 也可添加顶层状态。列表底部 MUST 另有「添加状态」按钮，行为与根级 `initial` 上添加顶层状态相同。
+状态树 MUST NOT 提供「设为默认」，MUST NOT 用对勾表示运行选用。左键点击 MUST 只切换编辑态查看，MUST NOT 改写 `state` 函数。只有叶子节点的右键菜单 MUST 提供「编辑」「删除」（`initial` 不可删除、不可重命名；根级 `initial` 可编辑过渡时长）。继承态（非叶子）的右键菜单 MUST 提供「添加状态」，行尾 MUST 另有添加图标按钮，二者行为相同。根级 `initial` 的菜单 MUST 也可添加顶层状态。列表底部 MUST 另有「添加状态」按钮，行为与根级 `initial` 上添加顶层状态相同。
 
-添加状态 MUST 打开弹窗，填写名称与「过渡时长」，确认后才创建。名称 MUST 在该选中控件全部 `<_>` 中唯一（含顶层与所有继承组内的子状态；各组 `initial` 可重复）。已占用的名称 MUST NOT 再出现在树中其它位置。创建与重命名 MUST 拒绝重名。从根级 `initial` 添加 MUST 在选中控件上写顶层 `<_>`。从继承态添加 MUST 在该控件对应 `<__ name="继承名">` 内写 `<_ name="子状态">`（没有则创建 `<__>`），MUST NOT 改写祖先的 `<_>`。子状态加入后 MUST 成为查看状态；除名为 `hover` 外 MUST 被该控件选用。名为 `hover` 的状态加入后 MUST 成为查看状态，MUST NOT 自动写成选用（预览与 H5 靠悬停命中）。进入某命名状态时，该状态的 `transition` MUST 作为该作用域内控件的 CSS 过渡时长（含位移、尺寸、边距、旋转与外观）。编辑模式下切换查看状态、以及改定位、尺寸、边距或旋转 MUST NOT 触发该过渡；预览模式与 H5 进入命名状态（含悬停命中 `hover`）时 MUST 使用该时长。`<__>` MUST NOT 写出 `transition`。
+添加状态 MUST 打开弹窗，填写名称与「过渡时长」，确认后才创建。名称 MUST 在该选中控件全部 `<_>` 中唯一（含顶层与所有继承组内的子状态；各组 `initial` 可重复）。已占用的名称 MUST NOT 再出现在树中其它位置。创建与重命名 MUST 拒绝重名。从根级 `initial` 添加 MUST 在选中控件上写顶层 `<_>`。从继承态添加 MUST 在该控件对应 `<__ name="继承名">` 内写 `<_ name="子状态">`（没有则创建 `<__>`），MUST NOT 改写祖先的 `<_>`。新状态加入后 MUST 成为查看状态，MUST NOT 自动改写 `state()`。进入某命名状态时，该状态的 `transition` MUST 作为该作用域内控件的 CSS 过渡时长（含位移、尺寸、边距、旋转与外观）。编辑模式下切换查看状态、以及改定位、尺寸、边距或旋转 MUST NOT 触发该过渡；预览模式与 H5 进入命名状态（含悬停命中 `hover`）时 MUST 使用该时长。`<__>` MUST NOT 写出 `transition`。
 
-切到另一控件时，若新控件的可见状态中仍有当前查看的命名状态，MUST 保持查看该状态。若新控件自己已选用了另一个自定义状态，MUST 改为查看该选用状态，同时祖先的当前状态 MUST 仍叠加在显示上。无自身选用时，没有该命名状态的控件 MUST 回落到最近祖先的当前命名状态（若有）。
+切到另一控件时，若新控件的可见状态中仍有当前查看的命名状态，MUST 保持查看该状态。否则 MUST 回落到最近祖先的当前查看命名状态（若有），再否则 `initial`。MUST NOT 因该控件的 `state()` 改写编辑态查看。
 
-叶子拥有态的右键菜单 MUST 提供「设为默认」。点「设为默认」MUST 把该叶子写成其所在一组的默认：根级则写宿主 `state="name"`（`initial` 则清除）；继承态下则写 `<__ name="继承名" state="子状态名">`（该组 `initial` 则去掉 `<__>` 的 `state`）。继承态节点本身 MUST NOT 提供「设为默认」。
+重命名 MUST 同步子孙对应 `<__>` 的 `name`。删除顶层 `<_>` MUST 去掉该控件对应 `<_>`、子孙对应 `<__>`；删除子状态 MUST 去掉 `<__>` 内对应 `<_>`。
 
-重命名 MUST 同步该控件 `state` 属性（若指向旧名）以及子孙对应 `<__>` 的 `name`。删除顶层 `<_>` MUST 去掉该控件对应 `<_>`、子孙对应 `<__>`；删除子状态 MUST 去掉 `<__>` 内对应 `<_>`。若当前 `state` 指向它则回落 `initial`。
-
-列表当前查看的状态 SHALL 驱动编辑态。编辑模式下，画布、气泡与检查器 MUST 展示并写入该查看状态下的解析属性：改根级 `initial` MUST 写控件自身属性；查看该控件自己的顶层命名状态 MUST 写 `<_>`；查看祖先命名状态下的 `initial` MUST 写该控件的 `<__>`（没有则创建，差异被压空且无子状态则删除）；查看 `<__>` 内子状态 MUST 写该 `<_>`。预览模式与只读版本 MUST NOT 用查看状态覆盖选用状态。添加、改属性、选用、重命名与删除 MUST 立即反映到当前 XML 与子窗口，且不必先保存版本。无选中控件时 MUST NOT 显示状态列表。
+列表当前查看的状态 SHALL 驱动编辑态。编辑模式下，画布、气泡与检查器 MUST 展示并写入该查看状态下的解析属性：改根级 `initial` MUST 写控件自身属性；查看该控件自己的顶层命名状态 MUST 写 `<_>`；查看祖先命名状态下的 `initial` MUST 写该控件的 `<__>`（没有则创建，差异被压空且无子状态则删除）；查看 `<__>` 内子状态 MUST 写该 `<_>`。预览模式与只读版本 MUST NOT 用查看状态覆盖 `state()` 求值结果。添加、改属性、重命名与删除 MUST 立即反映到当前 XML 与子窗口，且不必先保存版本。无选中控件时 MUST NOT 显示状态列表。
 
 #### Scenario: List always starts with initial
 - **WHEN** 已登录管理员在编辑草稿时选中一个还没有自定义状态的文本
-- **THEN** 画布左侧状态树显示 `initial`（白色），右键可添加状态
+- **THEN** 画布左侧状态树显示 `initial`（白色），右键可添加状态，且没有对勾或「设为默认」
 
-#### Scenario: Creating on the selected widget copies from a named source
-- **WHEN** 已登录管理员选中某弹性盒，在其 `initial` 上添加名为 `hover` 的状态
-- **THEN** 新状态出现为该弹性盒根级叶子，弹性盒带有 `<_ name="hover">`，且该弹性盒选用 `hover`
+#### Scenario: Creating on the selected widget does not apply it
+- **WHEN** 已登录管理员选中某弹性盒，在其 `initial` 上添加名为 `active` 的状态
+- **THEN** 新状态出现为该弹性盒根级叶子，弹性盒带有 `<_ name="active">`，工作台查看 `active`，MUST NOT 因此改写 `state()`
 
 #### Scenario: Creating hover does not set it as applied
 - **WHEN** 已登录管理员选中某弹性盒，在其 `initial` 上添加名为 `hover` 的状态
-- **THEN** 弹性盒带有 `<_ name="hover">`，工作台查看 `hover`，但 MUST NOT 写出 `state="hover"`（悬停才命中）
-
-#### Scenario: Creating a non-hover state applies it
-- **WHEN** 已登录管理员选中某弹性盒，在其 `initial` 上添加名为 `active` 的状态
-- **THEN** 新状态出现为该弹性盒根级叶子，弹性盒带有 `<_ name="active">`，且该弹性盒选用 `active`
+- **THEN** 弹性盒带有 `<_ name="hover">`，工作台查看 `hover`，MUST NOT 写出选用 `hover`
 
 #### Scenario: Creating a sub-state under an inherited state
 - **WHEN** 某弹性盒已有 `active` 状态，管理员选中其内部一个文本，在继承的 `active` 上添加名为 `mine` 的状态
@@ -340,29 +360,17 @@
 - **WHEN** 某弹性盒已有 `active` 状态，管理员选中其内部一个尚无自己状态的文本
 - **THEN** 状态树为 `initial`、`active`（灰白、可折叠），`active` 下为 `initial`；只有叶子可编辑删除，`active` 菜单可添加状态
 
-#### Scenario: Each non-leaf group has its own default
-- **WHEN** 选中控件根级选用 `B`，继承态 `C` 下选用 `A`，继承态 `D` 下选用 `B`
-- **THEN** 状态树在根级 `B`、`C` 下的 `A`、`D` 下的 `B` 后同时显示绿色对勾；`C` 与 `D` 自身不打勾；XML 宿主为 `state="B"`，并含 `<__ name="C">` 无 `state`、`<__ name="D" state="B">`
-
 #### Scenario: Selecting a child keeps the parent state
 - **WHEN** 父弹性盒 A 正在查看 `state2`，管理员选中没有自己状态的子控件 A1
 - **THEN** A1 的列表仍查看 `state2`，画布上 A 与 A1 都按 `state2` 显示
 
-#### Scenario: Selecting a nested owner keeps its own applied state
-- **WHEN** 父弹性盒 A 正在查看 `state2`，子控件 A2 已选用 `state4`，管理员选中 A2
-- **THEN** A2 查看并打勾 `state4`，同时 `state2` 仍作为继承态打勾并叠加显示；A 仍处于 `state2`
-
 #### Scenario: Selecting a nested owner without applied follows parent
-- **WHEN** 父弹性盒 A 正在查看 `state2`，子控件 A2 拥有 `state4` 但未选用，管理员选中 A2
+- **WHEN** 父弹性盒 A 正在查看 `state2`，子控件 A2 拥有 `state4` 但未查看它，管理员选中 A2
 - **THEN** A2 仍查看继承的 `state2`
 
 #### Scenario: Clicking a state only views it
 - **WHEN** 已登录管理员选中一个拥有 `active` 的文本，并左键点击列表中的 `active`
-- **THEN** 画布与检查器立刻显示 `active` 的解析属性，该文本的 `state` 不因此被改写
-
-#### Scenario: Set as default applies an owned state
-- **WHEN** 已登录管理员对拥有的 `active` 右键选择「设为默认」
-- **THEN** 该文本元素带有 `state="active"`，列表中 `active` 后显示绿色对勾
+- **THEN** 画布与检查器立刻显示 `active` 的解析属性，该文本的 `state` 函数不因此被改写
 
 #### Scenario: Clicking an inherited state does not apply
 - **WHEN** 已登录管理员选中子文本并点击继承的 `active`
@@ -372,17 +380,17 @@
 - **WHEN** 已登录管理员在查看 `active` 时把选中文本的颜色改为绿
 - **THEN** 该文本的 `<__ name="active">`（若 `active` 为自身拥有则为 `<_>`）含 `color` 为绿，默认状态的颜色不变
 
-#### Scenario: Preview uses applied state not viewing state
-- **WHEN** 某控件选用状态为默认，管理员在编辑模式正查看继承的 `active`，然后切到预览模式
-- **THEN** 画布按默认状态绘制，而不是按 `active`
+#### Scenario: Preview uses state function not viewing state
+- **WHEN** 某控件 `state()` 回落 `initial`，管理员在编辑模式正查看继承的 `active`，然后切到预览模式
+- **THEN** 画布按 `initial` 绘制，而不是按 `active`
 
 #### Scenario: Renaming an owned state updates xml
 - **WHEN** 已登录管理员把选中弹性盒拥有的 `active` 重命名为 `hover`，且一子文本带 `<__ name="active">`
-- **THEN** 弹性盒写出 `<_ name="hover">`，子文本写出 `<__ name="hover">`；若原先 `state="active"` 则改为 `state="hover"`
+- **THEN** 弹性盒写出 `<_ name="hover">`，子文本写出 `<__ name="hover">`
 
 #### Scenario: Deleting an owned state removes deltas
 - **WHEN** 已登录管理员删除选中弹性盒拥有的 `active`
-- **THEN** 该弹性盒不再有 `<_ name="active">`，子孙不再有 `<__ name="active">`，若原先选用 `active` 则回落默认且不写 `state`
+- **THEN** 该弹性盒不再有 `<_ name="active">`，子孙不再有 `<__ name="active">`
 
 ### Requirement: Workbench iframe preview
 工程编辑页 SHALL 使用主窗口加 iframe 子窗口的模式：主窗口展示工作台（页面列表、版本管理与控件编辑），子窗口加载管理后台自己的预览页并展示根据当前 XML 渲染出的页面。预览页 MUST 与工作台同源，MUST NOT 使用 H5 应用作为 iframe 目标。工作台壳层 MUST NOT 出现在子窗口的渲染结果中。
@@ -461,27 +469,27 @@
 - **THEN** 渲染结果不包含气泡样式编辑器
 
 ### Requirement: Bubble text and box style controls
-气泡样式编辑器 SHALL 按控件类型提供文字与盒样式入口，且 MUST 只编辑现有控件样式字段。当选中控件为 `text` 或 `button` 时，气泡 MUST 提供文本内容编辑入口（多行文本框），以及字体颜色、文字阴影、加粗、斜体、下划线与删除线。全部可选中控件的气泡 MUST 提供背景颜色与旋转入口。圆角与边框宽度 MUST 出现在 `swiper-item` 以外的控件。外边距与定位入口 MUST 出现在 `swiper-item` 以外的控件；内边距入口 MUST 出现在 `swiper` 以外的控件。外边距、内边距、圆角、边框宽度与定位偏移 MUST 逐行展示：总、上下、左右、上、左、下、右（圆角对应四角标签）。旋转 MUST 按 X、Y、Z 三轴逐行展示，单位 MUST 为 `deg` / `rad` / `grad` / `turn`，默认 `deg`。外边距 MUST 提供单位 `px` / `%` / `auto`；定位偏移 MUST 提供 `px` / `%`；内边距 MUST 提供 `px` / `%`。边框的线型与颜色 MUST 仍为控件级统一值。非 `text`/`button` 的气泡 MUST NOT 展示上述文字样式入口。本期气泡 MUST NOT 提供字号增减。
+气泡样式编辑器 SHALL 按控件类型提供文字与盒样式入口，且 MUST 只编辑现有控件样式字段。当选中控件为 `text` 或 `button` 时，气泡 MUST 提供文本内容编辑入口（多行文本框），以及字体颜色、文字阴影、加粗、斜体、下划线与删除线。全部可选中控件的气泡 MUST 提供背景颜色、旋转、状态控制与循环入口。圆角与边框宽度 MUST 出现在 `swiper-item` 以外的控件。外边距与定位入口 MUST 出现在 `swiper-item` 以外的控件；内边距入口 MUST 出现在 `swiper` 以外的控件。外边距、内边距、圆角、边框宽度与定位偏移 MUST 逐行展示：总、上下、左右、上、左、下、右（圆角对应四角标签）。旋转 MUST 按 X、Y、Z 三轴逐行展示，单位 MUST 为 `deg` / `rad` / `grad` / `turn`，默认 `deg`。外边距 MUST 提供单位 `px` / `%` / `auto`；定位偏移 MUST 提供 `px` / `%`；内边距 MUST 提供 `px` / `%`。边框的线型与颜色 MUST 仍为控件级统一值。非 `text`/`button` 的气泡 MUST NOT 展示上述文字样式入口。本期气泡 MUST NOT 提供字号增减。
 
-#### Scenario: Text widget bubble shows text styles
+#### Scenario: Text widget shows type-specific controls
 - **WHEN** 已登录管理员选中一个文本控件
-- **THEN** 气泡包含文本内容编辑、字体颜色、文字阴影、加粗、斜体、下划线、删除线，以及背景、外边距、内边距、圆角、边框、定位、旋转与设置入口
+- **THEN** 气泡包含文本内容编辑、字体颜色、文字阴影、加粗、斜体、下划线、删除线，以及背景、外边距、内边距、圆角、边框、定位、旋转、状态控制、循环与设置入口
 
-#### Scenario: Flex widget bubble hides text styles
+#### Scenario: Flex widget omits text style controls
 - **WHEN** 已登录管理员选中一个弹性盒
-- **THEN** 气泡包含背景、外边距、内边距、圆角、边框、定位、旋转与设置入口，不包含字体颜色或加粗等文字样式入口
+- **THEN** 气泡包含背景、外边距、内边距、圆角、边框、定位、旋转、状态控制、循环与设置入口，不包含字体颜色或加粗等文字样式入口
 
-#### Scenario: Bubble can edit margin and padding
-- **WHEN** 已登录管理员选中一个允许该边距的控件并打开外边距或内边距面板
+#### Scenario: Margin and padding use per-edge rows
+- **WHEN** 已登录管理员在弹性盒气泡中打开外边距或内边距
 - **THEN** 气泡按总、上下、左右、上、左、下、右逐行编辑对应边距，并可选择 `px` / `%` / `auto`（内边距无 `auto`），预览立即更新
 
-#### Scenario: Swiper bubble hides padding
+#### Scenario: Swiper omits padding
 - **WHEN** 已登录管理员选中一个滑动器
-- **THEN** 气泡包含背景、尺寸、外边距、圆角、边框、定位、旋转与设置入口，不包含内边距入口
+- **THEN** 气泡包含背景、尺寸、外边距、圆角、边框、定位、旋转、状态控制、循环与设置入口，不包含内边距入口
 
-#### Scenario: Swiper item bubble hides size, margin, border and radius
-- **WHEN** 已登录管理员选中一个 `swiper-item`
-- **THEN** 气泡包含背景、内边距、旋转与设置入口，不包含尺寸、外边距、圆角、边框与定位入口
+#### Scenario: Swiper item omits size margin border radius and position
+- **WHEN** 已登录管理员选中一个滑动器页
+- **THEN** 气泡包含背景、内边距、旋转、状态控制、循环与设置入口，不包含尺寸、外边距、圆角、边框与定位入口
 
 #### Scenario: Four-side radius mode
 - **WHEN** 已登录管理员将某控件圆角设为上下左右模式，并把四角设为不同数值
@@ -490,6 +498,55 @@
 #### Scenario: Bold toggle on button
 - **WHEN** 已登录管理员在按钮的气泡中打开加粗
 - **THEN** 该按钮以粗体渲染，关闭加粗后恢复为未设置粗细
+
+### Requirement: Workbench state function editor
+工作台编辑草稿且选中某一控件后，气泡工具栏 SHALL 为全部可选中控件提供状态控制入口。点击后 MUST 打开弹窗，标题为编辑状态，编辑器 MUST 包在 `function state(): string{` 与 `}` 之间。已填写函数时，工具栏图标 MUST 呈激活态；清空后 MUST 为普通未激活态。确认时若函数体无法作为 JavaScript 语句编译，MUST 提示且不保存。空函数 MUST 清除宿主 `state`。预览模式 MUST NOT 从气泡改该函数。非草稿版本打开时 MUST 只读。修改后 MUST 写入当前草稿 XML，子窗口 MUST 立即重新渲染，且不必先保存版本。
+
+#### Scenario: State icon opens the editor
+- **WHEN** 已登录管理员在编辑草稿时选中一个控件并点击气泡上的状态控制图标
+- **THEN** 弹出 `function state(): string{ ... }` 编辑器
+
+#### Scenario: Configured state function activates the icon
+- **WHEN** 选中控件已有非空 `state()` 函数体
+- **THEN** 气泡状态控制图标呈激活态
+
+#### Scenario: Invalid function is rejected
+- **WHEN** 管理员在弹窗中填入无法编译的语句并确认
+- **THEN** 系统提示未保存，宿主 `state` 保持原值
+
+### Requirement: Workbench loop configuration
+工作台编辑草稿且选中某一控件后，气泡工具栏 SHALL 为全部可选中控件提供循环入口。点击后 MUST 在气泡下方打开循环配置面板，字段 MUST 为：源数组（下拉框在「定义值」与「数据池」之间切换，其后为编辑定义值或选择变量池变量）、唯一键（必填）、索引变量名（默认 `index`）、项目变量名（默认 `item`）。循环已配置时，工具栏循环图标 MUST 呈激活态（与字体加粗相同的主色按钮）；未配置时 MUST 为普通未激活态。再次点击该图标 MUST 关闭面板（与其它分组切换方式一致）。`Tab` 切到兄弟后若上一控件已打开循环分组，新选中控件 MUST 仍打开循环分组。预览模式 MUST NOT 显示可编辑气泡，因此 MUST NOT 从气泡改循环。非草稿版本打开循环面板时 MUST 只读。修改循环后 MUST 写入当前草稿 XML，子窗口 MUST 立即重新渲染，且不必先保存版本。清空源或唯一键 MUST 使循环变为未配置并去掉激活态。
+
+#### Scenario: All widgets show loop control
+- **WHEN** 已登录管理员依次选中文本、按钮、弹性盒、滑动器与 `swiper-item`
+- **THEN** 各气泡工具栏都有循环图标
+
+#### Scenario: Opening loop shows binding fields
+- **WHEN** 已登录管理员在编辑草稿时点击选中控件的循环图标
+- **THEN** 气泡下方出现源数组（定义值/数据池）、唯一键、索引变量名与项目变量名
+
+#### Scenario: Configured loop activates the icon
+- **WHEN** 已登录管理员为某控件填好数据池源数组 `list`、唯一键 `id`，索引与项目使用缺省名
+- **THEN** 工具栏循环图标处于激活态，XML 写出 `loop-from="data"`、`loop-src="list"`、`loop-key="id"`
+
+#### Scenario: Clearing key deactivates loop
+- **WHEN** 已登录管理员把已配置循环的唯一键清空
+- **THEN** 循环图标回到未激活态，序列化结果不再写出循环属性
+
+#### Scenario: Loop edits are undoable
+- **WHEN** 已登录管理员在编辑草稿时给某控件配置循环，再执行撤回
+- **THEN** 该控件回到配置前的未循环状态，工具栏图标未激活
+
+### Requirement: Widget tree loop marker
+左侧控件树 SHALL 在已配置循环的节点行右侧显示循环图标。未配置循环的节点 MUST NOT 显示该图标。点击该图标 MUST 选中该控件、把它放到画布视野中，并打开该控件气泡的循环配置面板。该图标 MUST 只作为工作台编辑铬，MUST NOT 写入页面 XML，MUST NOT 出现在 H5。
+
+#### Scenario: Looped widget shows tree icon
+- **WHEN** 当前页面有一个已配置循环的弹性盒，以及一个未配置循环的文本
+- **THEN** 控件树只在该弹性盒行右侧显示循环图标
+
+#### Scenario: Tree icon focuses loop config
+- **WHEN** 已登录管理员点击控件树某节点右侧的循环图标
+- **THEN** 该控件被选中并放到视野中，气泡循环配置面板打开
 
 ### Requirement: Widget position and inset style
 控件样式 SHALL 可配置并持久化定位方式与四边偏移。定位方式 MUST 为 `static`、`relative`、`absolute`、`fixed` 或 `sticky`；缺省或无法识别的值 MUST 视为 `static`，MUST 不写入 `position` 属性，MUST NOT 使整页 XML 非法。四边偏移 MUST 使用 `top` / `right` / `bottom` / `left` 属性，单位 MUST 为 `px` 或 `%`；像素与百分比的数值 MUST 为整数，像素可为负。四边相等时 MUST 可序列化为 `inset`，否则 MUST 分别写出对应边。缺省的边与 `auto` MUST 不写入。工作台定位编辑 MUST NOT 提供 `auto` 单位。定位为静态（含缺省）时 MUST NOT 持久化四边偏移；解析时若静态仍带有这些属性，MUST 丢弃且 MUST NOT 再写出。无这些属性的既有页面 XML MUST 仍合法，渲染 MUST 保持静态文档流。
@@ -1155,6 +1212,49 @@
 - **WHEN** 已登录管理员处于预览模式或当前版本不是草稿，并查看文本文案输入
 - **THEN** 地球按钮不可把文案改成 `$t(...)` 表达式
 
+### Requirement: Copy field data binding
+文本控件的 `value` 与按钮控件的 `text` SHALL 允许填写整段绑定表达式，以在预览模式与 H5 中传入值。去掉首尾空白后，整段匹配优先级 MUST 为：`$t("分组键.文案键")`（仍按语言库解析）→ `$(表达式)` → `$data` 路径 → 当前循环作用域中的项目或索引路径 → 普通字面量。`$(表达式)` MUST 支持数字、字符串、布尔字面量、三元运算、四则与字符串拼接，并在表达式内用 `data.变量名` 读取变量池。`$data.变量名` 与 `$data.变量名.成员` MUST 读取变量池中对应值。配置了循环的节点及其子孙 MUST 还能使用 `$项目变量名`、`$项目变量名.成员` 与 `$索引变量名`（缺省为 `$item` 与 `$index`），并在 `$(表达式)` 内用对应标识符混写（例如 `$(data.var1 + data.var2)`、`$(item.name + '(' + item.id + ')')`）。混合在普通字面量中间的片段（例如 `前缀$(1)`）MUST 当作普通字面量，MUST NOT 部分求值。样式、尺寸与其它非文案字段 MUST NOT 按本语法求值。编辑模式下，除 `$t(...)` 外 MUST 在画布上展示绑定原文，MUST NOT 把 `$()` / `$data` / 循环路径替换成求值结果。预览模式与 H5 MUST 求值：成功时把结果转成展示字符串（`null` / `undefined` 为空串，对象与数组用 JSON 文本，其余按对应原始值的文本形式）；失败、未知变量或路径不存在时 MUST 显示空字符串，MUST NOT 把表达式原文画到页面上，MUST NOT 使整页渲染失败。
+
+#### Scenario: Number expression renders in preview
+- **WHEN** 某文本 `value` 为 `$(1)`，工作台处于预览模式或 H5 渲染该页
+- **THEN** 该文本展示 `1`，而不是 `$(1)`
+
+#### Scenario: String and boolean expressions render
+- **WHEN** 某按钮 `text` 为 `$("1")`，另一文本 `value` 为 `$(false)`，处于预览模式
+- **THEN** 按钮标签为 `1`，文本展示 `false`
+
+#### Scenario: Ternary expression renders
+- **WHEN** 某文本 `value` 为 `$(true ? '1' : '2')`，处于预览模式
+- **THEN** 该文本展示 `1`
+
+#### Scenario: Data path reads page variable
+- **WHEN** 页面变量 `var4` 的值为字符串 `张三`，某文本 `value` 为 `$data.var4`，处于预览模式
+- **THEN** 该文本展示 `张三`
+
+#### Scenario: Expression mixes data variables
+- **WHEN** 页面变量 `var1` 为数字 `1`、`var2` 为数字 `2`，某文本 `value` 为 `$(data.var1 + data.var2)`，处于预览模式
+- **THEN** 该文本展示 `3`
+
+#### Scenario: Data ternary mixes with literals
+- **WHEN** 页面变量 `var3` 为布尔真，某文本 `value` 为 `$(data.var3 ? '1' : '2')`，处于预览模式
+- **THEN** 该文本展示 `1`
+
+#### Scenario: Edit mode keeps binding source
+- **WHEN** 已登录管理员处于编辑模式，某文本 `value` 为 `$data.var4`
+- **THEN** 画布上该文本仍展示 `$data.var4`，不替换成变量值
+
+#### Scenario: I18n still wins over data binding
+- **WHEN** 某文本 `value` 为 `$t("common.ok")`，当前语言有对应译文
+- **THEN** 编辑模式与预览都展示该译文，不把整段当作 `$data` 或 `$()` 解析
+
+#### Scenario: Mixed literal is not evaluated
+- **WHEN** 某文本 `value` 为 `前缀$(1)`，处于预览模式
+- **THEN** 该文本展示 `前缀$(1)`，不把其中的 `$(1)` 单独求值
+
+#### Scenario: Unknown binding renders empty
+- **WHEN** 某文本 `value` 为 `$data.missing` 或 `$(data.missing)`，变量池没有该名，处于预览模式
+- **THEN** 该文本展示空字符串，页面其余控件仍渲染
+
 ### Requirement: Page inspector when no widget selected
 工作台 MUST NOT 再用独立右侧栏展示控件或页面属性。未选中任何控件时，画布右上角 SHALL 提供设置入口；点击后 MUST 弹出页面属性弹窗，展示当前页面的背景与内边距。选中某一控件后，同一设置入口 MUST 改为弹出该控件的属性。点击画布上控件以外的页面区域 MUST 取消控件选中。预览模式或非草稿版本时，页面属性 MUST 只读，MUST NOT 被编辑。编辑草稿时修改这些字段后，子窗口 MUST 立即按更新后的 XML 重新渲染，且不必先保存版本。
 
@@ -1297,6 +1397,29 @@
 - **WHEN** 当前某变量描述为空并序列化
 - **THEN** 对应变量元素不写出 `desc` 属性
 
+### Requirement: Widget loop in page xml
+可选中控件 SHALL 可声明循环，用于预览模式与 H5 按数组重复渲染该节点及其子树。循环 MUST 写在该控件元素自身上，MUST 使用属性：`loop-from`（`data` 表示数据池，`literal` 表示定义值）、`loop-src`（`data` 时为变量名，`literal` 时为数组表达式）、`loop-key`（唯一键，必填，相对每项的成员路径）、可选 `loop-item`（项目变量名，缺省 `item`）、可选 `loop-index`（索引变量名，缺省 `index`）。缺省项目/索引名 MUST 不写出对应属性。循环是控件身份与结构的一部分：MUST 在各视觉状态间共享，MUST NOT 写入 `<_>` 或 `<__>`。`loop-from`、`loop-src` 与 `loop-key` 均非空时循环 MUST 视为已配置；任一缺失、空白或 `loop-from` 无法识别时 MUST 视为未配置，MUST NOT 写出循环属性，MUST NOT 使整页 XML 非法。无循环属性的既有页面 XML MUST 仍合法。项目变量名与索引变量名 MUST 是合法的 JavaScript `IdentifierName`，MUST 互不相同，MUST NOT 为 `data` 或 `t`；非法名称 MUST 回落到缺省名。复制控件时 MUST 复制循环配置（新 `id` 除外）。
+
+#### Scenario: Data-pool loop round-trips
+- **WHEN** 系统解析 `<text id="row" value="$item.name" loop-from="data" loop-src="list" loop-key="id" />` 并再序列化
+- **THEN** 再次解析得到相同的循环来源、源名、唯一键，且不写出 `loop-item` 与 `loop-index`
+
+#### Scenario: Literal loop and custom aliases round-trip
+- **WHEN** 系统解析 `<flex id="row" loop-from="literal" loop-src="[{id:1},{id:2}]" loop-key="id" loop-item="row" loop-index="i"></flex>` 并再序列化
+- **THEN** 再次解析得到定义值来源、同一数组表达式、唯一键 `id`、项目变量名 `row`、索引变量名 `i`
+
+#### Scenario: Incomplete loop is not configured
+- **WHEN** 某控件只有 `loop-from="data"` 与 `loop-src="list"`，没有 `loop-key`
+- **THEN** 解析结果视为未配置循环，序列化不写出循环属性，整页仍合法
+
+#### Scenario: Existing pages without loop remain valid
+- **WHEN** 系统解析一份不含任何 `loop-*` 属性的既有页面 XML
+- **THEN** 解析成功，所有控件都未配置循环
+
+#### Scenario: Copy preserves loop
+- **WHEN** 已登录管理员复制一个已配置循环的弹性盒并粘贴
+- **THEN** 副本带有相同的循环来源、源、唯一键与变量名，且各控件 `id` 与原树不同
+
 ### Requirement: Render catalog is supplied by host
 公共渲染能力 SHALL 接受宿主提供的当前语言键与语言目录（语言列表、方向与译文），MUST NOT 从页面 XML 读取语言库。工作台预览 MUST 把数据库中的当前工程语言库交给渲染；H5 MUST 把已加载的发布 JSON 交给渲染。
 
@@ -1409,7 +1532,7 @@
 - **THEN** 该变量初始值不变
 
 ### Requirement: Render text and button from xml
-子窗口 SHALL 按当前 XML 渲染 `text` 与 `button`。每个 `text` MUST 显示其解析后的文案：若 `value` 去掉首尾空白后整段为 `$t("分组键.文案键")`，MUST 显示当前语言下该键的译文；否则 MUST 显示 `value` 原文。每个 `button` MUST 按同样规则解析其 `text` 标签。找不到对应分组、文案键或当前语言译文时，MUST 显示空字符串，MUST NOT 把 `$t(...)` 原文画到页面上。控件顺序 MUST 与 XML 中的声明顺序一致。
+子窗口 SHALL 按当前 XML 渲染 `text` 与 `button`。每个 `text` MUST 显示其解析后的文案：若 `value` 去掉首尾空白后整段为 `$t("分组键.文案键")`，MUST 显示当前语言下该键的译文；否则在预览模式与 H5 中 MUST 按「Copy field data binding」求值，在编辑模式中除 `$t(...)` 外 MUST 显示 `value` 原文。每个 `button` MUST 按同样规则解析其 `text` 标签。找不到对应分组、文案键或当前语言译文时，MUST 显示空字符串，MUST NOT 把 `$t(...)` 原文画到页面上。绑定求值失败时 MUST 显示空字符串。控件顺序 MUST 与 XML 中的声明顺序一致；已展开的循环实例 MUST 按源数组顺序占据该节点的位置。
 
 #### Scenario: Preview shows text and button
 - **WHEN** 当前 XML 依次包含 `value` 为「你好」的 `text` 与 `text` 为「确定」的 `button`
@@ -1426,6 +1549,45 @@
 #### Scenario: Missing translation renders empty
 - **WHEN** 某按钮 `text` 为 `$t("missing.key")`，语言库中没有该键
 - **THEN** 子窗口该按钮标签为空
+
+#### Scenario: Preview resolves data binding
+- **WHEN** 当前 XML 某文本 `value` 为 `$data.var4`，变量池 `var4` 为「你好」，工作台处于预览模式
+- **THEN** 子窗口展示「你好」，而不是 `$data.var4`
+
+#### Scenario: Edit mode shows data binding source
+- **WHEN** 当前 XML 某文本 `value` 为 `$(1)`，工作台处于编辑模式
+- **THEN** 子窗口展示 `$(1)`
+
+### Requirement: Render looped widgets from xml
+预览模式与 H5 SHALL 对已配置循环的节点按源数组展开：源为数据池时 MUST 读取该变量求值结果，源为定义值时 MUST 求值 `loop-src` 数组表达式。结果不是数组或长度为 0 时，该节点及其子树 MUST 不出现在渲染结果中。每一项 MUST 克隆该节点及其子树并按数组顺序插入原位置；该项及其子孙的文案绑定 MUST 能读取该次循环的项目与索引（按所配变量名）。唯一键 MUST 用于区分各次展开实例；某项缺少该键时 MUST 仍渲染，并用该项下标区分实例。嵌套循环 MUST 各自使用自己的项目/索引名；内层 MUST 仍能读取外层尚未被同名覆盖的变量以及 `data`。编辑模式 MUST NOT 展开循环，MUST 只渲染一份模板节点。管理后台预览与 H5 对同一份含循环的 XML MUST 展开出相同份数、相同顺序与相同求值文案。
+
+#### Scenario: Preview repeats node by data array
+- **WHEN** 页面变量 `list` 为 `[{id:1,name:'A'},{id:2,name:'B'}]`，某文本配置了数据池循环 `list`、唯一键 `id`、`value` 为 `$item.name`，工作台处于预览模式
+- **THEN** 子窗口依次展示 `A` 与 `B` 两份该文本
+
+#### Scenario: Nested item path and mixed expression
+- **WHEN** 循环项为 `{id:3,name:'李四'}`，某文本 `value` 为 `$(item.name + '(' + item.id + ')')`，处于预览模式
+- **THEN** 该次实例展示 `李四(3)`
+
+#### Scenario: Custom item alias is used
+- **WHEN** 某循环的项目变量名为 `row`，其文本 `value` 为 `$row.id`
+- **THEN** 预览中各实例展示对应项的 `id`
+
+#### Scenario: Empty source hides the node
+- **WHEN** 某弹性盒已配置循环，源数组为空数组，处于预览模式
+- **THEN** 子窗口不展示该弹性盒及其子控件
+
+#### Scenario: Edit mode shows a single template
+- **WHEN** 同一已配置循环的弹性盒，工作台处于编辑模式
+- **THEN** 画布只展示一份该弹性盒模板，不按数组复制
+
+#### Scenario: Nested loops compose scopes
+- **WHEN** 外层循环项目名为 `group`，内层为缺省 `item`，内层文本 `value` 为 `$(group.title + item.name)`，处于预览模式
+- **THEN** 每个内层实例展示对应外层标题与内层名称的拼接
+
+#### Scenario: H5 matches admin preview loops
+- **WHEN** 同一份含循环文本的合法页面 XML 分别在管理后台预览与 H5 中渲染
+- **THEN** 两处展开的份数、顺序与文案相同
 
 ### Requirement: Page direction follows language
 公共渲染能力 SHALL 把页面根排列方向设为当前语言的 `dir`。当前语言为 `rtl` 时，页面 MUST 以从右到左排列；为 `ltr` 或没有语言时 MUST 以从左到右排列。该方向 MUST 作用于页面内联排版与弹性容器的起止边，MUST NOT 改写 XML 中已保存的 `flex-direction` 或其他物理边距属性。管理后台 iframe 预览与 H5 在相同当前语言下 MUST 使用相同方向。
@@ -1571,7 +1733,7 @@
 - **THEN** 子窗口展示错误反馈，且不渲染出文本或按钮控件
 
 ### Requirement: Shared renderer across hosts
-`text` 与 `button` 的页面渲染 SHALL 由公共渲染能力提供。管理后台预览页与 H5 独立运行时 MUST 对同一份合法页面 XML 在相同当前语言与相同语言目录下渲染出相同的控件文案、顺序与页面排列方向。工作台编辑、版本管理与预览协议 MUST NOT 放入该公共渲染能力；当前语言与语言目录可作为渲染输入交给该公共能力。
+`text` 与 `button` 的页面渲染 SHALL 由公共渲染能力提供。管理后台预览页与 H5 独立运行时 MUST 对同一份合法页面 XML 在相同当前语言、相同语言目录与相同页面变量下渲染出相同的控件文案、循环展开、顺序与页面排列方向。工作台编辑、版本管理与预览协议 MUST NOT 放入该公共渲染能力；当前语言与语言目录可作为渲染输入交给该公共能力；页面变量 MUST 从同一份页面 XML 的 `<data>` 读取。
 
 #### Scenario: Same xml matches in admin preview and h5
 - **WHEN** 同一份依次包含文本「你好」与按钮「确定」的合法页面 XML 分别在管理后台预览页与 H5 运行时中渲染
@@ -1580,6 +1742,10 @@
 #### Scenario: Same locale resolves the same copy
 - **WHEN** 同一份含 `$t("common.ok")` 的页面 XML，工作台预览语言为 `ar` 且工程库中有对应译文，H5 加载同一版本发布的 `ar` JSON
 - **THEN** 两处都展示相同的 `ar` 译文，且页面都为从右到左
+
+#### Scenario: Same data binding resolves in both hosts
+- **WHEN** 同一份含 `$data.var4` 文本与对应 `<data>` 的页面 XML 分别在管理后台预览与 H5 中渲染
+- **THEN** 两处都展示该变量的求值文案
 
 ### Requirement: H5 standalone runtime
 H5 应用 SHALL 作为独立运行时宿主使用公共渲染能力展示页面控件。H5 MUST NOT 提供工程/页面/版本工作台，MUST NOT 作为管理后台预览 iframe 的目标，也 MUST NOT 依赖工作台预览消息才能完成一次渲染。
@@ -1693,7 +1859,7 @@ H5 独立运行时 SHALL 按运行时区域选择语言 JSON：若存在语言�
 - **THEN** 该语言仍在工程语言库中，控件树撤回栈也不包含这次新增
 
 ### Requirement: Keyboard shortcuts for widget commands
-工作台 SHALL 为删除、复制、粘贴、撤回、重做提供与按钮入口等效的快捷键。在编辑草稿且焦点不在文本输入、多行输入或可编辑区域内时：`Delete` MUST 删除当前选中控件；`Backspace` MUST NOT 删除控件。已选中控件时，`Tab` MUST 把选中切到当前控件的下一个兄弟节点；若当前已是最后一个兄弟，MUST 回到第一个兄弟。无选中或只有自身这一项时，`Tab` MUST NOT 改选中（仅一项时仍停留在该控件）。画布缩放不是 `500%` 时，`Tab` 切兄弟 MUST NOT 改变画布缩放或把该控件放大到视野中；当前缩放已是 `500%` 时，`Tab` 切到该兄弟后 MUST 把它放到视野中。若切兄弟前已打开内容、内边距、外边距、尺寸、圆角、边框、定位或旋转编辑分组，`Tab` 之后 MUST 在新选中控件上保持同一分组打开，MUST NOT 关掉该编辑模式；上一控件已改的值 MUST 保留。`Ctrl+Enter` 或 `⌘+Enter` MUST 选中当前控件的第一个子控件；没有子控件时 MUST NOT 改选中。`Ctrl+Shift+Enter` 或 `⌘+Shift+Enter` MUST 选中当前控件的父控件；已在页面根级时 MUST NOT 改选中。连按两次 `Enter`（间隔不超过 `300ms`）MUST 等同于对该节点 `Ctrl` 双击：把当前选中控件放大到视野中；若当前画布缩放已是 `500%`，第二次 `Enter` MUST 还原为放大前的视图（没有放大前记录则回到适配画布）。焦点在可编辑输入内时 MUST NOT 拦截这些键。平台修饰键加 `C` MUST 复制；平台修饰键加 `V` MUST 粘贴；平台修饰键加 `Z` MUST 撤回；平台修饰键加 `Shift+Z` 或平台修饰键加 `Y` MUST 重做。焦点在文本输入、多行输入或可编辑区域内时，系统 MUST NOT 用这些快捷键操作控件树，以便保留输入框自身的编辑行为。编辑态下，管理员在预览 iframe 内按下上述快捷键时，工作台 MUST 与主窗口快捷键产生相同效果。预览模式或非草稿版本下，除复制外的变更类快捷键 MUST NOT 改变控件树。
+工作台 SHALL 为删除、复制、粘贴、撤回、重做提供与按钮入口等效的快捷键。在编辑草稿且焦点不在文本输入、多行输入或可编辑区域内时：`Delete` MUST 删除当前选中控件；`Backspace` MUST NOT 删除控件。已选中控件时，`Tab` MUST 把选中切到当前控件的下一个兄弟节点；若当前已是最后一个兄弟，MUST 回到第一个兄弟。无选中或只有自身这一项时，`Tab` MUST NOT 改选中（仅一项时仍停留在该控件）。画布缩放不是 `500%` 时，`Tab` 切兄弟 MUST NOT 改变画布缩放或把该控件放大到视野中；当前缩放已是 `500%` 时，`Tab` 切到该兄弟后 MUST 把它放到视野中。若切兄弟前已打开内容、内边距、外边距、尺寸、圆角、边框、定位、旋转或循环编辑分组，`Tab` 之后 MUST 在新选中控件上保持同一分组打开，MUST NOT 关掉该编辑模式；上一控件已改的值 MUST 保留。`Ctrl+Enter` 或 `⌘+Enter` MUST 选中当前控件的第一个子控件；没有子控件时 MUST NOT 改选中。`Ctrl+Shift+Enter` 或 `⌘+Shift+Enter` MUST 选中当前控件的父控件；已在页面根级时 MUST NOT 改选中。连按两次 `Enter`（间隔不超过 `300ms`）MUST 等同于对该节点 `Ctrl` 双击：把当前选中控件放大到视野中；若当前画布缩放已是 `500%`，第二次 `Enter` MUST 还原为放大前的视图（没有放大前记录则回到适配画布）。焦点在可编辑输入内时 MUST NOT 拦截这些键。平台修饰键加 `C` MUST 复制；平台修饰键加 `V` MUST 粘贴；平台修饰键加 `Z` MUST 撤回；平台修饰键加 `Shift+Z` 或平台修饰键加 `Y` MUST 重做。焦点在文本输入、多行输入或可编辑区域内时，系统 MUST NOT 用这些快捷键操作控件树，以便保留输入框自身的编辑行为。编辑态下，管理员在预览 iframe 内按下上述快捷键时，工作台 MUST 与主窗口快捷键产生相同效果。预览模式或非草稿版本下，除复制外的变更类快捷键 MUST NOT 改变控件树。
 
 #### Scenario: Delete key removes the selected widget
 - **WHEN** 已登录管理员在编辑草稿时选中一个控件，且焦点不在输入框内，按下 `Delete`
@@ -1722,6 +1888,10 @@ H5 独立运行时 SHALL 按运行时区域选择语言 JSON：若存在语言�
 #### Scenario: Tab keeps the open box edit group
 - **WHEN** 已登录管理员在编辑草稿时已打开内边距分组并改了当前控件上内边距，再按 `Tab` 切到兄弟
 - **THEN** 上一控件的上内边距保持改后的值，新选中控件上内边距分组仍打开
+
+#### Scenario: Tab keeps the open loop group
+- **WHEN** 已登录管理员在编辑草稿时已打开循环分组，再按 `Tab` 切到兄弟
+- **THEN** 新选中控件上循环分组仍打开
 
 #### Scenario: Ctrl+Enter selects the first child
 - **WHEN** 已登录管理员在编辑草稿时选中一个有子控件的容器，且焦点不在输入框内，按下 `Ctrl+Enter`

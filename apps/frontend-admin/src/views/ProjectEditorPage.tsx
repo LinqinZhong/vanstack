@@ -61,6 +61,7 @@ import {
   compactPageI18n,
   compactSize,
   compactWidgetStyle,
+  isLoopConfigured,
   ownedStateNames,
   parsePageXml,
   serializePageXml,
@@ -158,7 +159,6 @@ import {
   type WidgetPatch,
 } from '../utils/widgetTree';
 import {
-  collectGroupDefaults,
   collectStateTree,
   createWidgetState,
   deleteWidgetState,
@@ -170,7 +170,6 @@ import {
   viewingAfterSelect,
   viewingListFromMap,
   widgetWithStateLayers,
-  setAppliedState,
   type ViewingByOwner,
 } from '../utils/widgetStates';
 import { writeWidgetDrag } from '../utils/pageData';
@@ -2415,16 +2414,25 @@ export function ProjectEditorPage() {
     const wasSpacing = isBoxDragGroup(openBoxGroupRef.current);
     if (nextSpacing) {
       const widgetId = selectedWidgetIdRef.current;
-      if (widgetId) {
+      if (widgetId && !readOnlyRef.current) {
         beginSpacingSession(widgetId);
       }
+      openBoxGroupRef.current = group;
       setOpenBoxGroup(group);
       return;
     }
     if (wasSpacing) {
       confirmSpacingEdit();
     }
+    openBoxGroupRef.current = group;
     setOpenBoxGroup(group);
+  }
+
+  function openWidgetLoopPanel(widgetId: string) {
+    keepBoxGroupForIdRef.current = widgetId;
+    selectWidget(widgetId);
+    handleOpenBoxGroupChange('loop');
+    focusWidgetById(widgetId);
   }
 
   function syncHeldSpacingEdges() {
@@ -3459,7 +3467,6 @@ export function ProjectEditorPage() {
   const selectedWidget = findWidget(widgets, selectedWidgetId);
   const selectedParent = findParentWidget(widgets, selectedWidgetId);
   const visibleStates = collectStateTree(widgets, selectedWidgetId);
-  const activeStates = collectGroupDefaults(widgets, selectedWidgetId);
   const selectedDisplayWidget = selectedWidget
     ? widgetWithStateLayers(selectedWidget, stateLayersForWidget(widgets, selectedWidget.id, viewingByOwner))
     : null;
@@ -3640,19 +3647,39 @@ export function ProjectEditorPage() {
                 expandedKeys={expandedKeys}
                 selectedKeys={selectedWidgetId ? [selectedWidgetId] : []}
                 treeData={widgetTreeData}
-                titleRender={(node) => (
-                  <span
-                    className={canDragWidgetToData ? 'widget-tree-drag-title' : undefined}
-                    draggable={canDragWidgetToData}
-                    onDragStart={(event) => {
-                      event.stopPropagation();
-                      event.dataTransfer.effectAllowed = 'copy';
-                      writeWidgetDrag(event.dataTransfer, String(node.key));
-                    }}
-                  >
-                    {typeof node.title === 'string' ? node.title : String(node.key)}
-                  </span>
-                )}
+                titleRender={(node) => {
+                  const widgetId = String(node.key);
+                  const looped = isLoopConfigured(findWidget(widgets, widgetId)?.loop);
+                  return (
+                    <span className="widget-tree-title">
+                      <span
+                        className={canDragWidgetToData ? 'widget-tree-drag-title' : 'widget-tree-title-label'}
+                        draggable={canDragWidgetToData}
+                        onDragStart={(event) => {
+                          event.stopPropagation();
+                          event.dataTransfer.effectAllowed = 'copy';
+                          writeWidgetDrag(event.dataTransfer, widgetId);
+                        }}
+                      >
+                        {typeof node.title === 'string' ? node.title : widgetId}
+                      </span>
+                      {looped ? (
+                        <button
+                          type="button"
+                          className="widget-tree-loop"
+                          title={t('lowcode.styleLoop')}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openWidgetLoopPanel(widgetId);
+                          }}
+                        >
+                          <UnorderedListOutlined />
+                        </button>
+                      ) : null}
+                    </span>
+                  );
+                }}
                 onExpand={(keys) => setExpandedKeys(keys.map(String))}
                 onSelect={(keys) => {
                   if (keys[0]) {
@@ -3764,11 +3791,13 @@ export function ProjectEditorPage() {
                       event.stopPropagation();
                     }}
                   >
-                    {selectedDisplayWidget && !readOnly ? (
+                    {selectedDisplayWidget ? (
                       <WidgetStyleBubble
                         widget={selectedDisplayWidget}
                         style={selectedDisplayWidget.style}
                         i18nCatalog={pageI18n}
+                        variables={pageData}
+                        disabled={readOnly}
                         openGroup={openBoxGroup}
                         onOpenGroupChange={handleOpenBoxGroupChange}
                         onChange={(nextStyle) =>
@@ -3787,6 +3816,16 @@ export function ProjectEditorPage() {
                                   `edit:${selectedDisplayWidget.id}:${selectedDisplayWidget.type === 'text' ? 'value' : 'text'}`,
                                 )
                             : undefined
+                        }
+                        onLoopChange={(loop) =>
+                          updateWidget(selectedDisplayWidget.id, { loop }, `loop:${selectedDisplayWidget.id}`)
+                        }
+                        onStateFnChange={(stateFn) =>
+                          updateWidget(
+                            selectedDisplayWidget.id,
+                            { stateFn },
+                            `stateFn:${selectedDisplayWidget.id}`,
+                          )
                         }
                         onOpenInspector={() => setInspectorOpen(true)}
                         onToolbarPopupChange={(open) => {
@@ -3820,7 +3859,6 @@ export function ProjectEditorPage() {
                   items={visibleStates}
                   viewingOwnerId={viewingOwnerId}
                   viewingState={viewingState}
-                  applied={activeStates}
                   ownedNames={ownedStateNames(selectedWidget)}
                   onSelect={(row) => {
                     if (!row.owned && row.name) {
@@ -3860,27 +3898,6 @@ export function ProjectEditorPage() {
                       return next;
                     });
                   }}
-                  onApply={(row) => {
-                    if (!row.owned) {
-                      return;
-                    }
-                    commitWidgets(setAppliedState(widgets, selectedWidget.id, row.name, row.scopeName), selectedWidgetId);
-                    const scopeOwnerId = row.scopeOwnerId;
-                    const scopeName = row.scopeName;
-                    if (scopeName && scopeOwnerId) {
-                      setViewingOwnerId(row.name ? row.ownerId : scopeOwnerId);
-                      setViewingState(row.name ?? scopeName);
-                      setViewingByOwner((prev) => ({
-                        ...prev,
-                        [scopeOwnerId]: scopeName,
-                        [row.ownerId]: row.name ?? null,
-                      }));
-                      return;
-                    }
-                    setViewingOwnerId(row.ownerId);
-                    setViewingState(row.name);
-                    setViewingByOwner((prev) => ({ ...prev, [row.ownerId]: row.name }));
-                  }}
                   onCreate={(name, from, transition) => {
                     const scopeName = from.scopeName ?? (!from.owned ? from.name : null);
                     const scopeOwnerId = from.scopeOwnerId ?? (!from.owned ? from.ownerId : undefined);
@@ -3893,10 +3910,7 @@ export function ProjectEditorPage() {
                       transition,
                       scopeName,
                     );
-                    commitWidgets(
-                      name === 'hover' ? created : setAppliedState(created, selectedWidget.id, name, scopeName),
-                      selectedWidgetId,
-                    );
+                    commitWidgets(created, selectedWidgetId);
                     setViewingOwnerId(selectedWidget.id);
                     setViewingState(name);
                     setViewingByOwner((prev) => {

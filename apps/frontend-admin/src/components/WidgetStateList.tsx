@@ -1,17 +1,15 @@
-import { CaretRightOutlined, CheckOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
+import { CaretRightOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { Button, Dropdown, Form, Input, InputNumber, Modal, type MenuProps } from 'antd';
 import { useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { nextCopiedStateName, type AppliedGroupState, type VisibleWidgetState } from '../utils/widgetStates';
+import { nextCopiedStateName, type VisibleWidgetState } from '../utils/widgetStates';
 
 type WidgetStateListProps = {
   items: VisibleWidgetState[];
   viewingOwnerId: string | null;
   viewingState: string | null;
-  applied: AppliedGroupState[];
   ownedNames: string[];
   onSelect: (row: VisibleWidgetState) => void;
-  onApply: (row: VisibleWidgetState) => void;
   onCreate: (name: string, from: VisibleWidgetState, transition?: number) => void;
   onEdit: (from: VisibleWidgetState, name: string | null, transition?: number) => void;
   onDelete: (row: VisibleWidgetState) => void;
@@ -39,10 +37,8 @@ export function WidgetStateList({
   items,
   viewingOwnerId,
   viewingState,
-  applied,
   ownedNames,
   onSelect,
-  onApply,
   onCreate,
   onEdit,
   onDelete,
@@ -85,19 +81,11 @@ export function WidgetStateList({
     });
   }
 
-  function menuFor(row: VisibleWidgetState, appliedThis: boolean): MenuProps['items'] {
+  function menuFor(row: VisibleWidgetState): MenuProps['items'] {
     const items: MenuProps['items'] = [];
     const leaf = isLeaf(row);
     const namedOwned = leaf && row.owned && row.name != null;
     const rootInitial = leaf && row.owned && row.name == null && !row.scopeName;
-    const canApply = leaf && row.owned;
-    if (canApply) {
-      items.push({
-        key: 'apply',
-        label: t('lowcode.stateSetDefault'),
-        disabled: appliedThis,
-      });
-    }
     if (!leaf) {
       items.push({
         key: 'add',
@@ -142,8 +130,7 @@ export function WidgetStateList({
 
   function renderNode(row: VisibleWidgetState, depth: number) {
     const viewingThis = isViewingRow(row, viewingOwnerId, viewingState);
-    const appliedThis = isAppliedRow(row, applied);
-    const menuItems = menuFor(row, appliedThis);
+    const menuItems = menuFor(row);
     const branch = Boolean(row.children?.length);
     const expanded = branch && !collapsed[rowKey(row)];
     const rowBody = (
@@ -167,7 +154,6 @@ export function WidgetStateList({
         <span className={['canvas-state-list-name', row.owned ? 'is-owned' : 'is-inherited'].join(' ')}>
           {row.name ?? t('lowcode.stateDefault')}
         </span>
-        {isLeaf(row) && appliedThis ? <CheckOutlined className="canvas-state-list-check" /> : null}
         {branch ? (
           <button
             type="button"
@@ -193,9 +179,7 @@ export function WidgetStateList({
               items: menuItems,
               onClick: ({ key, domEvent }) => {
                 domEvent.stopPropagation();
-                if (key === 'apply') {
-                  onApply(row);
-                } else if (key === 'add') {
+                if (key === 'add') {
                   openCreate(row);
                 } else if (key === 'edit') {
                   openEdit(row);
@@ -339,16 +323,4 @@ function isViewingRow(row: VisibleWidgetState, viewingOwnerId: string | null, vi
     return viewingOwnerId === row.ownerId && viewingState === row.name;
   }
   return row.ownerId === viewingOwnerId && row.name === viewingState && !row.scopeName;
-}
-
-function isAppliedRow(row: VisibleWidgetState, applied: AppliedGroupState[]) {
-  if (!isLeaf(row)) {
-    return false;
-  }
-  if (row.scopeName) {
-    return applied.some(
-      (item) => item.scopeName === row.scopeName && item.scopeOwnerId === row.scopeOwnerId && item.name === row.name,
-    );
-  }
-  return applied.some((item) => !item.scopeName && item.ownerId === row.ownerId && item.name === row.name);
 }

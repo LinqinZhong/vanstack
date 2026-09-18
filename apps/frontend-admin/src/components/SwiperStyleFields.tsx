@@ -1,13 +1,16 @@
 import { ColorPicker, Form, InputNumber, Select, Switch } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { SWIPER_EASINGS, compactSwiper, type SwiperStyle } from '@vanstack/xml';
+import { SWIPER_EASINGS, compactSwiper, isCopyBinding, type SwiperStyle } from '@vanstack/xml';
 
 function enumOptions(values: readonly string[]) {
   return values.map((value) => ({ value, label: value }));
 }
 
 function colorValue(value: string | undefined) {
-  return value || undefined;
+  if (!value || isCopyBinding(value)) {
+    return undefined;
+  }
+  return value;
 }
 
 export function SwiperFields({

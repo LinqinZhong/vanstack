@@ -1,7 +1,7 @@
 import { createElement, type ReactElement } from 'react';
-import { resolveI18nCopy, type PageWidget } from '@vanstack/xml';
+import type { PageWidget } from '@vanstack/xml';
 import { flexItemCss, mergeCss, widgetCss } from '../css';
-import type { WidgetRenderContext } from '../widget-render';
+import { resolveWidgetCopy, widgetCssOptions, type WidgetRenderContext } from '../widget-render';
 
 export function renderText(
   widget: Extract<PageWidget, { type: 'text' }>,
@@ -10,14 +10,14 @@ export function renderText(
   return createElement(
     'span',
     {
-      key: widget.id,
+      key: ctx.instanceKey,
       className: 'lowcode-text',
       'data-widget-id': widget.id,
       'data-widget-type': 'text',
-      style: mergeCss(widgetCss(widget.style, { animate: ctx.animate }), flexItemCss(widget.item)),
+      style: mergeCss(widgetCss(widget.style, widgetCssOptions(ctx)), flexItemCss(widget.item)),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,
     },
-    resolveI18nCopy(widget.value, ctx.catalog, ctx.locale),
+    resolveWidgetCopy(widget.value, ctx),
   );
 }

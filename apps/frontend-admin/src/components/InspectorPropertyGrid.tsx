@@ -24,6 +24,7 @@ import {
   boxLengthsEqual,
   DEFAULT_SWIPER_HEIGHT,
   DEFAULT_SWIPER_WIDTH,
+  isCopyBinding,
   sanitizeWidgetStyle,
   type BoxLength,
   type AngleValue,
@@ -152,6 +153,9 @@ function parseCssColor(raw: string): string | undefined | false {
   if (!trimmed) {
     return undefined;
   }
+  if (isCopyBinding(trimmed)) {
+    return trimmed;
+  }
   if (typeof CSS !== 'undefined' && typeof CSS.supports === 'function') {
     return CSS.supports('color', trimmed) ? trimmed : false;
   }
@@ -168,6 +172,9 @@ function parseFontWeight(raw: string): string | undefined | false {
   const trimmed = raw.trim();
   if (!trimmed) {
     return undefined;
+  }
+  if (isCopyBinding(trimmed)) {
+    return trimmed;
   }
   if (/^(?:normal|bold|lighter|bolder|[1-9]00)$/i.test(trimmed)) {
     return trimmed;
@@ -195,6 +202,9 @@ function parseCssShadow(raw: string, property: 'text-shadow' | 'box-shadow'): st
   const trimmed = raw.trim();
   if (!trimmed || trimmed === 'none') {
     return undefined;
+  }
+  if (isCopyBinding(trimmed)) {
+    return trimmed;
   }
   if (typeof CSS !== 'undefined' && typeof CSS.supports === 'function') {
     return CSS.supports(property, trimmed) ? trimmed : false;
@@ -297,6 +307,17 @@ function parseEnum<T extends string>(raw: string, values: readonly T[]): T | und
     return undefined;
   }
   return (values as readonly string[]).includes(trimmed) ? (trimmed as T) : false;
+}
+
+function parseBorderStyle(raw: string): string | undefined | false {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (isCopyBinding(trimmed)) {
+    return trimmed;
+  }
+  return parseEnum(raw, ['solid', 'dashed', 'dotted'] as const);
 }
 
 function parseNumber(raw: string, min?: number): number | undefined | false {
@@ -904,7 +925,7 @@ export function WidgetPropertyInspector({
       key: 'borderStyle',
       value: style.borderStyle ?? '',
       onChange: (raw) =>
-        accepted(parseEnum(raw, ['solid', 'dashed', 'dotted'] as const), (borderStyle) =>
+        accepted(parseBorderStyle(raw), (borderStyle) =>
           patchStyle({ borderStyle }),
         ),
     },

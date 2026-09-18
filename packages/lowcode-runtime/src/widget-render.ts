@@ -1,5 +1,13 @@
 import type { ReactElement } from 'react';
-import type { PageI18n, PageWidget } from '@vanstack/xml';
+import {
+  isI18nCopyExpr,
+  resolveCopyBinding,
+  resolveI18nCopy,
+  type BindingScope,
+  type PageI18n,
+  type PageWidget,
+} from '@vanstack/xml';
+import type { WidgetCssOptions } from './css';
 
 export type WidgetHoverHandlers = {
   onMouseEnter: () => void;
@@ -11,6 +19,27 @@ export type WidgetRenderContext = {
   animate: boolean;
   catalog: PageI18n | undefined;
   locale?: string;
+  evaluateBindings: boolean;
+  bindingScope: BindingScope;
+  instanceKey: string;
   hoverFor: (widget: PageWidget) => WidgetHoverHandlers | undefined;
   render: (widget: PageWidget) => ReactElement;
 };
+
+export function widgetCssOptions(ctx: WidgetRenderContext): WidgetCssOptions {
+  return {
+    animate: ctx.animate,
+    evaluateBindings: ctx.evaluateBindings,
+    bindingScope: ctx.bindingScope,
+  };
+}
+
+export function resolveWidgetCopy(raw: string, ctx: WidgetRenderContext): string {
+  if (isI18nCopyExpr(raw)) {
+    return resolveI18nCopy(raw, ctx.catalog, ctx.locale);
+  }
+  if (!ctx.evaluateBindings) {
+    return raw;
+  }
+  return resolveCopyBinding(raw, ctx.bindingScope);
+}

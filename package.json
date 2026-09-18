@@ -9,6 +9,8 @@
     "dev:backend": "pnpm --filter @vanstack/backend dev",
     "dev:app": "pnpm --filter @vanstack/frontend-app dev",
     "dev:admin": "pnpm --filter @vanstack/frontend-admin dev",
+    "dev:desktop": "pnpm --filter @vanstack/shared --filter @vanstack/xml --filter @vanstack/lowcode-runtime build && pnpm -r --parallel --filter @vanstack/shared --filter @vanstack/xml --filter @vanstack/lowcode-runtime --filter @vanstack/backend --filter @vanstack/frontend-app --filter @vanstack/frontend-admin --filter @vanstack/desktop dev",
+    "start:desktop": "pnpm build && pnpm --filter @vanstack/desktop start",
     "build": "pnpm --filter @vanstack/shared --filter @vanstack/xml --filter @vanstack/lowcode-runtime build && pnpm -r --filter @vanstack/backend --filter @vanstack/frontend-app --filter @vanstack/frontend-admin build",
     "build:packages": "pnpm --filter @vanstack/shared --filter @vanstack/xml --filter @vanstack/lowcode-runtime build",
     "lint": "pnpm -r --if-present lint",
@@ -21,6 +23,6 @@
     "node": ">=20"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["better-sqlite3", "bcrypt", "esbuild"]
+    "onlyBuiltDependencies": ["better-sqlite3", "bcrypt", "esbuild", "electron"]
   }
 }

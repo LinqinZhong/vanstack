@@ -4,19 +4,28 @@ import { useTranslation } from 'react-i18next';
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Button, Layout, Menu, Spin, Tag, Typography } from 'antd';
 import type { AuthSessionDto, AuthUserDto } from '@vanstack/shared';
-import { api } from './api';
-import { LanguageSwitch } from './LanguageSwitch';
-import { LoginPage } from './LoginPage';
-import { PreviewPage } from './PreviewPage';
-import { ProjectEditorPage } from './ProjectEditorPage';
-import { ProjectHomePage } from './ProjectHomePage';
-import { clearAccessToken, getAccessToken, setAccessToken, UNAUTHORIZED_EVENT } from './session';
+import { api } from './apis/api';
+import { LanguageSwitch } from './components/LanguageSwitch';
+import { LoginPage } from './views/LoginPage';
+import { PreviewPage } from './views/PreviewPage';
+import { ProjectEditorPage } from './views/ProjectEditorPage';
+import { ProjectHomePage } from './views/ProjectHomePage';
+import { h5Url, localeFromI18n } from './utils/h5';
+import { loadServerConfig } from './apis/serverConfig';
+import { clearAccessToken, getAccessToken, setAccessToken, UNAUTHORIZED_EVENT } from './apis/session';
 
 function isEditableElement(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest('input, textarea, [contenteditable="true"]'));
 }
 
+function isExplicitDragHandle(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest('[draggable="true"]'));
+}
+
 function preventNonInputSelection(event: Event) {
+  if (event.type === 'dragstart' && isExplicitDragHandle(event.target)) {
+    return;
+  }
   if (!isEditableElement(event.target)) {
     event.preventDefault();
   }
@@ -48,20 +57,39 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const token = getAccessToken();
-    if (!token) {
-      setBooting(false);
-      return;
-    }
+    let cancelled = false;
+    void loadServerConfig().then(() => {
+      if (cancelled) {
+        return;
+      }
+      const token = getAccessToken();
+      if (!token) {
+        setBooting(false);
+        return;
+      }
 
-    void api
-      .me()
-      .then((profile) => setUser(profile))
-      .catch(() => {
-        clearAccessToken();
-        setUser(null);
-      })
-      .finally(() => setBooting(false));
+      void api
+        .me()
+        .then((profile) => {
+          if (!cancelled) {
+            setUser(profile);
+          }
+        })
+        .catch(() => {
+          clearAccessToken();
+          if (!cancelled) {
+            setUser(null);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setBooting(false);
+          }
+        });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function handleLoggedIn(session: AuthSessionDto) {
@@ -102,7 +130,7 @@ function BootScreen() {
 }
 
 function Workspace({ user, onLogout }: { user: AuthUserDto; onLogout: () => void }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const location = useLocation();
   const [online, setOnline] = useState(false);
 
@@ -137,7 +165,10 @@ function Workspace({ user, onLogout }: { user: AuthUserDto; onLogout: () => void
               {
                 key: 'app',
                 label: (
-                  <a href="http://127.0.0.1:5173" rel="noreferrer">
+                  <a
+                    href={h5Url({ lang: localeFromI18n(i18n.resolvedLanguage ?? i18n.language) })}
+                    rel="noreferrer"
+                  >
                     {t('nav.app')}
                   </a>
                 ),

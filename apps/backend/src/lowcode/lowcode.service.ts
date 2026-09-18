@@ -8,12 +8,20 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import type {
   ProjectDto,
+  ProjectLangCatalogDto,
+  ProjectLangDto,
+  ProjectLangEntryDto,
+  ProjectLangGroupDto,
   ProjectPageDto,
   ProjectPageVersionDto,
+  RuntimeLangDto,
+  RuntimeProjectDto,
 } from '@vanstack/shared';
-import { EMPTY_PAGE_XML, parsePageXml, XmlParseError } from '@vanstack/xml';
-import { QueryFailedError, Repository } from 'typeorm';
+import { EMPTY_PAGE_XML, isI18nKey, parsePageXml, XmlParseError } from '@vanstack/xml';
+import { DataSource, In, QueryFailedError, Repository } from 'typeorm';
 import { OssService } from '../oss/oss.service';
+import { ProjectLangValue } from './entities/project-lang-value.entity';
+import { ProjectLang } from './entities/project-lang.entity';
 import { ProjectPageVersion } from './entities/project-page-version.entity';
 import { ProjectPage } from './entities/project-page.entity';
 import { Project } from './entities/project.entity';
@@ -30,6 +38,22 @@ function toIso(value: Date): string {
   return value.toISOString();
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function nextPlaceholderEntryKey(used: string[]) {
+  const taken = new Set(used);
+  let n = 1;
+  while (taken.has(`key${n}`)) {
+    n += 1;
+  }
+  return `key${n}`;
+}
+
 @Injectable()
 export class LowcodeService {
   private readonly logger = new Logger(LowcodeService.name);
@@ -38,6 +62,9 @@ export class LowcodeService {
     @InjectRepository(Project) private readonly projects: Repository<Project>,
     @InjectRepository(ProjectPage) private readonly pages: Repository<ProjectPage>,
     @InjectRepository(ProjectPageVersion) private readonly versions: Repository<ProjectPageVersion>,
+    @InjectRepository(ProjectLang) private readonly langs: Repository<ProjectLang>,
+    @InjectRepository(ProjectLangValue) private readonly langValues: Repository<ProjectLangValue>,
+    private readonly dataSource: DataSource,
     private readonly oss: OssService,
   ) {}
 
@@ -48,6 +75,58 @@ export class LowcodeService {
 
   async getProject(id: string): Promise<ProjectDto> {
     return this.toProjectDto(await this.requireProject(id));
+  }
+
+  async getRuntimeProject(projectKey: string): Promise<RuntimeProjectDto> {
+    if (!/^[a-z][a-z0-9-]{0,63}$/.test(projectKey)) {
+      throw new NotFoundException();
+    }
+    const project = await this.projects.findOne({ where: { key: projectKey } });
+    if (!project) {
+      throw new NotFoundException();
+    }
+    const pages = await this.pages.find({
+      where: { projectId: project.id },
+      order: { createdAt: 'ASC' },
+    });
+    const langRows = await this.langs.find({
+      where: { projectId: project.id },
+      order: { sortOrder: 'ASC' },
+    });
+    const currentIds = pages
+      .map((page) => page.currentVersionId)
+      .filter((id): id is string => Boolean(id));
+    const currentVersions =
+      currentIds.length > 0 ? await this.versions.find({ where: { id: In(currentIds) } }) : [];
+    const versionById = new Map(currentVersions.map((version) => [version.id, version]));
+    const runtimePages = [];
+    for (const page of pages) {
+      if (!page.currentVersionId || !page.xmlKey) {
+        continue;
+      }
+      const version = versionById.get(page.currentVersionId);
+      const langs: RuntimeLangDto[] = version
+        ? langRows.map((lang) => ({
+            key: lang.key,
+            name: lang.name,
+            dir: lang.dir === 'rtl' ? 'rtl' : 'ltr',
+            jsonUrl: this.oss.getPublicUrl(
+              this.langObjectKey(project.key, page.key, version.versionNo, lang.key),
+            ),
+          }))
+        : [];
+      runtimePages.push({
+        name: page.name,
+        key: page.key,
+        xmlUrl: this.oss.getPublicUrl(page.xmlKey),
+        langs,
+      });
+    }
+    return {
+      name: project.name,
+      key: project.key,
+      pages: runtimePages,
+    };
   }
 
   async createProject(input: { name: string; key: string; description?: string }): Promise<ProjectDto> {
@@ -92,12 +171,82 @@ export class LowcodeService {
     if (!project) {
       throw new NotFoundException();
     }
+    const langKeys = (await this.langs.find({ where: { projectId: project.id } })).map((row) => row.key);
     const keys = (project.pages ?? []).flatMap((page) => [
       page.xmlKey,
-      ...(page.versions ?? []).map((version) => version.xmlKey),
+      ...(page.versions ?? []).flatMap((version) => [
+        version.xmlKey,
+        ...langKeys.map((langKey) => this.langObjectKey(project.key, page.key, version.versionNo, langKey)),
+      ]),
     ]).filter(Boolean);
     await this.projects.remove(project);
     await this.deleteOssKeys([...new Set(keys)]);
+  }
+
+  async getLangs(projectId: string): Promise<ProjectLangCatalogDto> {
+    await this.requireProject(projectId);
+    return this.readLangCatalog(projectId);
+  }
+
+  async putLangs(projectId: string, input: { langs: unknown[]; groups: unknown[] }): Promise<ProjectLangCatalogDto> {
+    await this.requireProject(projectId);
+    const catalog = this.parseLangCatalog(input);
+    const langRows = catalog.langs.map((lang, index) =>
+      this.langs.create({
+        projectId,
+        key: lang.key,
+        name: lang.name,
+        dir: lang.dir,
+        sortOrder: index,
+      }),
+    );
+    const valueRows: ProjectLangValue[] = [];
+    for (const [groupIndex, group] of catalog.groups.entries()) {
+      const filled = group.entries.flatMap((entry, entryIndex) => {
+        const cells = Object.entries(entry.values)
+          .filter(([, text]) => text)
+          .map(([langKey, value]) =>
+            this.langValues.create({
+              projectId,
+              groupKey: group.key,
+              entryKey: entry.key,
+              langKey,
+              value,
+              sortOrder: groupIndex * 10000 + entryIndex,
+            }),
+          );
+        return cells;
+      });
+      if (filled.length > 0) {
+        valueRows.push(...filled);
+        continue;
+      }
+      if (catalog.langs.length === 0) {
+        continue;
+      }
+      const entryKey = group.entries[0]?.key ?? nextPlaceholderEntryKey([]);
+      valueRows.push(
+        this.langValues.create({
+          projectId,
+          groupKey: group.key,
+          entryKey,
+          langKey: catalog.langs[0].key,
+          value: '',
+          sortOrder: groupIndex * 10000,
+        }),
+      );
+    }
+    await this.dataSource.transaction(async (em) => {
+      await em.delete(ProjectLangValue, { projectId });
+      await em.delete(ProjectLang, { projectId });
+      if (langRows.length > 0) {
+        await em.save(ProjectLang, langRows);
+      }
+      if (valueRows.length > 0) {
+        await em.save(ProjectLangValue, valueRows);
+      }
+    });
+    return this.readLangCatalog(projectId);
   }
 
   async listPages(projectId: string): Promise<ProjectPageDto[]> {
@@ -184,7 +333,15 @@ export class LowcodeService {
     if (!page) {
       throw new NotFoundException();
     }
-    const keys = [page.xmlKey, ...(page.versions ?? []).map((version) => version.xmlKey)].filter(Boolean);
+    const project = await this.requireProject(projectId);
+    const langKeys = (await this.langs.find({ where: { projectId } })).map((row) => row.key);
+    const keys = [
+      page.xmlKey,
+      ...(page.versions ?? []).flatMap((version) => [
+        version.xmlKey,
+        ...langKeys.map((langKey) => this.langObjectKey(project.key, page.key, version.versionNo, langKey)),
+      ]),
+    ].filter(Boolean);
     await this.pages.remove(page);
     await this.deleteOssKeys([...new Set(keys)]);
   }
@@ -273,13 +430,14 @@ export class LowcodeService {
   }
 
   async publishVersion(projectId: string, pageId: string, versionId: string): Promise<ProjectPageVersionDto> {
+    const project = await this.requireProject(projectId);
     const page = await this.requirePage(projectId, pageId);
     const version = await this.requireVersion(projectId, pageId, versionId);
-    if (version.status !== 'draft') {
-      throw new ConflictException('Only draft versions can be published');
+    if (version.status === 'draft') {
+      version.status = 'published';
+      await this.versions.save(version);
     }
-    version.status = 'published';
-    await this.versions.save(version);
+    await this.writeLangSnapshots(project, page, version);
     return this.toVersionDto(version, page.currentVersionId, await this.readXml(version.xmlKey));
   }
 
@@ -289,9 +447,14 @@ export class LowcodeService {
     if (page.currentVersionId === version.id) {
       throw new ConflictException('Cannot delete the version in use');
     }
+    const project = await this.requireProject(projectId);
     const xmlKey = version.xmlKey;
+    const langKeys = (await this.langs.find({ where: { projectId } })).map((row) => row.key);
+    const langObjects = langKeys.map((langKey) =>
+      this.langObjectKey(project.key, page.key, version.versionNo, langKey),
+    );
     await this.versions.remove(version);
-    await this.deleteOssKeys([xmlKey]);
+    await this.deleteOssKeys([xmlKey, ...langObjects]);
   }
 
   async activateVersion(projectId: string, pageId: string, versionId: string): Promise<ProjectPageDto> {
@@ -306,6 +469,155 @@ export class LowcodeService {
     await this.pages.save(page);
     const xml = await this.readXml(page.xmlKey);
     return this.toPageDto(page, xml);
+  }
+
+  private async readLangCatalog(projectId: string): Promise<ProjectLangCatalogDto> {
+    const langRows = await this.langs.find({
+      where: { projectId },
+      order: { sortOrder: 'ASC' },
+    });
+    const valueRows = await this.langValues.find({
+      where: { projectId },
+      order: { sortOrder: 'ASC' },
+    });
+    const langs: ProjectLangDto[] = langRows.map((row) => ({
+      key: row.key,
+      name: row.name,
+      dir: row.dir === 'rtl' ? 'rtl' : 'ltr',
+    }));
+    const groups: ProjectLangGroupDto[] = [];
+    const groupMap = new Map<string, ProjectLangGroupDto>();
+    for (const row of valueRows) {
+      let group = groupMap.get(row.groupKey);
+      if (!group) {
+        group = { key: row.groupKey, entries: [] };
+        groupMap.set(row.groupKey, group);
+        groups.push(group);
+      }
+      let entry = group.entries.find((item) => item.key === row.entryKey);
+      if (!entry) {
+        entry = { key: row.entryKey, values: {} };
+        group.entries.push(entry);
+      }
+      if (row.value) {
+        entry.values[row.langKey] = row.value;
+      }
+    }
+    return { langs, groups };
+  }
+
+  private parseLangCatalog(input: { langs: unknown[]; groups: unknown[] }): ProjectLangCatalogDto {
+    const langs: ProjectLangDto[] = [];
+    const langKeys = new Set<string>();
+    for (const item of input.langs) {
+      const row = asRecord(item);
+      if (!row) {
+        throw new BadRequestException('Invalid language');
+      }
+      const key = String(row.key ?? '').trim();
+      if (!isI18nKey(key)) {
+        throw new BadRequestException('Invalid language key');
+      }
+      if (langKeys.has(key)) {
+        throw new ConflictException('key already exists');
+      }
+      langKeys.add(key);
+      const dirRaw = String(row.dir ?? 'ltr').trim();
+      if (dirRaw !== 'ltr' && dirRaw !== 'rtl') {
+        throw new BadRequestException('Invalid language dir');
+      }
+      langs.push({
+        key,
+        name: String(row.name ?? '').trim(),
+        dir: dirRaw,
+      });
+    }
+
+    const groups: ProjectLangGroupDto[] = [];
+    const groupKeys = new Set<string>();
+    for (const item of input.groups) {
+      const row = asRecord(item);
+      if (!row) {
+        throw new BadRequestException('Invalid group');
+      }
+      const groupKey = String(row.key ?? '').trim();
+      if (!isI18nKey(groupKey)) {
+        throw new BadRequestException('Invalid group key');
+      }
+      if (groupKeys.has(groupKey)) {
+        throw new ConflictException('key already exists');
+      }
+      groupKeys.add(groupKey);
+      const entries: ProjectLangEntryDto[] = [];
+      const entryKeys = new Set<string>();
+      const rawEntries = Array.isArray(row.entries) ? row.entries : [];
+      for (const entryItem of rawEntries) {
+        const entryRow = asRecord(entryItem);
+        if (!entryRow) {
+          throw new BadRequestException('Invalid entry');
+        }
+        const entryKey = String(entryRow.key ?? '').trim();
+        if (!isI18nKey(entryKey)) {
+          throw new BadRequestException('Invalid entry key');
+        }
+        if (entryKeys.has(entryKey)) {
+          throw new ConflictException('key already exists');
+        }
+        entryKeys.add(entryKey);
+        const values: Record<string, string> = {};
+        const rawValues = asRecord(entryRow.values) ?? {};
+        for (const [langKey, text] of Object.entries(rawValues)) {
+          if (!isI18nKey(langKey) || !langKeys.has(langKey)) {
+            continue;
+          }
+          if (typeof text !== 'string') {
+            continue;
+          }
+          const trimmed = text.trim();
+          if (!trimmed) {
+            continue;
+          }
+          values[langKey] = trimmed;
+        }
+        entries.push({ key: entryKey, values });
+      }
+      groups.push({ key: groupKey, entries });
+    }
+
+    return { langs, groups };
+  }
+
+  private async writeLangSnapshots(project: Project, page: ProjectPage, version: ProjectPageVersion) {
+    const catalog = await this.readLangCatalog(project.id);
+    if (catalog.langs.length === 0) {
+      return;
+    }
+    for (const lang of catalog.langs) {
+      const values: Record<string, string> = {};
+      for (const group of catalog.groups) {
+        for (const entry of group.entries) {
+          const text = entry.values[lang.key];
+          if (text) {
+            values[`${group.key}.${entry.key}`] = text;
+          }
+        }
+      }
+      const body = JSON.stringify({
+        key: lang.key,
+        name: lang.name,
+        dir: lang.dir,
+        values,
+      });
+      await this.oss.putObject(
+        this.langObjectKey(project.key, page.key, version.versionNo, lang.key),
+        Buffer.from(body, 'utf8'),
+        'application/json',
+      );
+    }
+  }
+
+  private langObjectKey(projectKey: string, pageKey: string, versionNo: number, langKey: string) {
+    return `lowcode/${projectKey}/lang/${pageKey}-v${versionNo}-${langKey}.json`;
   }
 
   private async requireProject(id: string): Promise<Project> {

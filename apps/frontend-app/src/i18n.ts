@@ -5,21 +5,24 @@ import { DEFAULT_LOCALE } from '@vanstack/shared';
 import en from './locales/en.json';
 import zh from './locales/zh.json';
 
-void i18n
-  .use(LanguageDetector)
-  .use(initReactI18next)
-  .init({
-    resources: {
-      zh: { translation: zh },
-      en: { translation: en },
-    },
-    fallbackLng: DEFAULT_LOCALE,
-    supportedLngs: ['zh', 'en'],
-    interpolation: { escapeValue: false },
-    detection: {
-      order: ['localStorage', 'navigator'],
-      caches: ['localStorage'],
-    },
-  });
+i18n.use(LanguageDetector).use(initReactI18next);
+i18n.on('languageChanged', (lng) => {
+  document.documentElement.lang = lng.split('-')[0];
+});
+
+void i18n.init({
+  resources: {
+    zh: { translation: zh },
+    en: { translation: en },
+  },
+  fallbackLng: DEFAULT_LOCALE,
+  supportedLngs: ['zh', 'en'],
+  interpolation: { escapeValue: false },
+  detection: {
+    order: ['querystring', 'navigator'],
+    lookupQuerystring: 'lang',
+    caches: [],
+  },
+});
 
 export default i18n;

@@ -8,9 +8,16 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
 } from '@nestjs/common';
-import type { ProjectDto, ProjectPageDto, ProjectPageVersionDto } from '@vanstack/shared';
+import type {
+  ProjectDto,
+  ProjectLangCatalogDto,
+  ProjectPageDto,
+  ProjectPageVersionDto,
+} from '@vanstack/shared';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
+import { PutProjectLangsDto } from './dto/lang.dto';
 import { CreateProjectPageDto, UpdateProjectPageDto } from './dto/page.dto';
 import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
 import { ActivatePageVersionDto, CreatePageVersionDto, UpdatePageVersionDto } from './dto/version.dto';
@@ -48,6 +55,19 @@ export class LowcodeController {
   @HttpCode(204)
   deleteProject(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.lowcode.deleteProject(id);
+  }
+
+  @Get(':id/langs')
+  getLangs(@Param('id', ParseUUIDPipe) id: string): Promise<ProjectLangCatalogDto> {
+    return this.lowcode.getLangs(id);
+  }
+
+  @Put(':id/langs')
+  putLangs(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PutProjectLangsDto,
+  ): Promise<ProjectLangCatalogDto> {
+    return this.lowcode.putLangs(id, dto);
   }
 
   @Get(':id/pages')

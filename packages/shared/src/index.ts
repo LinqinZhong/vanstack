@@ -109,3 +109,46 @@ export interface UpdateProjectPageVersionInput {
 export interface ActivateProjectPageVersionInput {
   versionId: string;
 }
+
+export type ProjectLangDir = 'ltr' | 'rtl';
+
+export interface ProjectLangDto {
+  key: string;
+  name: string;
+  dir: ProjectLangDir;
+}
+
+export interface ProjectLangEntryDto {
+  key: string;
+  values: Record<string, string>;
+}
+
+export interface ProjectLangGroupDto {
+  key: string;
+  entries: ProjectLangEntryDto[];
+}
+
+export interface ProjectLangCatalogDto {
+  langs: ProjectLangDto[];
+  groups: ProjectLangGroupDto[];
+}
+
+export interface RuntimeLangDto {
+  key: string;
+  name: string;
+  dir: ProjectLangDir;
+  jsonUrl: string;
+}
+
+export interface RuntimePageDto {
+  name: string;
+  key: string;
+  xmlUrl: string;
+  langs: RuntimeLangDto[];
+}
+
+export interface RuntimeProjectDto {
+  name: string;
+  key: string;
+  pages: RuntimePageDto[];
+}

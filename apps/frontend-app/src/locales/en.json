@@ -5,6 +5,9 @@
     "language": "Language"
   },
   "runtime": {
-    "hint": "Standalone runtime preview (flex + text + button)"
+    "hint": "Standalone runtime preview (swiper + flex + text + button)",
+    "loading": "Loading…",
+    "missing": "This project is missing or was deleted",
+    "empty": "No pages to preview"
   }
 }

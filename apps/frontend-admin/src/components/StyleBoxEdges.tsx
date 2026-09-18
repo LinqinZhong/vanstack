@@ -1,0 +1,347 @@
+import { InputNumber, Select } from 'antd';
+import { useTranslation } from 'react-i18next';
+import type { CSSProperties } from 'react';
+import {
+  boxLengthsEqual,
+  compactBoxLength,
+  type BoxLength,
+  type BoxLengthMode,
+} from '@vanstack/xml';
+
+export type BoxQuad = {
+  top?: number;
+  right?: number;
+  bottom?: number;
+  left?: number;
+};
+
+export type LengthQuad = {
+  top?: BoxLength;
+  right?: BoxLength;
+  bottom?: BoxLength;
+  left?: BoxLength;
+};
+
+export function pxFromLength(length?: BoxLength): number | undefined {
+  return length && length.mode !== 'auto' ? length.value : undefined;
+}
+
+export function pxLength(value?: number): BoxLength | undefined {
+  return value == null ? undefined : { mode: 'px', value };
+}
+
+function asLength(value?: BoxLength | number): BoxLength | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  return typeof value === 'number' ? { mode: 'px', value } : value;
+}
+
+function toLengthQuad(values: LengthQuad | BoxQuad): LengthQuad {
+  return {
+    top: asLength(values.top as BoxLength | number | undefined),
+    right: asLength(values.right as BoxLength | number | undefined),
+    bottom: asLength(values.bottom as BoxLength | number | undefined),
+    left: asLength(values.left as BoxLength | number | undefined),
+  };
+}
+
+function unifiedLength(values: LengthQuad) {
+  const list = [values.top, values.right, values.bottom, values.left];
+  const first = list[0];
+  if (first == null || list.some((value) => !boxLengthsEqual(value, first))) {
+    return undefined;
+  }
+  return first;
+}
+
+function pairedLength(a?: BoxLength, b?: BoxLength) {
+  return a != null && boxLengthsEqual(a, b) ? a : undefined;
+}
+
+function asLengthAmount(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function makeLength(mode: BoxLengthMode, value?: unknown): BoxLength | undefined {
+  if (mode === 'auto') {
+    return { mode: 'auto' };
+  }
+  const amount = asLengthAmount(value);
+  if (amount == null) {
+    return undefined;
+  }
+  return { mode, value: amount };
+}
+
+function EdgeRow({
+  label,
+  value,
+  disabled,
+  min,
+  max,
+  units,
+  popupContainer,
+  onChange,
+}: {
+  label: string;
+  value?: BoxLength;
+  disabled?: boolean;
+  min?: number;
+  max?: number;
+  units: readonly BoxLengthMode[];
+  popupContainer?: () => HTMLElement;
+  onChange: (value: BoxLength | undefined) => void;
+}) {
+  const showUnits = units.length > 1;
+  const mode: BoxLengthMode = value?.mode ?? 'px';
+  const numeric = value && value.mode !== 'auto' ? value.value : undefined;
+  const auto = mode === 'auto';
+
+  return (
+    <div className="style-box-row">
+      <span className="style-box-row-label">{label}</span>
+      <InputNumber
+        size="small"
+        disabled={disabled || auto}
+        min={min}
+        max={max}
+        changeOnBlur={false}
+        value={auto ? undefined : numeric}
+        onChange={(next) => onChange(makeLength(auto ? 'px' : mode, next))}
+        onBlur={(event) => {
+          if (auto) {
+            return;
+          }
+          const raw = event.target instanceof HTMLInputElement ? event.target.value : '';
+          onChange(makeLength(mode, raw.trim() === '' ? undefined : raw));
+        }}
+      />
+      {showUnits ? (
+        <Select
+          size="small"
+          disabled={disabled}
+          value={value ? mode : 'px'}
+          popupMatchSelectWidth={false}
+          getPopupContainer={popupContainer ?? (() => document.body)}
+          onMouseDown={(event) => event.stopPropagation()}
+          onChange={(next: BoxLengthMode) => {
+            if (next === 'auto') {
+              onChange({ mode: 'auto' });
+              return;
+            }
+            onChange(makeLength(next, numeric ?? 0));
+          }}
+          options={units.map((unit) => ({ value: unit, label: unit }))}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function formatPreviewValue(value?: BoxLength | number) {
+  const length = asLength(value);
+  if (!length || length.mode === 'auto') {
+    return 0;
+  }
+  return length.value;
+}
+
+function BoxPreview({
+  values,
+  kind,
+  stroke,
+}: {
+  values: LengthQuad;
+  kind: 'edges' | 'corners';
+  stroke?: { color?: string; style?: string };
+}) {
+  const top = formatPreviewValue(values.top);
+  const right = formatPreviewValue(values.right);
+  const bottom = formatPreviewValue(values.bottom);
+  const left = formatPreviewValue(values.left);
+  const style: CSSProperties = {};
+
+  if (kind === 'corners') {
+    const cap = (value: number) => Math.min(value, 24);
+    style.borderRadius = `${cap(top)}px ${cap(right)}px ${cap(bottom)}px ${cap(left)}px`;
+  }
+
+  if (stroke) {
+    const color = stroke.color || undefined;
+    const borderStyle = stroke.style || 'solid';
+    const widths = {
+      top: Math.min(top, 14),
+      right: Math.min(right, 14),
+      bottom: Math.min(bottom, 14),
+      left: Math.min(left, 14),
+    };
+    const hasWidth = widths.top || widths.right || widths.bottom || widths.left;
+    if (hasWidth) {
+      style.borderTopWidth = widths.top;
+      style.borderRightWidth = widths.right;
+      style.borderBottomWidth = widths.bottom;
+      style.borderLeftWidth = widths.left;
+      style.borderStyle = borderStyle;
+    }
+    if (color) {
+      style.borderColor = color;
+      style.color = color;
+    }
+  }
+
+  return (
+    <div
+      className={[
+        'style-box-preview',
+        kind === 'corners' ? 'is-corners' : '',
+        stroke ? 'is-border' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      style={style}
+      aria-hidden
+    >
+      {kind === 'edges' && !stroke ? (
+        <>
+          <span className="style-box-preview-top">{top}</span>
+          <span className="style-box-preview-right">{right}</span>
+          <span className="style-box-preview-bottom">{bottom}</span>
+          <span className="style-box-preview-left">{left}</span>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+export function StyleBoxEdges({
+  values,
+  kind = 'edges',
+  disabled,
+  min,
+  max,
+  stroke,
+  showPreview = true,
+  units = ['px'],
+  lengthKind = 'margin',
+  popupContainer,
+  onChange,
+}: {
+  resetKey?: string;
+  values: LengthQuad | BoxQuad;
+  kind?: 'edges' | 'corners';
+  disabled?: boolean;
+  min?: number;
+  max?: number;
+  stroke?: { color?: string; style?: string };
+  showPreview?: boolean;
+  units?: readonly BoxLengthMode[];
+  lengthKind?: 'margin' | 'padding' | 'inset';
+  popupContainer?: () => HTMLElement;
+  onChange: (values: LengthQuad) => void;
+}) {
+  const { t } = useTranslation();
+  const current = toLengthQuad(values);
+  const numericOnly = units.length <= 1 && units[0] === 'px';
+
+  function emit(next: LengthQuad) {
+    const compact = {
+      top: compactBoxLength(next.top, lengthKind),
+      right: compactBoxLength(next.right, lengthKind),
+      bottom: compactBoxLength(next.bottom, lengthKind),
+      left: compactBoxLength(next.left, lengthKind),
+    };
+    onChange(compact);
+  }
+
+  function writeAll(value: BoxLength | undefined) {
+    emit({ top: value, right: value, bottom: value, left: value });
+  }
+
+  function writeHorizontal(value: BoxLength | undefined) {
+    emit({ ...current, left: value, right: value });
+  }
+
+  function writeVertical(value: BoxLength | undefined) {
+    emit({ ...current, top: value, bottom: value });
+  }
+
+  const labels =
+    kind === 'corners'
+      ? {
+          all: t('lowcode.styleEdgeAll'),
+          horizontal: t('lowcode.styleEdgeHorizontal'),
+          vertical: t('lowcode.styleEdgeVertical'),
+          top: t('lowcode.styleCornerTopLeft'),
+          right: t('lowcode.styleCornerTopRight'),
+          bottom: t('lowcode.styleCornerBottomRight'),
+          left: t('lowcode.styleCornerBottomLeft'),
+        }
+      : {
+          all: t('lowcode.styleEdgeAll'),
+          horizontal: t('lowcode.styleEdgeHorizontal'),
+          vertical: t('lowcode.styleEdgeVertical'),
+          top: t('lowcode.styleEdgeTop'),
+          left: t('lowcode.styleEdgeLeft'),
+          bottom: t('lowcode.styleEdgeBottom'),
+          right: t('lowcode.styleEdgeRight'),
+        };
+
+  const rows: Array<{
+    key: string;
+    label: string;
+    value?: BoxLength;
+    onChange: (value: BoxLength | undefined) => void;
+  }> = [
+    { key: 'all', label: labels.all, value: unifiedLength(current), onChange: writeAll },
+    {
+      key: 'vertical',
+      label: labels.vertical,
+      value: pairedLength(current.top, current.bottom),
+      onChange: writeVertical,
+    },
+    {
+      key: 'horizontal',
+      label: labels.horizontal,
+      value: pairedLength(current.left, current.right),
+      onChange: writeHorizontal,
+    },
+    { key: 'top', label: labels.top, value: current.top, onChange: (value) => emit({ ...current, top: value }) },
+    { key: 'left', label: labels.left, value: current.left, onChange: (value) => emit({ ...current, left: value }) },
+    {
+      key: 'bottom',
+      label: labels.bottom,
+      value: current.bottom,
+      onChange: (value) => emit({ ...current, bottom: value }),
+    },
+    { key: 'right', label: labels.right, value: current.right, onChange: (value) => emit({ ...current, right: value }) },
+  ];
+
+  return (
+    <div className={`style-box-edges is-rows${numericOnly ? ' is-px-only' : ''}`}>
+      {showPreview ? <BoxPreview values={current} kind={kind} stroke={stroke} /> : null}
+      {rows.map((row) => (
+        <EdgeRow
+          key={row.key}
+          label={row.label}
+          value={row.value}
+          disabled={disabled}
+          min={min}
+          max={max}
+          units={units}
+          popupContainer={popupContainer}
+          onChange={row.onChange}
+        />
+      ))}
+    </div>
+  );
+}

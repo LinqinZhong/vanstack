@@ -3,6 +3,8 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  PutBucketCorsCommand,
+  PutBucketPolicyCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -38,6 +40,43 @@ export class S3OssStorage extends OssStorage {
     } catch {
       await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
     }
+    await this.client
+      .send(
+        new PutBucketCorsCommand({
+          Bucket: this.bucket,
+          CORSConfiguration: {
+            CORSRules: [
+              {
+                AllowedHeaders: ['*'],
+                AllowedMethods: ['GET', 'HEAD'],
+                AllowedOrigins: ['*'],
+                ExposeHeaders: ['ETag', 'Content-Type'],
+                MaxAgeSeconds: 3600,
+              },
+            ],
+          },
+        }),
+      )
+      .catch(() => undefined);
+    await this.client
+      .send(
+        new PutBucketPolicyCommand({
+          Bucket: this.bucket,
+          Policy: JSON.stringify({
+            Version: '2012-10-17',
+            Statement: [
+              {
+                Sid: 'PublicReadLowcodeXml',
+                Effect: 'Allow',
+                Principal: { AWS: ['*'] },
+                Action: ['s3:GetObject'],
+                Resource: [`arn:aws:s3:::${this.bucket}/lowcode/*`],
+              },
+            ],
+          }),
+        }),
+      )
+      .catch(() => undefined);
   }
 
   async putObject(key: string, body: Buffer, contentType: string): Promise<StoredObject> {

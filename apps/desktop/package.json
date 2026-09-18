@@ -1,0 +1,20 @@
+{
+  "name": "@vanstack/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsc && wait-on http://127.0.0.1:5174 && electron . --dev",
+    "start": "tsc && electron .",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "electron": "^38.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.1",
+    "typescript": "^5.9.2",
+    "wait-on": "^8.0.5"
+  }
+}

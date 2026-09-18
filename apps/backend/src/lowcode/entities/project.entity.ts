@@ -6,6 +6,8 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { ProjectLangValue } from './project-lang-value.entity';
+import { ProjectLang } from './project-lang.entity';
 import { ProjectPage } from './project-page.entity';
 
 @Entity({ name: 'project' })
@@ -24,6 +26,12 @@ export class Project {
 
   @OneToMany(() => ProjectPage, (page) => page.project, { cascade: true })
   pages: ProjectPage[];
+
+  @OneToMany(() => ProjectLang, (lang) => lang.project, { cascade: true })
+  langs: ProjectLang[];
+
+  @OneToMany(() => ProjectLangValue, (value) => value.project, { cascade: true })
+  langValues: ProjectLangValue[];
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

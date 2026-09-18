@@ -15,6 +15,7 @@ apps/backend/uploads
 .vscode/*
 !.vscode/extensions.json
 minio/*.exe
+minio/data
 .venv
 __pycache__
 *.py[cod]

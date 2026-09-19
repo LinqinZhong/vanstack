@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type {
+  ProjectAssetFileDto,
+  ProjectAssetGroupDto,
   ProjectDto,
   ProjectLangCatalogDto,
   ProjectLangDto,
@@ -52,6 +54,14 @@ function nextPlaceholderEntryKey(used: string[]) {
     n += 1;
   }
   return `key${n}`;
+}
+
+function safeDecode(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 @Injectable()
@@ -180,7 +190,8 @@ export class LowcodeService {
       ]),
     ]).filter(Boolean);
     await this.projects.remove(project);
-    await this.deleteOssKeys([...new Set(keys)]);
+    const assetKeys = (await this.oss.listObjects(this.assetRoot(project.key))).map((item) => item.key);
+    await this.deleteOssKeys([...new Set([...keys, ...assetKeys])]);
   }
 
   async getLangs(projectId: string): Promise<ProjectLangCatalogDto> {
@@ -457,6 +468,110 @@ export class LowcodeService {
     await this.deleteOssKeys([xmlKey, ...langObjects]);
   }
 
+  async listAssetGroups(projectId: string): Promise<ProjectAssetGroupDto[]> {
+    const project = await this.requireProject(projectId);
+    const prefix = this.assetRoot(project.key);
+    const names = new Set<string>();
+    for (const item of await this.oss.listObjects(prefix)) {
+      const rest = item.key.slice(prefix.length);
+      const group = rest.split('/')[0];
+      if (group) {
+        names.add(group);
+      }
+    }
+    return [...names].sort((a, b) => a.localeCompare(b)).map((name) => ({ name }));
+  }
+
+  async createAssetGroup(projectId: string, name: string): Promise<ProjectAssetGroupDto> {
+    const project = await this.requireProject(projectId);
+    const group = this.assertAssetGroupName(name);
+    const existing = await this.listAssetGroups(projectId);
+    if (existing.some((item) => item.name === group)) {
+      throw new ConflictException('group already exists');
+    }
+    await this.oss.putObject(this.assetKeepKey(project.key, group), Buffer.alloc(0), 'application/octet-stream');
+    return { name: group };
+  }
+
+  async renameAssetGroup(projectId: string, fromName: string, toName: string): Promise<ProjectAssetGroupDto> {
+    const project = await this.requireProject(projectId);
+    const from = this.assertAssetGroupName(fromName);
+    const to = this.assertAssetGroupName(toName);
+    if (from === to) {
+      return { name: to };
+    }
+    const groups = await this.listAssetGroups(projectId);
+    if (!groups.some((item) => item.name === from)) {
+      throw new NotFoundException();
+    }
+    if (groups.some((item) => item.name === to)) {
+      throw new ConflictException('group already exists');
+    }
+    const fromPrefix = this.assetGroupPrefix(project.key, from);
+    const objects = await this.oss.listObjects(fromPrefix);
+    for (const item of objects) {
+      const nextKey = this.assetGroupPrefix(project.key, to) + item.key.slice(fromPrefix.length);
+      await this.oss.copyObject(item.key, nextKey);
+    }
+    await this.deleteOssKeys(objects.map((item) => item.key));
+    return { name: to };
+  }
+
+  async deleteAssetGroup(projectId: string, name: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    const group = this.assertAssetGroupName(name);
+    const objects = await this.oss.listObjects(this.assetGroupPrefix(project.key, group));
+    await this.deleteOssKeys(objects.map((item) => item.key));
+  }
+
+  async listAssetFiles(projectId: string, name: string): Promise<ProjectAssetFileDto[]> {
+    const project = await this.requireProject(projectId);
+    const group = this.assertAssetGroupName(name);
+    const prefix = this.assetGroupPrefix(project.key, group);
+    return (await this.oss.listObjects(prefix))
+      .filter((item) => {
+        const fileName = item.key.slice(prefix.length);
+        return fileName && !fileName.includes('/') && fileName !== '.keep';
+      })
+      .map((item) => ({
+        name: item.key.slice(prefix.length),
+        key: item.key,
+        url: this.oss.getPublicUrl(item.key),
+        size: item.size,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async uploadAssetFile(
+    projectId: string,
+    name: string,
+    file: Express.Multer.File,
+    displayName?: string,
+  ): Promise<ProjectAssetFileDto> {
+    const project = await this.requireProject(projectId);
+    const group = this.assertAssetGroupName(name);
+    const fileName = this.assertAssetFileName(this.assetUploadName(file.originalname, displayName));
+    const key = this.assetGroupPrefix(project.key, group) + fileName;
+    const existing = await this.oss.getObject(key);
+    if (existing) {
+      throw new ConflictException('file already exists');
+    }
+    const stored = await this.oss.putObject(key, file.buffer, file.mimetype || 'application/octet-stream');
+    return {
+      name: fileName,
+      key: stored.key,
+      url: stored.url,
+      size: file.size,
+    };
+  }
+
+  async deleteAssetFile(projectId: string, groupName: string, fileName: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    const group = this.assertAssetGroupName(groupName);
+    const name = this.assertAssetFileName(fileName);
+    await this.oss.deleteObject(this.assetGroupPrefix(project.key, group) + name);
+  }
+
   async activateVersion(projectId: string, pageId: string, versionId: string): Promise<ProjectPageDto> {
     const page = await this.requirePage(projectId, pageId);
     const version = await this.requireVersion(projectId, pageId, versionId);
@@ -662,6 +777,50 @@ export class LowcodeService {
 
   private xmlObjectKey(projectKey: string, pageKey: string, versionNo: number) {
     return `lowcode/${projectKey}/${pageKey}/v${versionNo}.xml`;
+  }
+
+  private assetRoot(projectKey: string) {
+    return `lowcode/${projectKey}/assets/`;
+  }
+
+  private assetGroupPrefix(projectKey: string, group: string) {
+    return `${this.assetRoot(projectKey)}${group}/`;
+  }
+
+  private assetKeepKey(projectKey: string, group: string) {
+    return `${this.assetGroupPrefix(projectKey, group)}.keep`;
+  }
+
+  private assertAssetGroupName(name: string) {
+    const trimmed = safeDecode(name).trim();
+    if (!trimmed || trimmed.length > 64 || trimmed === '.' || trimmed === '..' || trimmed.startsWith('.')) {
+      throw new BadRequestException('invalid group name');
+    }
+    if (/[\\/]/.test(trimmed)) {
+      throw new BadRequestException('invalid group name');
+    }
+    return trimmed;
+  }
+
+  private assertAssetFileName(name: string) {
+    const trimmed = safeDecode(name).trim().replace(/[\\/]/g, '');
+    if (!trimmed || trimmed === '.' || trimmed === '..' || trimmed === '.keep' || trimmed.length > 200) {
+      throw new BadRequestException('invalid file name');
+    }
+    return trimmed;
+  }
+
+  private assetUploadName(originalName: string, displayName?: string) {
+    const original = originalName.replace(/[\\/]/g, '').trim();
+    const originalExt = original.includes('.') ? original.slice(original.lastIndexOf('.')) : '';
+    const raw = (displayName ?? '').trim();
+    if (!raw) {
+      return original;
+    }
+    if (raw.includes('.') || !originalExt) {
+      return raw;
+    }
+    return `${raw}${originalExt}`;
   }
 
   private async readXml(key: string): Promise<string> {

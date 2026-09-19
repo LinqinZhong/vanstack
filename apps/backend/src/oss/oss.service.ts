@@ -34,4 +34,16 @@ export class OssService implements OnModuleInit {
   deleteObject(key: string) {
     return this.storage.deleteObject(key);
   }
+
+  listObjects(prefix: string) {
+    return this.storage.listObjects(prefix);
+  }
+
+  async copyObject(from: string, to: string, contentType?: string) {
+    const object = await this.storage.getObject(from);
+    if (!object) {
+      return;
+    }
+    await this.storage.putObject(to, object.body, contentType ?? object.contentType);
+  }
 }

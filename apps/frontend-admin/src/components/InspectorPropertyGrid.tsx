@@ -47,6 +47,7 @@ import {
   type WidgetStyle,
 } from '@vanstack/xml';
 import type { WidgetPatch } from '../utils/widgetTree';
+import { AssetImagePicker } from './AssetLibraryPanel';
 import { CopyI18nPicker } from './CopyI18nPicker';
 
 type BoxQuad = {
@@ -482,12 +483,14 @@ function PropertyGrid({
   resetKey,
   onInvalidChange,
   i18nCatalog,
+  projectId,
 }: {
   items: InspectorProp[];
   disabled?: boolean;
   resetKey?: string;
   onInvalidChange?: (invalid: boolean) => void;
   i18nCatalog?: PageI18n;
+  projectId?: string;
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
@@ -550,13 +553,37 @@ function PropertyGrid({
                   onChange={item.onChange}
                   onInvalidChange={reportInvalid}
                 />
-                {item.key === 'value' || item.key === 'text' || item.key === 'src' ? (
+                {item.key === 'value' || item.key === 'text' ? (
                   <>
                     <CopyI18nPicker
                       catalog={i18nCatalog}
                       disabled={disabled}
                       onPick={(expression) => item.onChange(expression)}
                     />
+                    <Tooltip title={t('lowcode.propEdit')}>
+                      <Button
+                        size="small"
+                        type="text"
+                        className="inspector-prop-edit"
+                        disabled={disabled}
+                        icon={<EditOutlined />}
+                        onClick={() => {
+                          setEditing(item);
+                          setEditorDraft(item.value);
+                        }}
+                      />
+                    </Tooltip>
+                  </>
+                ) : null}
+                {item.key === 'src' ? (
+                  <>
+                    {projectId ? (
+                      <AssetImagePicker
+                        projectId={projectId}
+                        disabled={disabled}
+                        onPick={(url) => item.onChange(url)}
+                      />
+                    ) : null}
                     <Tooltip title={t('lowcode.propEdit')}>
                       <Button
                         size="small"
@@ -602,12 +629,25 @@ function PropertyGrid({
           disabled={disabled}
           onChange={(event) => setEditorDraft(event.target.value)}
         />
-        {editing?.key === 'value' || editing?.key === 'text' || editing?.key === 'src' ? (
+        {editing?.key === 'value' || editing?.key === 'text' ? (
           <div className="inspector-text-modal-i18n">
             <CopyI18nPicker
               catalog={i18nCatalog}
               disabled={disabled}
               onPick={(expression) => setEditorDraft(expression)}
+            />
+          </div>
+        ) : null}
+        {editing?.key === 'src' && projectId ? (
+          <div className="inspector-text-modal-i18n">
+            <AssetImagePicker
+              projectId={projectId}
+              disabled={disabled}
+              onPick={(url) => {
+                setEditorDraft(url);
+                editing.onChange(url);
+                setEditing(null);
+              }}
             />
           </div>
         ) : null}
@@ -623,6 +663,7 @@ export function WidgetPropertyInspector({
   onPatch,
   onInvalidChange,
   i18nCatalog,
+  projectId,
 }: {
   widget: PageWidget;
   parentType?: PageWidget['type'];
@@ -630,6 +671,7 @@ export function WidgetPropertyInspector({
   onPatch: (patch: WidgetPatch, coalesceKey: string) => void;
   onInvalidChange?: (invalid: boolean) => void;
   i18nCatalog?: PageI18n;
+  projectId?: string;
 }) {
   const style = widget.style ?? {};
   const flex = widget.type === 'flex' ? (widget.flex ?? {}) : undefined;
@@ -1173,6 +1215,7 @@ export function WidgetPropertyInspector({
       resetKey={widget.id}
       onInvalidChange={onInvalidChange}
       i18nCatalog={i18nCatalog}
+      projectId={projectId}
     />
   );
 }

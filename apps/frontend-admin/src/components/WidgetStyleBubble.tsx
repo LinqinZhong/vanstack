@@ -11,6 +11,7 @@ import {
   ExpandOutlined,
   HighlightOutlined,
   ItalicOutlined,
+  PictureOutlined,
   RadiusSettingOutlined,
   RotateRightOutlined,
   UnorderedListOutlined,
@@ -37,6 +38,7 @@ import {
   type WidgetLoop,
   type WidgetStyle,
 } from '@vanstack/xml';
+import { AssetImagePicker } from './AssetLibraryPanel';
 import { CopyI18nPicker } from './CopyI18nPicker';
 import { StyleBoxEdges, pxFromLength } from './StyleBoxEdges';
 import { AngleField, SizeField, fontFamilyOptions } from './WidgetStyleFields';
@@ -241,10 +243,12 @@ export function WidgetStyleBubble({
   onOpenGroupChange,
   onChange,
   onTextChange,
+  onSrcChange,
   onLoopChange,
   onStateFnChange,
   onOpenInspector,
   i18nCatalog,
+  projectId,
   variables,
   disabled,
   onToolbarPopupChange,
@@ -255,6 +259,8 @@ export function WidgetStyleBubble({
   onOpenGroupChange: (group: BoxGroup | null) => void;
   onChange: (style: WidgetStyle | undefined) => void;
   onTextChange?: (text: string) => void;
+  onSrcChange?: (src: string) => void;
+  projectId?: string;
   onLoopChange?: (loop: WidgetLoop | undefined) => void;
   onStateFnChange?: (stateFn: string | undefined) => void;
   onOpenInspector: () => void;
@@ -335,6 +341,13 @@ export function WidgetStyleBubble({
         data-toolbar-popup={openPopup ? '' : undefined}
       >
         <div className="widget-style-bubble-toolbar">
+          {widget.type === 'image' && projectId && onSrcChange ? (
+            <AssetImagePicker projectId={projectId} disabled={disabled} onPick={onSrcChange} />
+          ) : widget.type === 'image' ? (
+            <Tooltip title={t('lowcode.assetsPickImage')}>
+              <Button size="small" type="text" icon={<PictureOutlined />} disabled />
+            </Tooltip>
+          ) : null}
           {showText ? (
             <>
               <BindingLock

@@ -1,9 +1,9 @@
 import { createReadStream } from 'node:fs';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
+import { dirname, join, relative, sep } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OssStorage, StoredObject } from './oss.types';
+import { ListedObject, OssStorage, StoredObject } from './oss.types';
 
 @Injectable()
 export class LocalOssStorage extends OssStorage {
@@ -36,11 +36,42 @@ export class LocalOssStorage extends OssStorage {
     await unlink(join(this.root, key)).catch(() => undefined);
   }
 
+  async listObjects(prefix: string): Promise<ListedObject[]> {
+    const start = join(this.root, ...prefix.split('/').filter(Boolean));
+    const items: ListedObject[] = [];
+    await walkFiles(start, async (filePath) => {
+      const key = relative(this.root, filePath).split(sep).join('/');
+      if (!key.startsWith(prefix.replace(/^\//, ''))) {
+        return;
+      }
+      const info = await stat(filePath);
+      items.push({ key, size: info.size });
+    });
+    return items;
+  }
+
   getPublicUrl(key: string): string {
     return `${this.publicUrl}/api/files/content/${encodeURIComponent(key)}`;
   }
 
   createReadStream(key: string) {
     return createReadStream(join(this.root, key));
+  }
+}
+
+async function walkFiles(dir: string, visit: (filePath: string) => Promise<void>) {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const next = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await walkFiles(next, visit);
+    } else {
+      await visit(next);
+    }
   }
 }

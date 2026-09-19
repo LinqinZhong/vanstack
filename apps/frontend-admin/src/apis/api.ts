@@ -1,16 +1,20 @@
 import type {
   AuthSessionDto,
   AuthUserDto,
+  CreateProjectAssetGroupInput,
   CreateProjectInput,
   CreateProjectPageInput,
   CreateProjectPageVersionInput,
   HealthDto,
   Locale,
   LoginInput,
+  ProjectAssetFileDto,
+  ProjectAssetGroupDto,
   ProjectDto,
   ProjectLangCatalogDto,
   ProjectPageDto,
   ProjectPageVersionDto,
+  UpdateProjectAssetGroupInput,
   UpdateProjectInput,
   UpdateProjectPageInput,
   UpdateProjectPageVersionInput,
@@ -127,6 +131,37 @@ export const api = {
     request<ProjectPageDto>(
       `/projects/${projectId}/pages/${pageId}/activate-version`,
       json('POST', { versionId }),
+    ),
+  listAssetGroups: (projectId: string) =>
+    request<ProjectAssetGroupDto[]>(`/projects/${projectId}/assets/groups`),
+  createAssetGroup: (projectId: string, body: CreateProjectAssetGroupInput) =>
+    request<ProjectAssetGroupDto>(`/projects/${projectId}/assets/groups`, json('POST', body)),
+  renameAssetGroup: (projectId: string, group: string, body: UpdateProjectAssetGroupInput) =>
+    request<ProjectAssetGroupDto>(
+      `/projects/${projectId}/assets/groups/${encodeURIComponent(group)}`,
+      json('PATCH', body),
+    ),
+  deleteAssetGroup: (projectId: string, group: string) =>
+    request<void>(`/projects/${projectId}/assets/groups/${encodeURIComponent(group)}`, { method: 'DELETE' }),
+  listAssetFiles: (projectId: string, group: string) =>
+    request<ProjectAssetFileDto[]>(
+      `/projects/${projectId}/assets/groups/${encodeURIComponent(group)}/files`,
+    ),
+  uploadAssetFile: (projectId: string, group: string, file: File, name?: string) => {
+    const body = new FormData();
+    body.append('file', file);
+    if (name?.trim()) {
+      body.append('name', name.trim());
+    }
+    return request<ProjectAssetFileDto>(
+      `/projects/${projectId}/assets/groups/${encodeURIComponent(group)}/files`,
+      { method: 'POST', body },
+    );
+  },
+  deleteAssetFile: (projectId: string, group: string, name: string) =>
+    request<void>(
+      `/projects/${projectId}/assets/groups/${encodeURIComponent(group)}/files/${encodeURIComponent(name)}`,
+      { method: 'DELETE' },
     ),
 };
 

@@ -4,6 +4,7 @@ import {
   CopyOutlined,
   DeleteOutlined,
   ExpandOutlined,
+  FolderOpenOutlined,
   GlobalOutlined,
   PlusOutlined,
   QuestionCircleOutlined,
@@ -82,6 +83,7 @@ import {
   rememberPageId,
   rememberVersionId,
 } from '../utils/editorSelection';
+import { AssetLibraryPanel } from '../components/AssetLibraryPanel';
 import { EditorHelpModal } from '../components/EditorHelpModal';
 import { PageDataPanel } from '../components/PageDataPanel';
 import { LanguageLibraryPanel } from '../components/LanguageLibraryModal';
@@ -540,7 +542,7 @@ export function ProjectEditorPage() {
   const [pageData, setPageData] = useState<PageVariable[]>([]);
   const [pageI18n, setPageI18n] = useState<PageI18n | undefined>(undefined);
   const [previewLocale, setPreviewLocale] = useState<string | null>(null);
-  const [leftNav, setLeftNav] = useState<'develop' | 'i18n'>('develop');
+  const [leftNav, setLeftNav] = useState<'develop' | 'i18n' | 'assets'>('develop');
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
   const [viewingOwnerId, setViewingOwnerId] = useState<string | null>(null);
   const [viewingState, setViewingState] = useState<string | null>(null);
@@ -3519,7 +3521,7 @@ export function ProjectEditorPage() {
         </Space>
       </div>
       <div className="editor-body">
-        <nav className="editor-rail" aria-label={`${t('lowcode.i18nDevelop')} / ${t('lowcode.i18nLibrary')}`}>
+        <nav className="editor-rail" aria-label={`${t('lowcode.i18nDevelop')} / ${t('lowcode.i18nLibrary')} / ${t('lowcode.assetLibrary')}`}>
           <Tooltip title={t('lowcode.i18nDevelop')} placement="right">
             <button
               type="button"
@@ -3538,12 +3540,21 @@ export function ProjectEditorPage() {
               <GlobalOutlined />
             </button>
           </Tooltip>
+          <Tooltip title={t('lowcode.assetLibrary')} placement="right">
+            <button
+              type="button"
+              className={['editor-rail-btn', leftNav === 'assets' ? 'is-active' : ''].filter(Boolean).join(' ')}
+              onClick={() => setLeftNav('assets')}
+            >
+              <FolderOpenOutlined />
+            </button>
+          </Tooltip>
         </nav>
         <div className="editor-main">
           <div
             className={[
               versionsOpen ? 'editor-grid' : 'editor-grid is-versions-collapsed',
-              leftNav === 'i18n' ? 'is-covered' : '',
+              leftNav !== 'develop' ? 'is-covered' : '',
             ]
               .filter(Boolean)
               .join(' ')}
@@ -3798,6 +3809,7 @@ export function ProjectEditorPage() {
                             widget={selectedDisplayWidget}
                             style={selectedDisplayWidget.style}
                             i18nCatalog={pageI18n}
+                            projectId={project.id}
                             variables={pageData}
                             disabled={readOnly}
                             openGroup={openBoxGroup}
@@ -3808,6 +3820,12 @@ export function ProjectEditorPage() {
                                 { style: nextStyle },
                                 `edit:${selectedDisplayWidget.id}:style`,
                               )
+                            }
+                            onSrcChange={
+                              selectedDisplayWidget.type === 'image'
+                                ? (src) =>
+                                  updateWidget(selectedDisplayWidget.id, { src }, `edit:${selectedDisplayWidget.id}:src`)
+                                : undefined
                             }
                             onTextChange={
                               selectedDisplayWidget.type === 'text' || selectedDisplayWidget.type === 'button'
@@ -4093,6 +4111,11 @@ export function ProjectEditorPage() {
               <LanguageLibraryPanel catalog={pageI18n} onChange={commitPageI18n} />
             </Card>
           ) : null}
+          {leftNav === 'assets' ? (
+            <Card size="small" className="editor-panel language-library-card" title={t('lowcode.assetLibrary')}>
+              <AssetLibraryPanel projectId={project.id} />
+            </Card>
+          ) : null}
         </div>
       </div>
 
@@ -4147,6 +4170,7 @@ export function ProjectEditorPage() {
                 parentType={selectedParent?.type}
                 disabled={readOnly}
                 i18nCatalog={pageI18n}
+                projectId={project.id}
                 onPatch={(patch, coalesceKey) => updateWidget(selectedDisplayWidget.id, patch, coalesceKey)}
                 onInvalidChange={setInspectorInvalid}
               />

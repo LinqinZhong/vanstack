@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -9,14 +10,21 @@ import {
   Patch,
   Post,
   Put,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import type {
+  ProjectAssetFileDto,
+  ProjectAssetGroupDto,
   ProjectDto,
   ProjectLangCatalogDto,
   ProjectPageDto,
   ProjectPageVersionDto,
 } from '@vanstack/shared';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
+import { CreateAssetGroupDto, UpdateAssetGroupDto, UploadAssetFileDto } from './dto/asset.dto';
 import { PutProjectLangsDto } from './dto/lang.dto';
 import { CreateProjectPageDto, UpdateProjectPageDto } from './dto/page.dto';
 import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
@@ -171,5 +179,73 @@ export class LowcodeController {
     @Body() dto: ActivatePageVersionDto,
   ): Promise<ProjectPageDto> {
     return this.lowcode.activateVersion(id, pageId, dto.versionId);
+  }
+
+  @Get(':id/assets/groups')
+  listAssetGroups(@Param('id', ParseUUIDPipe) id: string): Promise<ProjectAssetGroupDto[]> {
+    return this.lowcode.listAssetGroups(id);
+  }
+
+  @Post(':id/assets/groups')
+  createAssetGroup(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateAssetGroupDto,
+  ): Promise<ProjectAssetGroupDto> {
+    return this.lowcode.createAssetGroup(id, dto.name);
+  }
+
+  @Patch(':id/assets/groups/:group')
+  renameAssetGroup(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('group') group: string,
+    @Body() dto: UpdateAssetGroupDto,
+  ): Promise<ProjectAssetGroupDto> {
+    return this.lowcode.renameAssetGroup(id, group, dto.name);
+  }
+
+  @Delete(':id/assets/groups/:group')
+  @HttpCode(204)
+  deleteAssetGroup(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('group') group: string,
+  ): Promise<void> {
+    return this.lowcode.deleteAssetGroup(id, group);
+  }
+
+  @Get(':id/assets/groups/:group/files')
+  listAssetFiles(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('group') group: string,
+  ): Promise<ProjectAssetFileDto[]> {
+    return this.lowcode.listAssetFiles(id, group);
+  }
+
+  @Post(':id/assets/groups/:group/files')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 20 * 1024 * 1024 },
+    }),
+  )
+  uploadAssetFile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('group') group: string,
+    @UploadedFile() file?: Express.Multer.File,
+    @Body() dto?: UploadAssetFileDto,
+  ): Promise<ProjectAssetFileDto> {
+    if (!file) {
+      throw new BadRequestException('file is required');
+    }
+    return this.lowcode.uploadAssetFile(id, group, file, dto?.name);
+  }
+
+  @Delete(':id/assets/groups/:group/files/:name')
+  @HttpCode(204)
+  deleteAssetFile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('group') group: string,
+    @Param('name') name: string,
+  ): Promise<void> {
+    return this.lowcode.deleteAssetFile(id, group, name);
   }
 }

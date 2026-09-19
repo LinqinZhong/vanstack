@@ -152,3 +152,22 @@ export interface RuntimeProjectDto {
   key: string;
   pages: RuntimePageDto[];
 }
+
+export interface ProjectAssetGroupDto {
+  name: string;
+}
+
+export interface ProjectAssetFileDto {
+  name: string;
+  key: string;
+  url: string;
+  size: number;
+}
+
+export interface CreateProjectAssetGroupInput {
+  name: string;
+}
+
+export interface UpdateProjectAssetGroupInput {
+  name: string;
+}

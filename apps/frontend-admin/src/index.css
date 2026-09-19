@@ -2364,6 +2364,144 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
   padding: 16px 0 0;
 }
 
+.asset-library-panel {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  min-height: 0;
+  height: 100%;
+}
+
+.asset-library-groups,
+.asset-library-files {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 16px 16px;
+}
+
+.asset-library-groups {
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.asset-library-create {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.asset-library-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.asset-library-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  text-align: left;
+  cursor: pointer;
+}
+
+.asset-library-group:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.asset-library-group.is-active {
+  color: #3dba9a;
+  background: rgba(61, 186, 154, 0.16);
+}
+
+.asset-library-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.asset-library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.asset-library-card-item {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.asset-library-card-item.is-pickable {
+  cursor: pointer;
+}
+
+.asset-library-card-item.is-pickable:hover {
+  border-color: rgba(61, 186, 154, 0.55);
+}
+
+.asset-picker-modal .ant-modal-body {
+  min-height: 420px;
+}
+
+.asset-picker-modal .asset-library-panel {
+  height: 480px;
+}
+
+.asset-library-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 96px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.24);
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+}
+
+.asset-library-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.asset-library-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.asset-library-meta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.asset-library-meta span {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+}
+
+.asset-library-item-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .language-library-panel {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);

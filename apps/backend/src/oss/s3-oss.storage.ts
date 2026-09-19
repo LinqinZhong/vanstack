@@ -3,6 +3,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  ListObjectsV2Command,
   PutBucketCorsCommand,
   PutBucketPolicyCommand,
   PutObjectCommand,
@@ -10,7 +11,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OssStorage, StoredObject } from './oss.types';
+import { ListedObject, OssStorage, StoredObject } from './oss.types';
 
 @Injectable()
 export class S3OssStorage extends OssStorage {
@@ -120,6 +121,28 @@ export class S3OssStorage extends OssStorage {
         Key: key,
       }),
     );
+  }
+
+  async listObjects(prefix: string): Promise<ListedObject[]> {
+    const items: ListedObject[] = [];
+    let token: string | undefined;
+    do {
+      const result = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: prefix,
+          ContinuationToken: token,
+        }),
+      );
+      for (const object of result.Contents ?? []) {
+        if (!object.Key) {
+          continue;
+        }
+        items.push({ key: object.Key, size: object.Size ?? 0 });
+      }
+      token = result.IsTruncated ? result.NextContinuationToken : undefined;
+    } while (token);
+    return items;
   }
 
   getPublicUrl(key: string): string {

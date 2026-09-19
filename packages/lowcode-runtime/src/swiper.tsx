@@ -257,6 +257,7 @@ export function SwiperView({
                   width: '100%',
                   height: '100%',
                   overflow: 'hidden',
+                  ...(editing && item.hidden ? { visibility: 'hidden' as const } : {}),
                 },
               },
               item.children.map((child) => renderChild(child)),

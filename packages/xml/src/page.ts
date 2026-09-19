@@ -188,7 +188,7 @@ export type WidgetLoop = {
   index?: string;
 };
 
-type WidgetCommon = WidgetStates & { loop?: WidgetLoop };
+type WidgetCommon = WidgetStates & { loop?: WidgetLoop; hidden?: boolean };
 
 export type PageWidget =
   | ({ type: 'image'; id: string; src: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
@@ -567,6 +567,10 @@ function parseWidgetLoop(node: OrderedNode): { loop?: WidgetLoop } {
     index: attr(node, 'loop-index') || undefined,
   });
   return loop ? { loop } : {};
+}
+
+function parseWidgetHidden(node: OrderedNode): { hidden?: true } {
+  return isTrue(attr(node, 'hidden')) ? { hidden: true } : {};
 }
 
 function loopAttrs(loop: WidgetLoop | undefined): Record<string, string> {
@@ -2288,6 +2292,7 @@ function parseWidgets(
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2307,6 +2312,7 @@ function parseWidgets(
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2326,6 +2332,7 @@ function parseWidgets(
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2348,6 +2355,7 @@ function parseWidgets(
         ...(flex ? { flex } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2370,6 +2378,7 @@ function parseWidgets(
         ...(swiper ? { swiper } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2388,6 +2397,7 @@ function parseWidgets(
         children: parseWidgets(extra.rest, ids, 'swiper-item', nextNames),
         ...(style ? { style } : {}),
         ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2412,6 +2422,7 @@ function widgetHostAttrs(
     ...style,
     ...extra,
     ...loopAttrs(widget.loop),
+    ...(widget.hidden ? { '@_hidden': 'true' } : {}),
     ...(applied ? { '@_state': applied } : {}),
     ...(transition ? { '@_transition': String(transition) } : {}),
   };

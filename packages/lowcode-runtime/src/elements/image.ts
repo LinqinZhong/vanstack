@@ -1,6 +1,6 @@
 import { createElement, type ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
-import { flexItemCss, mergeCss, widgetCss } from '../css';
+import { flexItemCss, hiddenCss, mergeCss, widgetCss } from '../css';
 import { resolveWidgetCopy, widgetCssOptions, type WidgetRenderContext } from '../widget-render';
 
 export function renderImage(
@@ -18,6 +18,7 @@ export function renderImage(
         widgetCss(widget.style, widgetCssOptions(ctx)),
         flexItemCss(widget.item),
         { overflow: 'hidden' },
+        hiddenCss(widget.hidden, ctx.editing),
       ),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,

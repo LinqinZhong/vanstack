@@ -49,6 +49,10 @@ export function mergeCss(...parts: Array<CSSProperties | undefined>): CSSPropert
   return Object.keys(css).length > 0 ? css : undefined;
 }
 
+export function hiddenCss(hidden: boolean | undefined, editing: boolean): CSSProperties | undefined {
+  return hidden && editing ? { visibility: 'hidden' } : undefined;
+}
+
 export function pageCss(style: PageStyle | undefined): CSSProperties {
   const css: CSSProperties = { boxSizing: 'border-box', position: 'relative', perspective: 800 };
   if (style?.background) {

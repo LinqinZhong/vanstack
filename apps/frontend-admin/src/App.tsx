@@ -19,7 +19,10 @@ function isEditableElement(target: EventTarget | null) {
 }
 
 function isExplicitDragHandle(target: EventTarget | null) {
-  return target instanceof Element && Boolean(target.closest('[draggable="true"]'));
+  return (
+    target instanceof Element &&
+    Boolean(target.closest('[draggable="true"], .ant-tree-treenode-draggable'))
+  );
 }
 
 function preventNonInputSelection(event: Event) {

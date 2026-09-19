@@ -4,6 +4,8 @@ import {
   CopyOutlined,
   DeleteOutlined,
   ExpandOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
   FolderOpenOutlined,
   GlobalOutlined,
   PlusOutlined,
@@ -141,6 +143,7 @@ import {
 } from '../utils/widgetShortcuts';
 import {
   addWidgetToTree,
+  canMoveWidget,
   cloneWidget,
   collectExpandableKeys,
   createSwiperWidget,
@@ -149,15 +152,18 @@ import {
   findWidget,
   firstChildWidgetId,
   insertWidget,
+  moveWidget,
   nextExpandedKeys,
   nextSiblingWidgetId,
   nextWidgetId,
   parentWidgetId,
+  patchWidget,
   removeWidget,
   toWidgetTreeData,
   updateWidgetById,
   widgetTreeLabel,
   widgetTypeName,
+  type WidgetDropPlacement,
   type WidgetPatch,
 } from '../utils/widgetTree';
 import {
@@ -3144,6 +3150,28 @@ export function ProjectEditorPage() {
     commitWidgets(result.widgets, result.nextSelectedId);
   }
 
+  function toggleWidgetHidden(widgetId: string) {
+    if (readOnlyRef.current) {
+      return;
+    }
+    const widget = findWidget(widgetsRef.current, widgetId);
+    if (!widget) {
+      return;
+    }
+    commitWidgets(
+      updateWidgetById(widgetsRef.current, widgetId, (item) => patchWidget(item, { hidden: !item.hidden })),
+      selectedWidgetIdRef.current,
+    );
+  }
+
+  function treeDropPlacement(dropToGap: boolean, nodePos: string, dropPosition: number): WidgetDropPlacement {
+    if (!dropToGap) {
+      return 'inside';
+    }
+    const offset = dropPosition - Number(nodePos.split('-').at(-1));
+    return offset === -1 ? 'before' : 'after';
+  }
+
   function undoWidgetEdit() {
     if (readOnlyRef.current || pastRef.current.length === 0) {
       return;
@@ -3603,7 +3631,7 @@ export function ProjectEditorPage() {
 
               <Card
                 size="small"
-                className="editor-panel"
+                className="editor-panel widget-tree-panel"
                 title={t('lowcode.widgetTree')}
                 extra={
                   <div className="widget-tree-actions">
@@ -3657,14 +3685,22 @@ export function ProjectEditorPage() {
                       className="widget-tree"
                       blockNode
                       autoExpandParent={false}
+                      draggable={!readOnly && !canDragWidgetToData ? { icon: false } : false}
+                      allowDrop={({ dragNode, dropNode, dropPosition }) => {
+                        const placement: WidgetDropPlacement =
+                          dropPosition === 0 ? 'inside' : dropPosition < 0 ? 'before' : 'after';
+                        return canMoveWidget(widgets, String(dragNode.key), String(dropNode.key), placement);
+                      }}
                       expandedKeys={expandedKeys}
                       selectedKeys={selectedWidgetId ? [selectedWidgetId] : []}
                       treeData={widgetTreeData}
                       titleRender={(node) => {
                         const widgetId = String(node.key);
-                        const looped = isLoopConfigured(findWidget(widgets, widgetId)?.loop);
+                        const widget = findWidget(widgets, widgetId);
+                        const looped = isLoopConfigured(widget?.loop);
+                        const hidden = Boolean(widget?.hidden);
                         return (
-                          <span className="widget-tree-title">
+                          <span className={hidden ? 'widget-tree-title is-hidden' : 'widget-tree-title'}>
                             <span
                               className={canDragWidgetToData ? 'widget-tree-drag-title' : 'widget-tree-title-label'}
                               draggable={canDragWidgetToData}
@@ -3690,6 +3726,19 @@ export function ProjectEditorPage() {
                                 <UnorderedListOutlined />
                               </button>
                             ) : null}
+                            <button
+                              type="button"
+                              className="widget-tree-visibility"
+                              title={hidden ? t('lowcode.showWidget') : t('lowcode.hideWidget')}
+                              disabled={readOnly}
+                              onMouseDown={(event) => event.stopPropagation()}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleWidgetHidden(widgetId);
+                              }}
+                            >
+                              {hidden ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+                            </button>
                           </span>
                         );
                       }}
@@ -3698,6 +3747,22 @@ export function ProjectEditorPage() {
                         if (keys[0]) {
                           selectWidget(String(keys[0]));
                         }
+                      }}
+                      onDrop={(info) => {
+                        if (readOnly) {
+                          return;
+                        }
+                        const dragId = String(info.dragNode.key);
+                        const dropId = String(info.node.key);
+                        const placement = treeDropPlacement(info.dropToGap, info.node.pos, info.dropPosition);
+                        const nextWidgets = moveWidget(widgetsRef.current, dragId, dropId, placement);
+                        if (!nextWidgets) {
+                          return;
+                        }
+                        if (placement === 'inside') {
+                          setExpandedKeys((prev) => (prev.includes(dropId) ? prev : [...prev, dropId]));
+                        }
+                        commitWidgets(nextWidgets, dragId);
                       }}
                       onDoubleClick={(_event, node) => {
                         const widgetId = String(node.key);

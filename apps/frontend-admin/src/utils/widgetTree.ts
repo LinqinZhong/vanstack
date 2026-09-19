@@ -15,6 +15,7 @@ export type WidgetPatch = {
   value?: string;
   text?: string;
   src?: string;
+  hidden?: boolean;
   loop?: WidgetLoop | undefined;
   stateFn?: string | undefined;
   style?: WidgetStyle | undefined;
@@ -56,6 +57,10 @@ function cloneStateFields(widget: PageWidget) {
 function cloneLoop(widget: PageWidget): { loop?: WidgetLoop } {
   const loop = compactLoop(widget.loop);
   return loop ? { loop: { ...loop } } : {};
+}
+
+function cloneHidden(widget: PageWidget): { hidden?: true } {
+  return widget.hidden ? { hidden: true } : {};
 }
 
 type ContainerWidget = Extract<PageWidget, { children: PageWidget[] }>;
@@ -187,6 +192,13 @@ function applyCommon<T extends PageWidget>(widget: T, patch: WidgetPatch): T {
       withItem.item = patch.item;
     } else {
       delete withItem.item;
+    }
+  }
+  if ('hidden' in patch) {
+    if (patch.hidden) {
+      next.hidden = true;
+    } else {
+      delete next.hidden;
     }
   }
   if ('loop' in patch) {
@@ -424,6 +436,7 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
       item: cloneOptional(widget.item),
       ...states,
       ...cloneLoop(widget),
+      ...cloneHidden(widget),
     };
   }
   if (widget.type === 'text') {
@@ -435,6 +448,7 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
       item: cloneOptional(widget.item),
       ...states,
       ...cloneLoop(widget),
+      ...cloneHidden(widget),
     };
   }
   if (widget.type === 'button') {
@@ -446,6 +460,7 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
       item: cloneOptional(widget.item),
       ...states,
       ...cloneLoop(widget),
+      ...cloneHidden(widget),
     };
   }
   if (widget.type === 'flex') {
@@ -458,6 +473,7 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
       item: cloneOptional(widget.item),
       ...states,
       ...cloneLoop(widget),
+      ...cloneHidden(widget),
     };
   }
   if (widget.type === 'swiper') {
@@ -470,6 +486,7 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
       item: cloneOptional(widget.item),
       ...states,
       ...cloneLoop(widget),
+      ...cloneHidden(widget),
     };
   }
   return {
@@ -479,6 +496,7 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
     style: cloneOptional(widget.style),
     ...states,
     ...cloneLoop(widget),
+    ...cloneHidden(widget),
   };
 }
 
@@ -561,6 +579,119 @@ export function widgetTreeLabel(widget: PageWidget, t: (key: string) => string):
     return `${typeName} · ${widget.text}`;
   }
   return typeName;
+}
+
+export type WidgetDropPlacement = 'before' | 'after' | 'inside';
+
+function widgetContainsId(widget: PageWidget, id: string): boolean {
+  if (!hasChildren(widget)) {
+    return false;
+  }
+  return widget.children.some((child) => child.id === id || widgetContainsId(child, id));
+}
+
+function extractFromList(list: PageWidget[], id: string): { list: PageWidget[]; widget: PageWidget } | null {
+  const index = list.findIndex((item) => item.id === id);
+  if (index >= 0) {
+    return {
+      list: [...list.slice(0, index), ...list.slice(index + 1)],
+      widget: list[index],
+    };
+  }
+  for (let i = 0; i < list.length; i += 1) {
+    const item = list[i];
+    if (!hasChildren(item)) {
+      continue;
+    }
+    const nested = extractFromList(item.children, id);
+    if (nested) {
+      const nextList = [...list];
+      nextList[i] = mapChildren(item, nested.list);
+      return { list: nextList, widget: nested.widget };
+    }
+  }
+  return null;
+}
+
+function insertIntoList(
+  list: PageWidget[],
+  widget: PageWidget,
+  targetId: string,
+  placement: WidgetDropPlacement,
+  parent: PageWidget | 'page',
+): PageWidget[] | null {
+  const index = list.findIndex((item) => item.id === targetId);
+  if (index >= 0) {
+    const target = list[index];
+    let nextPlacement = placement;
+    if (nextPlacement === 'inside') {
+      const placed = placeInContainer(target, widget);
+      if (placed) {
+        const next = [...list];
+        next[index] = placed;
+        return next;
+      }
+      nextPlacement = 'after';
+    }
+    if (!canContain(parent, widget.type)) {
+      return null;
+    }
+    const at = nextPlacement === 'before' ? index : index + 1;
+    return [...list.slice(0, at), widget, ...list.slice(at)];
+  }
+  for (let i = 0; i < list.length; i += 1) {
+    const item = list[i];
+    if (!hasChildren(item)) {
+      continue;
+    }
+    const nested = insertIntoList(item.children, widget, targetId, placement, item);
+    if (nested) {
+      const next = [...list];
+      next[i] = mapChildren(item, nested);
+      return next;
+    }
+  }
+  return null;
+}
+
+export function canMoveWidget(
+  widgets: PageWidget[],
+  dragId: string,
+  dropId: string,
+  placement: WidgetDropPlacement,
+): boolean {
+  if (dragId === dropId) {
+    return false;
+  }
+  const drag = findWidget(widgets, dragId);
+  const drop = findWidget(widgets, dropId);
+  if (!drag || !drop || widgetContainsId(drag, dropId)) {
+    return false;
+  }
+  if (placement === 'inside') {
+    if (placeInContainer(drop, drag)) {
+      return true;
+    }
+    placement = 'after';
+  }
+  const parent = findParentWidget(widgets, dropId);
+  return canContain(parent ?? 'page', drag.type);
+}
+
+export function moveWidget(
+  widgets: PageWidget[],
+  dragId: string,
+  dropId: string,
+  placement: WidgetDropPlacement,
+): PageWidget[] | null {
+  if (!canMoveWidget(widgets, dragId, dropId, placement)) {
+    return null;
+  }
+  const extracted = extractFromList(widgets, dragId);
+  if (!extracted) {
+    return null;
+  }
+  return insertIntoList(extracted.list, extracted.widget, dropId, placement, 'page');
 }
 
 export function toWidgetTreeData(

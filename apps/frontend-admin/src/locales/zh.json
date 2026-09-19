@@ -81,6 +81,8 @@
     "eventsEmpty": "暂无事件",
     "screenSize": "屏幕",
     "widgetTree": "控件树",
+    "hideWidget": "隐藏控件",
+    "showWidget": "显示控件",
     "widgetInspector": "控件属性",
     "widgetInspectorTitle": "控件属性【{{type}}-{{id}}】",
     "pageInspector": "页面属性",

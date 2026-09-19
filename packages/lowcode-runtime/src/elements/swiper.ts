@@ -2,7 +2,7 @@ import { createElement, type ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
 import { DEFAULT_SWIPER_HEIGHT, DEFAULT_SWIPER_WIDTH, sanitizeWidgetStyle } from '@vanstack/xml';
 import { SwiperView } from '../swiper';
-import { boxCss, flexItemCss, mergeCss, sizeCss } from '../css';
+import { boxCss, flexItemCss, hiddenCss, mergeCss, sizeCss } from '../css';
 import { widgetCssOptions, type WidgetRenderContext } from '../widget-render';
 
 export function renderSwiper(
@@ -17,6 +17,7 @@ export function renderSwiper(
     },
     boxCss(style, widgetCssOptions(ctx)),
     flexItemCss(widget.item),
+    hiddenCss(widget.hidden, ctx.editing),
   );
   return createElement(SwiperView, {
     key: ctx.instanceKey,

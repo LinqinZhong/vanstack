@@ -1,7 +1,7 @@
 import { createElement, type ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
 import { sanitizeWidgetStyle } from '@vanstack/xml';
-import { boxCss, mergeCss } from '../css';
+import { boxCss, hiddenCss, mergeCss } from '../css';
 import { widgetCssOptions, type WidgetRenderContext } from '../widget-render';
 
 export function renderSwiperItem(
@@ -23,6 +23,7 @@ export function renderSwiperItem(
           height: '100%',
           overflow: 'hidden',
         },
+        hiddenCss(widget.hidden, ctx.editing),
       ),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,

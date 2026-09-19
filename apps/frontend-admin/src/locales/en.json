@@ -81,6 +81,8 @@
     "eventsEmpty": "No events yet",
     "screenSize": "Screen",
     "widgetTree": "Widget tree",
+    "hideWidget": "Hide widget",
+    "showWidget": "Show widget",
     "widgetInspector": "Widget properties",
     "widgetInspectorTitle": "Widget properties【{{type}}-{{id}}】",
     "pageInspector": "Page properties",

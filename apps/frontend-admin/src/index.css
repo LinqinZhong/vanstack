@@ -600,18 +600,77 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 4px;
+  gap: 2px;
+}
+
+.widget-tree-actions .ant-btn {
+  padding: 0 4px;
+  font-size: 12px;
 }
 
 .widget-tree.ant-tree {
   background: transparent;
   color: inherit;
+  font-size: 12px;
+}
+
+.widget-tree .ant-tree-treenode {
+  padding: 0 4px;
+  line-height: 1.4;
 }
 
 .widget-tree .ant-tree-switcher {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.widget-tree .ant-tree-indent-unit {
+  width: 18px !important;
+}
+
+.widget-tree .ant-tree-node-content-wrapper {
+  min-height: 18px;
+  padding: 0 4px;
+  line-height: 1.4;
+}
+
+.widget-tree .ant-tree-title {
+  line-height: 1.4;
+}
+
+.widget-tree-panel .ant-card-body {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.widget-tree-panel .ant-card-body:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
+}
+
+.widget-tree-panel .ant-card-body::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.widget-tree-panel .ant-card-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.widget-tree-panel .ant-card-body::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 8px;
+}
+
+.widget-tree-panel .ant-card-body:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.widget-tree-panel .ant-card-body:hover::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.45);
 }
 
 .widget-type-picker {
@@ -621,6 +680,14 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 
 .widget-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
   background: rgba(61, 186, 154, 0.12);
+}
+
+.widget-tree .ant-tree-treenode-draggable {
+  cursor: grab;
+}
+
+.widget-tree .ant-tree-treenode-draggable:active {
+  cursor: grabbing;
 }
 
 .widget-tree-drag-title {
@@ -646,10 +713,42 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 .widget-tree-title {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 4px;
+  justify-content: flex-start;
+  gap: 2px;
   width: 100%;
   min-width: 0;
+}
+
+.widget-tree-title.is-hidden {
+  opacity: 0.45;
+}
+
+.widget-tree-visibility {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.72;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.widget-tree-visibility:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.widget-tree-visibility:disabled {
+  cursor: default;
+  opacity: 0.4;
 }
 
 .widget-tree-title-label {
@@ -665,8 +764,8 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   padding: 0;
   border: none;
   border-radius: 4px;
@@ -674,6 +773,7 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   color: inherit;
   opacity: 0.72;
   cursor: pointer;
+  font-size: 12px;
 }
 
 .widget-tree-loop:hover {

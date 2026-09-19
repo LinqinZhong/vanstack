@@ -1,7 +1,7 @@
 import { createElement, type ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
-import { flexItemCss, hiddenCss, mergeCss, widgetCss } from '../css';
-import { resolveWidgetCopy, widgetCssOptions, type WidgetRenderContext } from '../widget-render';
+import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
+import { resolveWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
 export function renderImage(
   widget: Extract<PageWidget, { type: 'image' }>,
@@ -11,11 +11,12 @@ export function renderImage(
     'span',
     {
       key: ctx.instanceKey,
-      className: 'lowcode-image',
+      className: `lowcode-image ${widgetClassName(widget.id)}`,
       'data-widget-id': widget.id,
       'data-widget-type': 'image',
+      'data-state': widgetStateAttr(widget, ctx),
       style: mergeCss(
-        widgetCss(widget.style, widgetCssOptions(ctx)),
+        dynamicStyleCss(widget.style, widgetCssOptions(ctx)),
         flexItemCss(widget.item),
         { overflow: 'hidden' },
         hiddenCss(widget.hidden, ctx.editing),

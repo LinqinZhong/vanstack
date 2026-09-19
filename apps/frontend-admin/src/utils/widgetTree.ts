@@ -15,6 +15,7 @@ export type WidgetPatch = {
   value?: string;
   text?: string;
   src?: string;
+  size?: number;
   hidden?: boolean;
   loop?: WidgetLoop | undefined;
   stateFn?: string | undefined;
@@ -225,6 +226,20 @@ export function patchWidget(widget: PageWidget, patch: WidgetPatch): PageWidget 
     const next = applyCommon(widget, patch);
     if (patch.src != null) {
       next.src = patch.src;
+    }
+    return next;
+  }
+  if (widget.type === 'icon') {
+    const next = applyCommon(widget, patch);
+    if (patch.src != null) {
+      next.src = patch.src;
+    }
+    if (patch.size != null) {
+      if (patch.size > 0) {
+        next.size = patch.size;
+      } else {
+        delete next.size;
+      }
     }
     return next;
   }
@@ -439,6 +454,19 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
       ...cloneHidden(widget),
     };
   }
+  if (widget.type === 'icon') {
+    return {
+      type: 'icon',
+      id: nextId(),
+      src: widget.src,
+      ...(widget.size != null ? { size: widget.size } : {}),
+      style: cloneOptional(widget.style),
+      item: cloneOptional(widget.item),
+      ...states,
+      ...cloneLoop(widget),
+      ...cloneHidden(widget),
+    };
+  }
   if (widget.type === 'text') {
     return {
       type: 'text',
@@ -554,6 +582,9 @@ export function nextExpandedKeys(
 export function widgetTypeName(type: PageWidget['type'], t: (key: string) => string): string {
   if (type === 'image') {
     return t('lowcode.defaultImage');
+  }
+  if (type === 'icon') {
+    return t('lowcode.defaultIcon');
   }
   if (type === 'text') {
     return t('lowcode.defaultText');

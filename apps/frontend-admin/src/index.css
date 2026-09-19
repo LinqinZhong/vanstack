@@ -868,6 +868,11 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   gap: 6px;
 }
 
+.style-box-row.is-inherited {
+  background: rgba(255, 170, 60, 0.18);
+  border-radius: 4px;
+}
+
 .style-box-edges.is-px-only .style-box-row {
   grid-template-columns: 2.4em minmax(0, 1fr);
 }
@@ -1053,7 +1058,6 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 
 .widget-style-bubble {
   box-sizing: border-box;
-  width: 240px;
   max-width: min(240px, calc(100vw - 24px));
   padding: 6px;
   border-radius: 12px;
@@ -1067,6 +1071,37 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   flex-wrap: wrap;
   align-items: center;
   gap: 2px;
+}
+
+.widget-style-inherited {
+  background: rgba(255, 170, 60, 0.2);
+  border-radius: 4px;
+}
+
+.widget-style-inherited-active {
+  background: rgba(255, 140, 30, 0.45);
+  border-radius: 4px;
+}
+
+.widget-style-bubble-color.widget-style-inherited {
+  background: rgba(255, 170, 60, 0.35);
+}
+
+.widget-style-bubble-color.widget-style-inherited-active {
+  background: rgba(255, 140, 30, 0.55);
+}
+
+.widget-style-bubble-font.widget-style-inherited .ant-select-selector,
+.widget-style-bubble-fontsize.widget-style-inherited .ant-input-number {
+  background: rgba(255, 170, 60, 0.25);
+}
+
+.style-size-panel .ant-select.widget-style-inherited .ant-select-selector,
+.style-size-panel .ant-input-number.widget-style-inherited,
+.style-border-meta .ant-select.widget-style-inherited .ant-select-selector,
+.style-border-meta .ant-color-picker.widget-style-inherited .ant-color-picker-trigger,
+.ant-color-picker.widget-style-inherited .ant-color-picker-trigger {
+  background: rgba(255, 170, 60, 0.25);
 }
 
 .widget-style-binding {
@@ -1095,15 +1130,6 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   color: #fff;
 }
 
-.widget-style-binding[data-bound] .widget-style-bubble-color-bar {
-  background: #fff;
-  box-shadow: none;
-}
-
-.widget-style-binding[data-bound] .widget-style-bubble-color-bar[data-empty] {
-  background: #fff;
-}
-
 .widget-style-binding[data-bound] .ant-select-selector,
 .widget-style-binding[data-bound] .ant-color-picker-trigger {
   color: #fff;
@@ -1128,24 +1154,59 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 }
 
 .widget-style-bubble-toggle {
-  min-width: 28px;
-  padding-inline: 6px;
-}
-
-.widget-style-bubble-color {
   display: inline-flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   min-width: 28px;
   height: 24px;
-  padding: 1px 6px 2px;
-  border: none;
+  padding: 0 6px;
+  border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
   color: inherit;
   cursor: pointer;
   line-height: 1;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+
+.widget-style-bubble-toggle:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.widget-style-bubble-toggle.is-active {
+  background: #3dba9a;
+  color: #fff;
+  border-color: #3dba9a;
+}
+
+.widget-style-bubble-toggle.widget-style-inherited {
+  background: rgba(255, 170, 60, 0.35);
+  color: inherit;
+  border-color: transparent;
+}
+
+.widget-style-bubble-toggle.widget-style-inherited-active {
+  background: rgba(255, 140, 30, 0.55);
+  color: #fff;
+  border-color: transparent;
+}
+
+.widget-style-bubble-color {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  line-height: 1;
+  box-sizing: border-box;
+  font-size: 14px;
 }
 
 .widget-style-bubble-color:hover {
@@ -1161,23 +1222,6 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 
 .widget-style-bubble-color .anticon {
   font-size: 13px;
-}
-
-.widget-style-bubble-color-bar {
-  display: block;
-  width: 14px;
-  height: 3px;
-  margin-top: 2px;
-  border-radius: 1px;
-  background: #8c8c8c;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
-}
-
-.widget-style-bubble-color-bar[data-empty] {
-  background:
-    linear-gradient(to top right, transparent calc(50% - 1px), #ff4d4f 50%, transparent calc(50% + 1px)),
-    #fff;
-  box-shadow: inset 0 0 0 1px #d9d9d9;
 }
 
 .widget-style-bubble-text {
@@ -1352,6 +1396,10 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   width: 100%;
 }
 
+.inspector-props-tabs .ant-tabs-nav {
+  margin-bottom: 8px;
+}
+
 .inspector-prop-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1380,6 +1428,11 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   gap: 2px;
   align-items: center;
   min-width: 0;
+}
+
+.inspector-prop.is-inherited .inspector-prop-value {
+  background: rgba(255, 170, 60, 0.2);
+  border-radius: 4px;
 }
 
 .inspector-prop-value .ant-input {
@@ -1549,15 +1602,11 @@ body:has(.preview-host.is-editing) #root {
   box-sizing: border-box;
 }
 
-.preview-mount .lowcode-flex > .lowcode-text,
-.preview-mount .lowcode-flex > .lowcode-button,
-.preview-mount .lowcode-flex > .lowcode-image,
-.preview-mount .lowcode-flex > .lowcode-flex,
-.preview-mount .lowcode-flex > .lowcode-swiper {
+.preview-mount :where(.lowcode-flex > .lowcode-text, .lowcode-flex > .lowcode-button, .lowcode-flex > .lowcode-image, .lowcode-flex > .lowcode-flex, .lowcode-flex > .lowcode-swiper) {
   margin: 0;
 }
 
-.preview-mount .lowcode-text {
+.preview-mount :where(.lowcode-text) {
   display: inline-block;
   vertical-align: baseline;
   box-sizing: border-box;
@@ -1582,7 +1631,7 @@ body:has(.preview-host.is-editing) #root {
   user-select: none;
 }
 
-.preview-mount .lowcode-button {
+.preview-mount :where(.lowcode-button) {
   display: inline-block;
   vertical-align: baseline;
   box-sizing: border-box;
@@ -2577,6 +2626,12 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+.icon-library-thumb img {
+  width: 56px;
+  height: 56px;
+  filter: brightness(0) invert(1);
 }
 
 .asset-library-meta {

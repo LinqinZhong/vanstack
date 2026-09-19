@@ -2,6 +2,7 @@ import type {
   AuthSessionDto,
   AuthUserDto,
   CreateProjectAssetGroupInput,
+  CreateProjectIconGroupInput,
   CreateProjectInput,
   CreateProjectPageInput,
   CreateProjectPageVersionInput,
@@ -11,10 +12,13 @@ import type {
   ProjectAssetFileDto,
   ProjectAssetGroupDto,
   ProjectDto,
+  ProjectIconFileDto,
+  ProjectIconGroupDto,
   ProjectLangCatalogDto,
   ProjectPageDto,
   ProjectPageVersionDto,
   UpdateProjectAssetGroupInput,
+  UpdateProjectIconGroupInput,
   UpdateProjectInput,
   UpdateProjectPageInput,
   UpdateProjectPageVersionInput,
@@ -161,6 +165,37 @@ export const api = {
   deleteAssetFile: (projectId: string, group: string, name: string) =>
     request<void>(
       `/projects/${projectId}/assets/groups/${encodeURIComponent(group)}/files/${encodeURIComponent(name)}`,
+      { method: 'DELETE' },
+    ),
+  listIconGroups: (projectId: string) =>
+    request<ProjectIconGroupDto[]>(`/projects/${projectId}/icons/groups`),
+  createIconGroup: (projectId: string, body: CreateProjectIconGroupInput) =>
+    request<ProjectIconGroupDto>(`/projects/${projectId}/icons/groups`, json('POST', body)),
+  renameIconGroup: (projectId: string, group: string, body: UpdateProjectIconGroupInput) =>
+    request<ProjectIconGroupDto>(
+      `/projects/${projectId}/icons/groups/${encodeURIComponent(group)}`,
+      json('PATCH', body),
+    ),
+  deleteIconGroup: (projectId: string, group: string) =>
+    request<void>(`/projects/${projectId}/icons/groups/${encodeURIComponent(group)}`, { method: 'DELETE' }),
+  listIconFiles: (projectId: string, group: string) =>
+    request<ProjectIconFileDto[]>(
+      `/projects/${projectId}/icons/groups/${encodeURIComponent(group)}/files`,
+    ),
+  uploadIconFile: (projectId: string, group: string, file: File, name?: string) => {
+    const body = new FormData();
+    body.append('file', file);
+    if (name?.trim()) {
+      body.append('name', name.trim());
+    }
+    return request<ProjectIconFileDto>(
+      `/projects/${projectId}/icons/groups/${encodeURIComponent(group)}/files`,
+      { method: 'POST', body },
+    );
+  },
+  deleteIconFile: (projectId: string, group: string, name: string) =>
+    request<void>(
+      `/projects/${projectId}/icons/groups/${encodeURIComponent(group)}/files/${encodeURIComponent(name)}`,
       { method: 'DELETE' },
     ),
 };

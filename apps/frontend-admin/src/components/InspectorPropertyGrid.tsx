@@ -1,5 +1,5 @@
 import { EditOutlined } from '@ant-design/icons';
-import { Button, Input, Modal, Tooltip, type InputRef } from 'antd';
+import { Button, Input, Modal, Tabs, Tooltip, type InputRef } from 'antd';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -48,6 +48,7 @@ import {
 } from '@vanstack/xml';
 import type { WidgetPatch } from '../utils/widgetTree';
 import { AssetImagePicker } from './AssetLibraryPanel';
+import { IconPicker } from './IconLibraryPanel';
 import { CopyI18nPicker } from './CopyI18nPicker';
 
 type BoxQuad = {
@@ -61,6 +62,9 @@ type InspectorProp = {
   key: string;
   value: string;
   onChange: (raw: string) => boolean;
+  picker?: 'image' | 'icon';
+  category?: 'basic' | 'style';
+  inherited?: boolean;
 };
 
 type LengthQuad = {
@@ -531,6 +535,89 @@ function PropertyGrid({
     });
   }, [items, query, t]);
 
+  const basicItems = visible.filter((item) => item.category === 'basic');
+  const styleItems = visible.filter((item) => item.category !== 'basic');
+  const hasBasic = items.some((item) => item.category === 'basic');
+
+  const renderItem = (item: InspectorProp) => (
+    <div
+      key={`${resetKey ?? ''}:${item.key}`}
+      className={`inspector-prop${item.inherited ? ' is-inherited' : ''}`}
+      title={item.key}
+    >
+      <span className="inspector-prop-label">{item.key}</span>
+      <div className="inspector-prop-value">
+        <PropertyInput
+          propKey={item.key}
+          disabled={disabled}
+          value={item.value}
+          onChange={item.onChange}
+          onInvalidChange={reportInvalid}
+        />
+        {item.key === 'value' || item.key === 'text' ? (
+          <>
+            <CopyI18nPicker
+              catalog={i18nCatalog}
+              disabled={disabled}
+              onPick={(expression) => item.onChange(expression)}
+            />
+            <Tooltip title={t('lowcode.propEdit')}>
+              <Button
+                size="small"
+                type="text"
+                className="inspector-prop-edit"
+                disabled={disabled}
+                icon={<EditOutlined />}
+                onClick={() => {
+                  setEditing(item);
+                  setEditorDraft(item.value);
+                }}
+              />
+            </Tooltip>
+          </>
+        ) : null}
+        {item.key === 'src' ? (
+          <>
+            {projectId && item.picker === 'image' ? (
+              <AssetImagePicker
+                projectId={projectId}
+                disabled={disabled}
+                onPick={(url) => item.onChange(url)}
+              />
+            ) : null}
+            {projectId && item.picker === 'icon' ? (
+              <IconPicker
+                projectId={projectId}
+                disabled={disabled}
+                onPick={(url) => item.onChange(url)}
+              />
+            ) : null}
+            <Tooltip title={t('lowcode.propEdit')}>
+              <Button
+                size="small"
+                type="text"
+                className="inspector-prop-edit"
+                disabled={disabled}
+                icon={<EditOutlined />}
+                onClick={() => {
+                  setEditing(item);
+                  setEditorDraft(item.value);
+                }}
+              />
+            </Tooltip>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  const renderGrid = (list: InspectorProp[]) =>
+    list.length ? (
+      <div className="inspector-prop-grid">{list.map((item) => renderItem(item))}</div>
+    ) : (
+      <div className="inspector-prop-empty">{t('lowcode.propFilterEmpty')}</div>
+    );
+
   return (
     <div className="inspector-props">
       <Input
@@ -540,69 +627,26 @@ function PropertyGrid({
         value={query}
         onChange={(event) => setQuery(event.target.value)}
       />
-      {visible.length ? (
-        <div className="inspector-prop-grid">
-          {visible.map((item) => (
-            <div key={`${resetKey ?? ''}:${item.key}`} className="inspector-prop" title={item.key}>
-              <span className="inspector-prop-label">{item.key}</span>
-              <div className="inspector-prop-value">
-                <PropertyInput
-                  propKey={item.key}
-                  disabled={disabled}
-                  value={item.value}
-                  onChange={item.onChange}
-                  onInvalidChange={reportInvalid}
-                />
-                {item.key === 'value' || item.key === 'text' ? (
-                  <>
-                    <CopyI18nPicker
-                      catalog={i18nCatalog}
-                      disabled={disabled}
-                      onPick={(expression) => item.onChange(expression)}
-                    />
-                    <Tooltip title={t('lowcode.propEdit')}>
-                      <Button
-                        size="small"
-                        type="text"
-                        className="inspector-prop-edit"
-                        disabled={disabled}
-                        icon={<EditOutlined />}
-                        onClick={() => {
-                          setEditing(item);
-                          setEditorDraft(item.value);
-                        }}
-                      />
-                    </Tooltip>
-                  </>
-                ) : null}
-                {item.key === 'src' ? (
-                  <>
-                    {projectId ? (
-                      <AssetImagePicker
-                        projectId={projectId}
-                        disabled={disabled}
-                        onPick={(url) => item.onChange(url)}
-                      />
-                    ) : null}
-                    <Tooltip title={t('lowcode.propEdit')}>
-                      <Button
-                        size="small"
-                        type="text"
-                        className="inspector-prop-edit"
-                        disabled={disabled}
-                        icon={<EditOutlined />}
-                        onClick={() => {
-                          setEditing(item);
-                          setEditorDraft(item.value);
-                        }}
-                      />
-                    </Tooltip>
-                  </>
-                ) : null}
-              </div>
-            </div>
-          ))}
-        </div>
+      {hasBasic ? (
+        <Tabs
+          size="small"
+          defaultActiveKey="basic"
+          className="inspector-props-tabs"
+          items={[
+            {
+              key: 'basic',
+              label: t('lowcode.propTabBasic'),
+              children: renderGrid(basicItems),
+            },
+            {
+              key: 'style',
+              label: t('lowcode.propTabStyle'),
+              children: renderGrid(styleItems),
+            },
+          ]}
+        />
+      ) : visible.length ? (
+        <div className="inspector-prop-grid">{visible.map((item) => renderItem(item))}</div>
       ) : (
         <div className="inspector-prop-empty">{t('lowcode.propFilterEmpty')}</div>
       )}
@@ -638,9 +682,22 @@ function PropertyGrid({
             />
           </div>
         ) : null}
-        {editing?.key === 'src' && projectId ? (
+        {editing?.key === 'src' && projectId && editing.picker === 'image' ? (
           <div className="inspector-text-modal-i18n">
             <AssetImagePicker
+              projectId={projectId}
+              disabled={disabled}
+              onPick={(url) => {
+                setEditorDraft(url);
+                editing.onChange(url);
+                setEditing(null);
+              }}
+            />
+          </div>
+        ) : null}
+        {editing?.key === 'src' && projectId && editing.picker === 'icon' ? (
+          <div className="inspector-text-modal-i18n">
+            <IconPicker
               projectId={projectId}
               disabled={disabled}
               onPick={(url) => {
@@ -664,6 +721,7 @@ export function WidgetPropertyInspector({
   onInvalidChange,
   i18nCatalog,
   projectId,
+  ownKeys,
 }: {
   widget: PageWidget;
   parentType?: PageWidget['type'];
@@ -672,6 +730,7 @@ export function WidgetPropertyInspector({
   onInvalidChange?: (invalid: boolean) => void;
   i18nCatalog?: PageI18n;
   projectId?: string;
+  ownKeys?: Set<string>;
 }) {
   const style = widget.style ?? {};
   const flex = widget.type === 'flex' ? (widget.flex ?? {}) : undefined;
@@ -747,8 +806,40 @@ export function WidgetPropertyInspector({
     items.push({
       key: 'src',
       value: widget.src,
+      picker: 'image',
+      category: 'basic',
       onChange: (raw) => {
         onPatch({ src: raw }, `edit:${widget.id}:src`);
+        return true;
+      },
+    });
+  }
+  if (widget.type === 'icon') {
+    items.push({
+      key: 'src',
+      value: widget.src,
+      picker: 'icon',
+      category: 'basic',
+      onChange: (raw) => {
+        onPatch({ src: raw }, `edit:${widget.id}:src`);
+        return true;
+      },
+    });
+    items.push({
+      key: 'size',
+      value: widget.size != null ? String(widget.size) : '',
+      category: 'basic',
+      onChange: (raw) => {
+        const trimmed = raw.trim();
+        if (!trimmed) {
+          onPatch({ size: 0 }, `edit:${widget.id}:size`);
+          return true;
+        }
+        const num = Number(trimmed);
+        if (!Number.isFinite(num) || num <= 0) {
+          return false;
+        }
+        onPatch({ size: num }, `edit:${widget.id}:size`);
         return true;
       },
     });
@@ -757,6 +848,7 @@ export function WidgetPropertyInspector({
     items.push({
       key: 'value',
       value: widget.value,
+      category: 'basic',
       onChange: (raw) => {
         onPatch({ value: raw }, `edit:${widget.id}:value`);
         return true;
@@ -767,6 +859,7 @@ export function WidgetPropertyInspector({
     items.push({
       key: 'text',
       value: widget.text,
+      category: 'basic',
       onChange: (raw) => {
         onPatch({ text: raw }, `edit:${widget.id}:text`);
         return true;
@@ -1140,49 +1233,58 @@ export function WidgetPropertyInspector({
       {
         key: 'indicatorDots',
         value: formatBool(swiper.indicatorDots),
+        category: 'basic',
         onChange: (raw) =>
           accepted(parseBool(raw), (indicatorDots) => patchSwiper({ indicatorDots: indicatorDots || undefined })),
       },
       {
         key: 'indicatorColor',
         value: swiper.indicatorColor ?? '',
+        category: 'basic',
         onChange: (raw) =>
           accepted(parseCssColor(raw), (indicatorColor) => patchSwiper({ indicatorColor })),
       },
       {
         key: 'indicatorActiveColor',
         value: swiper.indicatorActiveColor ?? '',
+        category: 'basic',
         onChange: (raw) =>
           accepted(parseCssColor(raw), (indicatorActiveColor) => patchSwiper({ indicatorActiveColor })),
       },
       {
         key: 'autoplay',
         value: formatBool(swiper.autoplay),
+        category: 'basic',
         onChange: (raw) => accepted(parseBool(raw), (autoplay) => patchSwiper({ autoplay: autoplay || undefined })),
       },
       {
         key: 'current',
         value: swiper.current == null ? '' : String(swiper.current),
+        category: 'basic',
         onChange: (raw) => accepted(parseNumber(raw, 0), (current) => patchSwiper({ current })),
       },
       {
         key: 'interval',
         value: swiper.interval == null ? '' : String(swiper.interval),
+        category: 'basic',
         onChange: (raw) => accepted(parseNumber(raw, 1), (interval) => patchSwiper({ interval })),
       },
       {
         key: 'duration',
         value: swiper.duration == null ? '' : String(swiper.duration),
+        category: 'basic',
         onChange: (raw) => accepted(parseNumber(raw, 0), (duration) => patchSwiper({ duration })),
       },
       {
         key: 'circular',
         value: formatBool(swiper.circular),
+        category: 'basic',
         onChange: (raw) => accepted(parseBool(raw), (circular) => patchSwiper({ circular: circular || undefined })),
       },
       {
         key: 'vertical',
         value: formatBool(swiper.vertical),
+        category: 'basic',
         onChange: (raw) => accepted(parseBool(raw), (vertical) => patchSwiper({ vertical: vertical || undefined })),
       },
       pxProp('previousMargin', swiper.previousMargin, (previousMargin) => patchSwiper({ previousMargin })),
@@ -1190,28 +1292,39 @@ export function WidgetPropertyInspector({
       {
         key: 'displayMultipleItems',
         value: swiper.displayMultipleItems == null ? '' : String(swiper.displayMultipleItems),
+        category: 'basic',
         onChange: (raw) =>
           accepted(parseNumber(raw, 1), (displayMultipleItems) => patchSwiper({ displayMultipleItems })),
       },
       {
         key: 'snapToEdge',
         value: formatBool(swiper.snapToEdge),
+        category: 'basic',
         onChange: (raw) =>
           accepted(parseBool(raw), (snapToEdge) => patchSwiper({ snapToEdge: snapToEdge || undefined })),
       },
       {
         key: 'easingFunction',
         value: swiper.easingFunction ?? '',
+        category: 'basic',
         onChange: (raw) =>
           accepted(parseEnum<SwiperEasing>(raw, SWIPER_EASINGS), (easingFunction) => patchSwiper({ easingFunction })),
       },
     );
   }
 
+  const markedItems = ownKeys
+    ? items.map((item) => ({
+        ...item,
+        inherited: !ownKeys.has(item.key),
+        value: ownKeys.has(item.key) ? item.value : '',
+      }))
+    : items;
+
   return (
     <PropertyGrid
       disabled={disabled}
-      items={items}
+      items={markedItems}
       resetKey={widget.id}
       onInvalidChange={onInvalidChange}
       i18nCatalog={i18nCatalog}

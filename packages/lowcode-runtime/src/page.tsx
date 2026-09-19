@@ -8,8 +8,9 @@ import {
   type BindingScope,
   type PageI18n,
   type PageWidget,
+  type WidgetStateLayer,
 } from '@vanstack/xml';
-import { pageCss } from './css';
+import { pageCss, pageCssText } from './css';
 import { widgetElement } from './elements';
 import { HOVER_STATE_NAME, resolveRuntimeOwnState, widgetHasHoverState } from './hover';
 import { expandLoopTree, widgetInstanceKey, widgetInstanceMeta } from './loop';
@@ -39,14 +40,18 @@ export function LowcodePage({ xml, editing, locale, catalog, viewing }: LowcodeP
   }, [xml, editing]);
 
   const dataScope = useMemo(() => buildPageDataScope(page.data), [page.data]);
-  const widgets = useMemo(() => {
+  const { widgets, stateLayers } = useMemo(() => {
+    const sink = new WeakMap<object, WidgetStateLayer[]>();
     const expanded = expandLoopTree(page.widgets, { data: dataScope, aliases: {} }, editing);
-    return resolveWidgetTree(expanded, editing ? viewing : null, {
+    const resolved = resolveWidgetTree(expanded, editing ? viewing : null, {
       appliedNameFor: editing ? undefined : (widget) => resolveRuntimeOwnState(widget, hoverInstanceKeys),
+      stateLayersSink: sink,
     });
+    return { widgets: resolved, stateLayers: sink };
   }, [page.widgets, viewing, dataScope, editing, hoverInstanceKeys]);
   const currentLocale = locale || pickPageLocale(catalog);
   const dir = pageI18nDir(catalog, currentLocale);
+  const styleText = useMemo(() => pageCssText(page.widgets), [page.widgets]);
 
   function hoverFor(widget: PageWidget): WidgetHoverHandlers | undefined {
     if (editing || !widgetHasHoverState(widget)) {
@@ -75,6 +80,7 @@ export function LowcodePage({ xml, editing, locale, catalog, viewing }: LowcodeP
       instanceKey: meta?.key ?? widget.id,
       hoverFor,
       render,
+      stateLayers,
     });
   }
 
@@ -86,6 +92,10 @@ export function LowcodePage({ xml, editing, locale, catalog, viewing }: LowcodeP
       'data-hover-active': hoverInstanceKeys.length > 0 ? HOVER_STATE_NAME : undefined,
       style: { ...pageCss(page.style), direction: dir },
     },
+    createElement('style', {
+      key: 'lowcode-page-style',
+      dangerouslySetInnerHTML: { __html: styleText },
+    }),
     widgets.map((widget) => render(widget)),
   );
 }

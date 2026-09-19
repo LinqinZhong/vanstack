@@ -8,6 +8,7 @@ import {
   type FlexContainerStyle,
   type FlexItemStyle,
   type PageStyle,
+  type PageWidget,
   type SizeValue,
   type WidgetStyle,
 } from '@vanstack/xml';
@@ -87,8 +88,8 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
   if (textShadow) {
     css.textShadow = textShadow;
   }
-  if (style.italic) {
-    css.fontStyle = 'italic';
+  if (style.italic != null) {
+    css.fontStyle = style.italic ? 'italic' : 'normal';
   }
   if (style.fontFamily) {
     const fontFamily = cssText(style.fontFamily, options);
@@ -106,15 +107,15 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
     }
   }
 
-  const decorations: string[] = [];
-  if (style.underline) {
-    decorations.push('underline');
-  }
-  if (style.lineThrough) {
-    decorations.push('line-through');
-  }
-  if (decorations.length > 0) {
-    css.textDecoration = decorations.join(' ');
+  if (style.underline != null || style.lineThrough != null) {
+    const decorations: string[] = [];
+    if (style.underline) {
+      decorations.push('underline');
+    }
+    if (style.lineThrough) {
+      decorations.push('line-through');
+    }
+    css.textDecoration = decorations.length > 0 ? decorations.join(' ') : 'none';
   }
 
   const background = cssText(style.background, options);
@@ -296,4 +297,104 @@ export function boxCss(style: WidgetStyle | undefined, options?: WidgetCssOption
     delete css.height;
   }
   return Object.keys(css).length > 0 ? css : undefined;
+}
+
+export function widgetClassName(id: string): string {
+  return `lw-${id.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+}
+
+export function dynamicStyleCss(style: WidgetStyle | undefined, options?: WidgetCssOptions): CSSProperties | undefined {
+  const css: CSSProperties = {};
+  if ((options?.animate ?? true) && style?.transition != null && style.transition > 0) {
+    css.transition = `all ${style.transition}ms`;
+  }
+  if (style) {
+    const filtered: Record<string, string> = {};
+    for (const [key, value] of Object.entries(style)) {
+      if (typeof value === 'string' && isCopyBinding(value)) {
+        filtered[key] = value;
+      }
+    }
+    if (Object.keys(filtered).length > 0) {
+      const bound = widgetCss(filtered as unknown as WidgetStyle, { ...options, animate: false }) ?? {};
+      delete bound.width;
+      delete bound.height;
+      delete bound.borderTopWidth;
+      delete bound.borderRightWidth;
+      delete bound.borderBottomWidth;
+      delete bound.borderLeftWidth;
+      Object.assign(css, bound);
+    }
+  }
+  return Object.keys(css).length > 0 ? css : undefined;
+}
+
+export function cssDeclarationText(css: CSSProperties): string | undefined {
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(css)) {
+    if (value == null || value === '') {
+      continue;
+    }
+    const name = key.replace(/[A-Z]/g, (part) => `-${part.toLowerCase()}`);
+    lines.push(`${name}: ${String(value)}`);
+  }
+  return lines.length > 0 ? lines.join('; ') : undefined;
+}
+
+function escapeStateName(name: string): string {
+  return name.replace(/["\\]/g, '\\$&');
+}
+
+function styleRuleText(style: WidgetStyle | undefined, includeDefaults: boolean): string | undefined {
+  if (!style && !includeDefaults) {
+    return undefined;
+  }
+  const css = widgetCss(style, { animate: false, evaluateBindings: false }) ?? {};
+  if (!includeDefaults) {
+    if (style?.width == null) {
+      delete css.width;
+    }
+    if (style?.height == null) {
+      delete css.height;
+    }
+  }
+  return cssDeclarationText(css);
+}
+
+export function pageCssText(widgets: PageWidget[]): string {
+  const blocks: string[] = [];
+
+  function push(selector: string, style: WidgetStyle | undefined, includeDefaults: boolean) {
+    const body = styleRuleText(style, includeDefaults);
+    if (body) {
+      blocks.push(`${selector} { ${body}; }`);
+    }
+  }
+
+  function walk(list: PageWidget[]) {
+    for (const widget of list) {
+      const cls = widgetClassName(widget.id);
+      for (const override of widget.stateOverrides ?? []) {
+        const overrideName = escapeStateName(override.name);
+        push(`[data-state~="${overrideName}"] .${cls}`, override.style, false);
+        for (const nested of override.states ?? []) {
+          push(
+            `[data-state~="${overrideName}"] .${cls}[data-state~="${escapeStateName(nested.name)}"]`,
+            nested.style,
+            false,
+          );
+        }
+      }
+      push(`.${cls}`, widget.style, true);
+      for (const state of widget.states ?? []) {
+        push(`.${cls}[data-state~="${escapeStateName(state.name)}"]`, state.style, false);
+      }
+      if ('children' in widget) {
+        walk(widget.children);
+      }
+    }
+  }
+
+  walk(widgets);
+  return blocks.join('\n');
 }

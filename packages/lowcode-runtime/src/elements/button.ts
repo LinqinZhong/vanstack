@@ -1,7 +1,7 @@
 import { createElement, type ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
-import { flexItemCss, hiddenCss, mergeCss, widgetCss } from '../css';
-import { resolveWidgetCopy, widgetCssOptions, type WidgetRenderContext } from '../widget-render';
+import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
+import { resolveWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
 export function renderButton(
   widget: Extract<PageWidget, { type: 'button' }>,
@@ -11,11 +11,16 @@ export function renderButton(
     'button',
     {
       key: ctx.instanceKey,
-      className: 'lowcode-button',
+      className: `lowcode-button ${widgetClassName(widget.id)}`,
       type: 'button',
       'data-widget-id': widget.id,
       'data-widget-type': 'button',
-      style: mergeCss(widgetCss(widget.style, widgetCssOptions(ctx)), flexItemCss(widget.item), hiddenCss(widget.hidden, ctx.editing)),
+      'data-state': widgetStateAttr(widget, ctx),
+      style: mergeCss(
+        dynamicStyleCss(widget.style, widgetCssOptions(ctx)),
+        flexItemCss(widget.item),
+        hiddenCss(widget.hidden, ctx.editing),
+      ),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,
     },

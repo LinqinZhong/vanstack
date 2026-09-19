@@ -39,6 +39,7 @@ import {
   type WidgetStyle,
 } from '@vanstack/xml';
 import { AssetImagePicker } from './AssetLibraryPanel';
+import { IconPicker } from './IconLibraryPanel';
 import { CopyI18nPicker } from './CopyI18nPicker';
 import { StyleBoxEdges, pxFromLength } from './StyleBoxEdges';
 import { AngleField, SizeField, fontFamilyOptions } from './WidgetStyleFields';
@@ -158,21 +159,22 @@ function BindingLock({
 function ToggleButton({
   label,
   active,
+  inherited,
   onClick,
 }: {
   label: ReactNode;
   active: boolean;
+  inherited?: string;
   onClick: () => void;
 }) {
   return (
-    <Button
-      size="small"
-      type={active ? 'primary' : 'text'}
-      className="widget-style-bubble-toggle"
+    <button
+      type="button"
+      className={['widget-style-bubble-toggle', inherited, active ? 'is-active' : ''].filter(Boolean).join(' ')}
       onClick={onClick}
     >
       {label}
-    </Button>
+    </button>
   );
 }
 
@@ -187,6 +189,7 @@ function ColorIconPicker({
   onChange,
   resetKey,
   bound,
+  buttonClassName,
 }: {
   title: string;
   color?: string;
@@ -198,6 +201,7 @@ function ColorIconPicker({
   onChange: (css: string | undefined, cleared: boolean) => void;
   resetKey?: string;
   bound?: string;
+  buttonClassName?: string;
 }) {
   const picker = (
     <Tooltip title={title} open={open ? false : undefined}>
@@ -212,17 +216,17 @@ function ColorIconPicker({
           onOpenChange={onOpenChange}
           onChange={(value, css) => onChange(value.cleared ? undefined : css, value.cleared)}
         >
-          <button type="button" className="widget-style-bubble-color">
+          <button type="button" className={['widget-style-bubble-color', buttonClassName].filter(Boolean).join(' ')}>
             {kind === 'font' ? (
-              <span className="widget-style-bubble-color-letter">A</span>
+              <span
+                className="widget-style-bubble-color-letter"
+                style={colorValue(color) ? { color } : undefined}
+              >
+                A
+              </span>
             ) : (
               <HighlightOutlined />
             )}
-            <span
-              className="widget-style-bubble-color-bar"
-              style={colorValue(color) ? { backgroundColor: color } : undefined}
-              data-empty={!colorValue(color) || undefined}
-            />
           </button>
         </ColorPicker>
       </span>
@@ -230,7 +234,7 @@ function ColorIconPicker({
   );
 
   return (
-    <BindingLock bound={bound ?? color} resetKey={resetKey} onContinue={() => onOpenChange?.(true)}>
+    <BindingLock bound={bound} resetKey={resetKey} onContinue={() => onOpenChange?.(true)}>
       {picker}
     </BindingLock>
   );
@@ -252,6 +256,7 @@ export function WidgetStyleBubble({
   variables,
   disabled,
   onToolbarPopupChange,
+  ownKeys,
 }: {
   widget: PageWidget;
   style?: WidgetStyle;
@@ -268,14 +273,27 @@ export function WidgetStyleBubble({
   variables?: PageVariable[];
   disabled?: boolean;
   onToolbarPopupChange?: (open: boolean) => void;
+  ownKeys?: Set<string>;
 }) {
   const { t, i18n } = useTranslation();
   const modifier = modifierShortcutLabel();
   const rootRef = useRef<HTMLDivElement>(null);
   const current = style ?? {};
+  const isInherited = (key: string) => (ownKeys ? !ownKeys.has(key) : false);
+  const hasValue = (key: string) => {
+    const v = (current as Record<string, unknown>)[key];
+    return v != null && v !== '' && v !== false;
+  };
+  const inheritedClass = (key: string, active?: boolean) => {
+    if (!isInherited(key) || !hasValue(key)) return undefined;
+    return active ? 'widget-style-inherited-active' : 'widget-style-inherited';
+  };
+  const display: WidgetStyle = current;
+  const Inherited = ({ active, children }: { active?: boolean; children: ReactNode }) =>
+    active ? <div className="widget-style-inherited">{children}</div> : <>{children}</>;
   const showText = widget.type === 'text' || widget.type === 'button';
   const content = widget.type === 'text' ? widget.value : widget.type === 'button' ? widget.text : '';
-  const [textShadow, setTextShadow] = useState(() => parseCssShadow(current.textShadow));
+  const [textShadow, setTextShadow] = useState(() => parseCssShadow(display.textShadow));
   const [openPopup, setOpenPopup] = useState<string | null>(null);
   const [stateFnOpen, setStateFnOpen] = useState(false);
 
@@ -348,18 +366,37 @@ export function WidgetStyleBubble({
               <Button size="small" type="text" icon={<PictureOutlined />} disabled />
             </Tooltip>
           ) : null}
+          {widget.type === 'icon' && projectId && onSrcChange ? (
+            <IconPicker projectId={projectId} disabled={disabled} onPick={onSrcChange} />
+          ) : widget.type === 'icon' ? (
+            <Tooltip title={t('lowcode.iconsPickIcon')}>
+              <Button size="small" type="text" icon={<PictureOutlined />} disabled />
+            </Tooltip>
+          ) : null}
+          {widget.type === 'icon' ? (
+            <ColorIconPicker
+              title={t('lowcode.styleColor')}
+              kind="font"
+              color={display.color}
+              buttonClassName={inheritedClass('color')}
+              resetKey={widget.id}
+              getPopupContainer={popupContainer}
+              {...popupProps('icon-color')}
+              onChange={(css) => patch({ color: css })}
+            />
+          ) : null}
           {showText ? (
             <>
               <BindingLock
-                bound={current.fontFamily}
+                bound={isInherited('fontFamily') ? undefined : current.fontFamily}
                 resetKey={widget.id}
                 onContinue={() => popupProps('font-family').onOpenChange(true)}
               >
                 <Select
                 size="small"
-                className="widget-style-bubble-font"
+                className={['widget-style-bubble-font', inheritedClass('fontFamily')].filter(Boolean).join(' ')}
                 allowClear
-                value={current.fontFamily}
+                value={display.fontFamily}
                 placeholder={t('lowcode.styleFontDefault')}
                 popupMatchSelectWidth={false}
                 getPopupContainer={() => document.body}
@@ -372,11 +409,11 @@ export function WidgetStyleBubble({
               <Tooltip title={`${t('lowcode.styleFontSize')} (${modifier}+. / ${modifier}+-)`}>
                 <InputNumber
                   size="small"
-                  className="widget-style-bubble-fontsize"
+                  className={['widget-style-bubble-fontsize', inheritedClass('fontSize')].filter(Boolean).join(' ')}
                   min={1}
                   max={999}
                   controls
-                  value={current.fontSize}
+                  value={display.fontSize}
                   placeholder="px"
                   suffix="px"
                   onMouseDown={(event) => event.stopPropagation()}
@@ -392,69 +429,83 @@ export function WidgetStyleBubble({
                 />
               </Tooltip>
               <Tooltip title={`${t('lowcode.styleBold')} (${modifier}+B)`}>
-                <span>
-                  <BindingLock
-                    bound={current.fontWeight}
-                    resetKey={widget.id}
-                    onContinue={() =>
-                      patch({ fontWeight: current.fontWeight === '700' ? undefined : '700' })
+                <BindingLock
+                  bound={isInherited('fontWeight') ? undefined : current.fontWeight}
+                  resetKey={widget.id}
+                  onContinue={() =>
+                    patch({
+                      fontWeight: isInherited('fontWeight')
+                        ? current.fontWeight === '700' ? '400' : '700'
+                        : current.fontWeight === '700' ? undefined : '700',
+                    })
+                  }
+                >
+                  <ToggleButton
+                    label={<BoldOutlined />}
+                    active={current.fontWeight === '700'}
+                    inherited={inheritedClass('fontWeight', current.fontWeight === '700')}
+                    onClick={() =>
+                      patch({
+                        fontWeight: isInherited('fontWeight')
+                          ? current.fontWeight === '700' ? '400' : '700'
+                          : current.fontWeight === '700' ? undefined : '700',
+                      })
                     }
-                  >
-                    <ToggleButton
-                      label={<BoldOutlined />}
-                      active={current.fontWeight === '700'}
-                      onClick={() => patch({ fontWeight: current.fontWeight === '700' ? undefined : '700' })}
-                    />
-                  </BindingLock>
-                </span>
+                  />
+                </BindingLock>
               </Tooltip>
               <Tooltip title={`${t('lowcode.styleItalic')} (${modifier}+I)`}>
-                <span>
-                  <ToggleButton
-                    label={<ItalicOutlined />}
-                    active={Boolean(current.italic)}
-                    onClick={() => patch({ italic: current.italic ? undefined : true })}
-                  />
-                </span>
+                <ToggleButton
+                  label={<ItalicOutlined />}
+                  active={Boolean(current.italic)}
+                  inherited={inheritedClass('italic', Boolean(current.italic))}
+                  onClick={() =>
+                    patch({ italic: isInherited('italic') ? !current.italic : current.italic ? undefined : true })
+                  }
+                />
               </Tooltip>
               <Tooltip title={`${t('lowcode.styleUnderline')} (${modifier}+U)`}>
-                <span>
-                  <ToggleButton
-                    label={<UnderlineOutlined />}
-                    active={Boolean(current.underline)}
-                    onClick={() => patch({ underline: current.underline ? undefined : true })}
-                  />
-                </span>
+                <ToggleButton
+                  label={<UnderlineOutlined />}
+                  active={Boolean(current.underline)}
+                  inherited={inheritedClass('underline', Boolean(current.underline))}
+                  onClick={() =>
+                    patch({ underline: isInherited('underline') ? !current.underline : current.underline ? undefined : true })
+                  }
+                />
               </Tooltip>
               <Tooltip title={`${t('lowcode.styleLineThrough')} (${modifier}+D)`}>
-                <span>
-                  <ToggleButton
-                    label={<StrikethroughOutlined />}
-                    active={Boolean(current.lineThrough)}
-                    onClick={() => patch({ lineThrough: current.lineThrough ? undefined : true })}
-                  />
-                </span>
+                <ToggleButton
+                  label={<StrikethroughOutlined />}
+                  active={Boolean(current.lineThrough)}
+                  inherited={inheritedClass('lineThrough', Boolean(current.lineThrough))}
+                  onClick={() =>
+                    patch({ lineThrough: isInherited('lineThrough') ? !current.lineThrough : current.lineThrough ? undefined : true })
+                  }
+                />
               </Tooltip>
               <ColorIconPicker
                 title={t('lowcode.styleColor')}
                 kind="font"
-                color={current.color}
+                color={display.color}
+                bound={isInherited('color') ? undefined : current.color}
+                buttonClassName={inheritedClass('color')}
                 resetKey={widget.id}
                 getPopupContainer={popupContainer}
                 {...popupProps('font-color')}
                 onChange={(css) => patch({ color: css })}
               />
               <Tooltip title={t('lowcode.styleTextShadow')}>
-                <span>
-                  <BindingLock
-                    bound={current.textShadow}
-                    resetKey={widget.id}
-                    onContinue={() =>
-                      popupProps('text-shadow').onOpenChange(true)
-                    }
-                  >
-                    <ColorPicker
+                <BindingLock
+                  bound={isInherited('textShadow') ? undefined : current.textShadow}
+                  resetKey={widget.id}
+                  onContinue={() =>
+                    popupProps('text-shadow').onOpenChange(true)
+                  }
+                >
+                  <ColorPicker
                     size="small"
+                    className={inheritedClass('textShadow')}
                     allowClear
                     destroyOnHidden
                     value={colorValue(textShadow.color)}
@@ -462,8 +513,7 @@ export function WidgetStyleBubble({
                     {...popupProps('text-shadow')}
                     onChange={(value, css) => patchTextShadow({ color: value.cleared ? '' : css })}
                   />
-                  </BindingLock>
-                </span>
+                </BindingLock>
               </Tooltip>
             </>
           ) : null}
@@ -471,8 +521,9 @@ export function WidgetStyleBubble({
             title={t('lowcode.styleBackground')}
             kind="fill"
             allowClear={widget.type !== 'button'}
-            color={current.background || (widget.type === 'button' ? DEFAULT_BUTTON_BACKGROUND : undefined)}
-            bound={current.background}
+            color={display.background || (widget.type === 'button' ? DEFAULT_BUTTON_BACKGROUND : undefined)}
+            bound={isInherited('background') ? undefined : current.background}
+            buttonClassName={inheritedClass('background')}
             resetKey={widget.id}
             getPopupContainer={popupContainer}
             {...popupProps('background')}
@@ -611,27 +662,32 @@ export function WidgetStyleBubble({
             ) : null}
             {openGroup === 'size' && isBoxGroupAllowed(widget.type, 'size') ? (
               <div className="style-size-panel">
-                <SizeField
-                  label={t('lowcode.styleWidth')}
-                  size={current.width}
-                  allowFit={widget.type !== 'swiper'}
-                  fallback={widget.type === 'swiper' ? DEFAULT_SWIPER_WIDTH : undefined}
-                  onChange={(width) => patch({ width })}
-                />
-                <SizeField
-                  label={t('lowcode.styleHeight')}
-                  size={current.height}
-                  allowFit={widget.type !== 'swiper'}
-                  fallback={widget.type === 'swiper' ? DEFAULT_SWIPER_HEIGHT : undefined}
-                  onChange={(height) => patch({ height })}
-                />
+                <Inherited active={!!inheritedClass('width')}>
+                  <SizeField
+                    label={t('lowcode.styleWidth')}
+                    size={display.width}
+                    allowFit={widget.type !== 'swiper'}
+                    fallback={widget.type === 'swiper' ? DEFAULT_SWIPER_WIDTH : undefined}
+                    onChange={(width) => patch({ width })}
+                  />
+                </Inherited>
+                <Inherited active={!!inheritedClass('height')}>
+                  <SizeField
+                    label={t('lowcode.styleHeight')}
+                    size={display.height}
+                    allowFit={widget.type !== 'swiper'}
+                    fallback={widget.type === 'swiper' ? DEFAULT_SWIPER_HEIGHT : undefined}
+                    onChange={(height) => patch({ height })}
+                  />
+                </Inherited>
               </div>
             ) : null}
             {openGroup === 'overflow' && isBoxGroupAllowed(widget.type, 'overflow') ? (
               <div className="style-size-panel">
                 <Select
                   size="small"
-                  value={current.overflow ?? 'visible'}
+                  className={inheritedClass('overflow')}
+                  value={display.overflow ?? 'visible'}
                   getPopupContainer={popupContainer}
                   onChange={(overflow: OverflowMode) =>
                     patch({ overflow: overflow === 'visible' ? undefined : overflow })
@@ -647,7 +703,8 @@ export function WidgetStyleBubble({
               <div className="style-size-panel">
                 <Select
                   size="small"
-                  value={current.position ?? 'static'}
+                  className={inheritedClass('position')}
+                  value={display.position ?? 'static'}
                   getPopupContainer={popupContainer}
                   onChange={(position: PositionMode) =>
                     patch({ position: position === 'static' ? undefined : position })
@@ -657,7 +714,7 @@ export function WidgetStyleBubble({
                     label: t(`lowcode.stylePosition${value.charAt(0).toUpperCase()}${value.slice(1)}`),
                   }))}
                 />
-                {current.position ? (
+                {display.position ? (
                   <>
                     <StyleBoxEdges
                       resetKey={`${widget.id}:position`}
@@ -665,11 +722,14 @@ export function WidgetStyleBubble({
                       units={['px', '%']}
                       lengthKind="inset"
                       popupContainer={popupContainer}
+                      ownKeys={ownKeys}
+                      edgeKeys={{ top: 'top', right: 'right', bottom: 'bottom', left: 'left' }}
+                      baseValues={{ top: current.top, right: current.right, bottom: current.bottom, left: current.left }}
                       values={{
-                        top: current.top,
-                        right: current.right,
-                        bottom: current.bottom,
-                        left: current.left,
+                        top: display.top,
+                        right: display.right,
+                        bottom: display.bottom,
+                        left: display.left,
                       }}
                       onChange={(quad) =>
                         patch({
@@ -686,7 +746,8 @@ export function WidgetStyleBubble({
                         size="small"
                         step={1}
                         precision={0}
-                        value={current.zIndex}
+                        className={inheritedClass('zIndex')}
+                        value={display.zIndex}
                         onChange={(value) =>
                           patch({
                             zIndex:
@@ -706,11 +767,14 @@ export function WidgetStyleBubble({
                 units={['px', '%', 'auto']}
                 lengthKind="margin"
                 popupContainer={popupContainer}
+                ownKeys={ownKeys}
+                edgeKeys={{ top: 'marginTop', right: 'marginRight', bottom: 'marginBottom', left: 'marginLeft' }}
+                baseValues={{ top: current.marginTop, right: current.marginRight, bottom: current.marginBottom, left: current.marginLeft }}
                 values={{
-                  top: current.marginTop,
-                  right: current.marginRight,
-                  bottom: current.marginBottom,
-                  left: current.marginLeft,
+                  top: display.marginTop,
+                  right: display.marginRight,
+                  bottom: display.marginBottom,
+                  left: display.marginLeft,
                 }}
                 onChange={(quad) =>
                   patch({
@@ -730,11 +794,14 @@ export function WidgetStyleBubble({
                 units={['px', '%']}
                 lengthKind="padding"
                 popupContainer={popupContainer}
+                ownKeys={ownKeys}
+                edgeKeys={{ top: 'paddingTop', right: 'paddingRight', bottom: 'paddingBottom', left: 'paddingLeft' }}
+                baseValues={{ top: current.paddingTop, right: current.paddingRight, bottom: current.paddingBottom, left: current.paddingLeft }}
                 values={{
-                  top: current.paddingTop,
-                  right: current.paddingRight,
-                  bottom: current.paddingBottom,
-                  left: current.paddingLeft,
+                  top: display.paddingTop,
+                  right: display.paddingRight,
+                  bottom: display.paddingBottom,
+                  left: display.paddingLeft,
                 }}
                 onChange={(quad) =>
                   patch({
@@ -753,12 +820,15 @@ export function WidgetStyleBubble({
                   min={0}
                   max={20}
                   showPreview={false}
-                  stroke={{ color: current.borderColor, style: current.borderStyle }}
+                  stroke={{ color: display.borderColor, style: display.borderStyle }}
+                  ownKeys={ownKeys}
+                  edgeKeys={{ top: 'borderTopWidth', right: 'borderRightWidth', bottom: 'borderBottomWidth', left: 'borderLeftWidth' }}
+                  baseValues={{ top: current.borderTopWidth, right: current.borderRightWidth, bottom: current.borderBottomWidth, left: current.borderLeftWidth }}
                   values={{
-                    top: current.borderTopWidth,
-                    right: current.borderRightWidth,
-                    bottom: current.borderBottomWidth,
-                    left: current.borderLeftWidth,
+                    top: display.borderTopWidth,
+                    right: display.borderRightWidth,
+                    bottom: display.borderBottomWidth,
+                    left: display.borderLeftWidth,
                   }}
                   onChange={(quad) => {
                     const hasWidth = [quad.top, quad.right, quad.bottom, quad.left].some((value) => pxFromLength(value));
@@ -772,11 +842,12 @@ export function WidgetStyleBubble({
                   }}
                 />
                 <div className="style-border-meta">
-                  <BindingLock bound={current.borderStyle} resetKey={widget.id}>
+                  <BindingLock bound={isInherited('borderStyle') ? undefined : current.borderStyle} resetKey={widget.id}>
                     <Select
                     size="small"
+                    className={inheritedClass('borderStyle')}
                     allowClear
-                    value={current.borderStyle}
+                    value={display.borderStyle}
                     placeholder={t('lowcode.styleBorderNone')}
                     getPopupContainer={popupContainer}
                     onChange={(borderStyle) => patch({ borderStyle: borderStyle || undefined })}
@@ -788,15 +859,16 @@ export function WidgetStyleBubble({
                   />
                   </BindingLock>
                   <BindingLock
-                    bound={current.borderColor}
+                    bound={isInherited('borderColor') ? undefined : current.borderColor}
                     resetKey={widget.id}
                     onContinue={() => popupProps('border-color').onOpenChange(true)}
                   >
                     <ColorPicker
                     size="small"
+                    className={inheritedClass('borderColor')}
                     allowClear
                     destroyOnHidden
-                    value={colorValue(current.borderColor)}
+                    value={colorValue(display.borderColor)}
                     getPopupContainer={popupContainer}
                     {...popupProps('border-color')}
                     onChange={(value, css) => patch({ borderColor: value.cleared ? undefined : css })}
@@ -812,11 +884,14 @@ export function WidgetStyleBubble({
                 min={0}
                 max={999}
                 showPreview={false}
+                ownKeys={ownKeys}
+                edgeKeys={{ top: 'radiusTopLeft', right: 'radiusTopRight', bottom: 'radiusBottomRight', left: 'radiusBottomLeft' }}
+                baseValues={{ top: current.radiusTopLeft, right: current.radiusTopRight, bottom: current.radiusBottomRight, left: current.radiusBottomLeft }}
                 values={{
-                  top: current.radiusTopLeft,
-                  right: current.radiusTopRight,
-                  bottom: current.radiusBottomRight,
-                  left: current.radiusBottomLeft,
+                  top: display.radiusTopLeft,
+                  right: display.radiusTopRight,
+                  bottom: display.radiusBottomRight,
+                  left: display.radiusBottomLeft,
                 }}
                 onChange={(quad) =>
                   patch({
@@ -830,24 +905,30 @@ export function WidgetStyleBubble({
             ) : null}
             {openGroup === 'rotate' && isBoxGroupAllowed(widget.type, 'rotate') ? (
               <div className="style-size-panel">
-                <AngleField
-                  label={t('lowcode.styleRotateX')}
-                  angle={current.rotateX}
-                  popupContainer={popupContainer}
-                  onChange={(rotateX) => patch({ rotateX })}
-                />
-                <AngleField
-                  label={t('lowcode.styleRotateY')}
-                  angle={current.rotateY}
-                  popupContainer={popupContainer}
-                  onChange={(rotateY) => patch({ rotateY })}
-                />
-                <AngleField
-                  label={t('lowcode.styleRotateZ')}
-                  angle={current.rotateZ}
-                  popupContainer={popupContainer}
-                  onChange={(rotateZ) => patch({ rotateZ })}
-                />
+                <Inherited active={!!inheritedClass('rotateX')}>
+                  <AngleField
+                    label={t('lowcode.styleRotateX')}
+                    angle={display.rotateX}
+                    popupContainer={popupContainer}
+                    onChange={(rotateX) => patch({ rotateX })}
+                  />
+                </Inherited>
+                <Inherited active={!!inheritedClass('rotateY')}>
+                  <AngleField
+                    label={t('lowcode.styleRotateY')}
+                    angle={display.rotateY}
+                    popupContainer={popupContainer}
+                    onChange={(rotateY) => patch({ rotateY })}
+                  />
+                </Inherited>
+                <Inherited active={!!inheritedClass('rotateZ')}>
+                  <AngleField
+                    label={t('lowcode.styleRotateZ')}
+                    angle={display.rotateZ}
+                    popupContainer={popupContainer}
+                    onChange={(rotateZ) => patch({ rotateZ })}
+                  />
+                </Inherited>
               </div>
             ) : null}
             {openGroup === 'loop' && onLoopChange ? (

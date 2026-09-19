@@ -192,6 +192,7 @@ type WidgetCommon = WidgetStates & { loop?: WidgetLoop; hidden?: boolean };
 
 export type PageWidget =
   | ({ type: 'image'; id: string; src: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
+  | ({ type: 'icon'; id: string; src: string; size?: number; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({ type: 'text'; id: string; value: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({ type: 'button'; id: string; text: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({
@@ -512,6 +513,8 @@ const pageBuilder = new XMLBuilder({
   preserveOrder: true,
 });
 
+const BOOLEAN_STYLE_KEYS = new Set(['italic', 'underline', 'lineThrough']);
+
 const STYLE_KEYS = [
   'color',
   'textShadow',
@@ -589,6 +592,13 @@ function loopAttrs(loop: WidgetLoop | undefined): Record<string, string> {
 
 function isTrue(value: string) {
   return value === 'true' || value === '1';
+}
+
+function parseBoolAttr(value: string | undefined): boolean | undefined {
+  if (value == null || value === '') {
+    return undefined;
+  }
+  return isTrue(value);
 }
 
 function parseNumber(value: string): number | undefined {
@@ -984,7 +994,7 @@ export function compactWidgetStyle(style: WidgetStyle | undefined): WidgetStyle 
   const next: WidgetStyle = {};
   for (const key of STYLE_KEYS) {
     const value = style[key];
-    if (value == null || value === '' || value === false) {
+    if (value == null || value === '' || (value === false && !BOOLEAN_STYLE_KEYS.has(key))) {
       continue;
     }
     if (key === 'position' && !STORED_POSITIONS.includes(value as WidgetPosition)) {
@@ -1301,12 +1311,12 @@ function parseStyle(node: OrderedNode): WidgetStyle | undefined {
   return compactWidgetStyle({
     color: attr(node, 'color') || undefined,
     textShadow: attr(node, 'text-shadow') || undefined,
-    italic: isTrue(attr(node, 'italic')) || undefined,
+    italic: parseBoolAttr(attr(node, 'italic')),
     fontFamily: attr(node, 'font-family') || undefined,
     fontSize: parseNonNegative(attr(node, 'font-size')),
     fontWeight: attr(node, 'font-weight') || undefined,
-    underline: isTrue(attr(node, 'underline')) || undefined,
-    lineThrough: isTrue(attr(node, 'line-through')) || undefined,
+    underline: parseBoolAttr(attr(node, 'underline')),
+    lineThrough: parseBoolAttr(attr(node, 'line-through')),
     background: attr(node, 'background') || undefined,
     borderTopWidth: parseNonNegative(attr(node, 'border-top-width')) ?? border?.top,
     borderRightWidth: parseNonNegative(attr(node, 'border-right-width')) ?? border?.right,
@@ -1405,14 +1415,14 @@ function styleAttrs(style: WidgetStyle | undefined): Record<string, string> {
   if (compact.fontWeight) {
     attrs['@_font-weight'] = compact.fontWeight;
   }
-  if (compact.italic) {
-    attrs['@_italic'] = 'true';
+  if (compact.italic != null) {
+    attrs['@_italic'] = compact.italic ? 'true' : 'false';
   }
-  if (compact.underline) {
-    attrs['@_underline'] = 'true';
+  if (compact.underline != null) {
+    attrs['@_underline'] = compact.underline ? 'true' : 'false';
   }
-  if (compact.lineThrough) {
-    attrs['@_line-through'] = 'true';
+  if (compact.lineThrough != null) {
+    attrs['@_line-through'] = compact.lineThrough ? 'true' : 'false';
   }
   if (compact.textShadow) {
     attrs['@_text-shadow'] = compact.textShadow;
@@ -1982,6 +1992,7 @@ function normalizeViewing(
 
 export type ResolveWidgetTreeOptions = {
   appliedNameFor?: (widget: PageWidget) => string | null;
+  stateLayersSink?: WeakMap<object, WidgetStateLayer[]>;
 };
 
 function ownerActiveName(
@@ -2025,6 +2036,7 @@ function resolveWidgetNode(
   viewing: WidgetStateViewing[],
   inheritedTransition: number | undefined,
   appliedNameFor?: (widget: PageWidget) => string | null,
+  stateLayersSink?: WeakMap<object, WidgetStateLayer[]>,
 ): PageWidget {
   const ownName = ownerActiveName(widget, viewing, appliedNameFor);
   const layers: WidgetStateLayer[] = [];
@@ -2040,11 +2052,12 @@ function resolveWidgetNode(
     compactTransition(widget.transition) ??
     stackTransition(widget, layers, inheritedTransition);
   const next = withResolvedFields(widget, resolveWidgetStateStack(widget, layers), transition);
+  stateLayersSink?.set(next, layers);
   if ('children' in next) {
     const childNames = ownName && !inheritedNames.includes(ownName) ? [...inheritedNames, ownName] : inheritedNames;
     const childTransition = transition;
     next.children = next.children.map((child) =>
-      resolveWidgetNode(child, childNames, viewing, childTransition, appliedNameFor),
+      resolveWidgetNode(child, childNames, viewing, childTransition, appliedNameFor, stateLayersSink),
     );
   }
   return next;
@@ -2056,7 +2069,9 @@ export function resolveWidgetTree(
   options?: ResolveWidgetTreeOptions,
 ): PageWidget[] {
   const list = normalizeViewing(viewing);
-  return widgets.map((widget) => resolveWidgetNode(widget, [], list, undefined, options?.appliedNameFor));
+  return widgets.map((widget) =>
+    resolveWidgetNode(widget, [], list, undefined, options?.appliedNameFor, options?.stateLayersSink),
+  );
 }
 
 function parseStateDelta(node: OrderedNode): WidgetStateDelta | undefined {
@@ -2183,8 +2198,8 @@ function serializeDeltaNode(
 }
 
 function uniqueOverrideStates(widget: PageWidget): WidgetStateDelta[] {
-  const used = new Set((widget.states ?? []).map((item) => item.name));
   return (widget.stateOverrides ?? []).map((item) => {
+    const used = new Set((widget.states ?? []).map((state) => state.name));
     const nested = (item.states ?? []).filter((state) => {
       if (used.has(state.name)) {
         return false;
@@ -2233,10 +2248,10 @@ function widgetStateSpread(
 ): Pick<WidgetStates, 'states' | 'stateOverrides' | 'stateFn' | 'transition'> & { rest: OrderedNode[] } {
   const { states, overrides, rest } = splitStateNodes(inner);
   const known = new Set(ancestorNames);
-  const used = new Set(states.map((item) => item.name));
   const stateOverrides = overrides
     .filter((item) => known.has(item.name))
     .map((item) => {
+      const used = new Set(states.map((state) => state.name));
       const nested = (item.states ?? []).filter((state) => {
         if (used.has(state.name)) {
           return false;
@@ -2290,6 +2305,31 @@ function parseWidgets(
         id: attr(child, 'id') || `n${ids.n}`,
         src: attr(child, 'src'),
         ...(style ? { style } : {}),
+        ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
+    if (allowContent && Object.prototype.hasOwnProperty.call(child, 'icon')) {
+      ids.n += 1;
+      const style = parseStyle(child);
+      const item = asItem ? parseItem(child) : undefined;
+      const extra = widgetStateSpread(child, nodeList(child.icon), ancestorNames);
+      const color = attr(child, 'color');
+      const sizeStr = attr(child, 'size');
+      const size = sizeStr ? Number(sizeStr) : undefined;
+      const mergedStyle = color ? { ...(style ?? {}), color } : style;
+      widgets.push({
+        type: 'icon',
+        id: attr(child, 'id') || `n${ids.n}`,
+        src: attr(child, 'src'),
+        ...(size != null && Number.isFinite(size) ? { size } : {}),
+        ...(mergedStyle ? { style: mergedStyle } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
@@ -2440,6 +2480,16 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
       return {
         image: inner,
         ':@': widgetHostAttrs(widget, id, style, { '@_src': widget.src, ...item }),
+      };
+    }
+    if (widget.type === 'icon') {
+      return {
+        icon: inner,
+        ':@': widgetHostAttrs(widget, id, style, {
+          '@_src': widget.src,
+          ...(widget.size != null ? { '@_size': String(widget.size) } : {}),
+          ...item,
+        }),
       };
     }
     if (widget.type === 'text') {

@@ -57,11 +57,7 @@ button {
   box-sizing: border-box;
 }
 
-.h5-runtime .lowcode-flex > .lowcode-text,
-.h5-runtime .lowcode-flex > .lowcode-button,
-.h5-runtime .lowcode-flex > .lowcode-image,
-.h5-runtime .lowcode-flex > .lowcode-flex,
-.h5-runtime .lowcode-flex > .lowcode-swiper {
+.h5-runtime :where(.lowcode-flex > .lowcode-text, .lowcode-flex > .lowcode-button, .lowcode-flex > .lowcode-image, .lowcode-flex > .lowcode-flex, .lowcode-flex > .lowcode-swiper) {
   margin: 0;
 }
 
@@ -78,7 +74,7 @@ button {
   box-sizing: border-box;
 }
 
-.h5-runtime .lowcode-text {
+.h5-runtime :where(.lowcode-text) {
   display: inline-block;
   vertical-align: baseline;
   box-sizing: border-box;
@@ -102,7 +98,7 @@ button {
   user-select: none;
 }
 
-.h5-runtime .lowcode-button {
+.h5-runtime :where(.lowcode-button) {
   display: inline-block;
   vertical-align: baseline;
   box-sizing: border-box;

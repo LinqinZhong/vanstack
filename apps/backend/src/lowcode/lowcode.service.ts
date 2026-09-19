@@ -10,6 +10,8 @@ import type {
   ProjectAssetFileDto,
   ProjectAssetGroupDto,
   ProjectDto,
+  ProjectIconFileDto,
+  ProjectIconGroupDto,
   ProjectLangCatalogDto,
   ProjectLangDto,
   ProjectLangEntryDto,
@@ -572,6 +574,113 @@ export class LowcodeService {
     await this.oss.deleteObject(this.assetGroupPrefix(project.key, group) + name);
   }
 
+  async listIconGroups(projectId: string): Promise<ProjectIconGroupDto[]> {
+    const project = await this.requireProject(projectId);
+    const prefix = this.iconRoot(project.key);
+    const names = new Set<string>();
+    for (const item of await this.oss.listObjects(prefix)) {
+      const rest = item.key.slice(prefix.length);
+      const group = rest.split('/')[0];
+      if (group) {
+        names.add(group);
+      }
+    }
+    return [...names].sort((a, b) => a.localeCompare(b)).map((name) => ({ name }));
+  }
+
+  async createIconGroup(projectId: string, name: string): Promise<ProjectIconGroupDto> {
+    const project = await this.requireProject(projectId);
+    const group = this.assertIconGroupName(name);
+    const existing = await this.listIconGroups(projectId);
+    if (existing.some((item) => item.name === group)) {
+      throw new ConflictException('group already exists');
+    }
+    await this.oss.putObject(this.iconKeepKey(project.key, group), Buffer.alloc(0), 'application/octet-stream');
+    return { name: group };
+  }
+
+  async renameIconGroup(projectId: string, fromName: string, toName: string): Promise<ProjectIconGroupDto> {
+    const project = await this.requireProject(projectId);
+    const from = this.assertIconGroupName(fromName);
+    const to = this.assertIconGroupName(toName);
+    if (from === to) {
+      return { name: to };
+    }
+    const groups = await this.listIconGroups(projectId);
+    if (!groups.some((item) => item.name === from)) {
+      throw new NotFoundException();
+    }
+    if (groups.some((item) => item.name === to)) {
+      throw new ConflictException('group already exists');
+    }
+    const fromPrefix = this.iconGroupPrefix(project.key, from);
+    const objects = await this.oss.listObjects(fromPrefix);
+    for (const item of objects) {
+      const nextKey = this.iconGroupPrefix(project.key, to) + item.key.slice(fromPrefix.length);
+      await this.oss.copyObject(item.key, nextKey);
+    }
+    await this.deleteOssKeys(objects.map((item) => item.key));
+    return { name: to };
+  }
+
+  async deleteIconGroup(projectId: string, name: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    const group = this.assertIconGroupName(name);
+    const objects = await this.oss.listObjects(this.iconGroupPrefix(project.key, group));
+    await this.deleteOssKeys(objects.map((item) => item.key));
+  }
+
+  async listIconFiles(projectId: string, name: string): Promise<ProjectIconFileDto[]> {
+    const project = await this.requireProject(projectId);
+    const group = this.assertIconGroupName(name);
+    const prefix = this.iconGroupPrefix(project.key, group);
+    return (await this.oss.listObjects(prefix))
+      .filter((item) => {
+        const fileName = item.key.slice(prefix.length);
+        return fileName && !fileName.includes('/') && fileName !== '.keep';
+      })
+      .map((item) => ({
+        name: item.key.slice(prefix.length),
+        key: item.key,
+        url: this.oss.getPublicUrl(item.key),
+        size: item.size,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async uploadIconFile(
+    projectId: string,
+    name: string,
+    file: Express.Multer.File,
+    displayName?: string,
+  ): Promise<ProjectIconFileDto> {
+    const project = await this.requireProject(projectId);
+    const group = this.assertIconGroupName(name);
+    if (!/\.svg$/i.test(file.originalname)) {
+      throw new BadRequestException('only svg files are allowed');
+    }
+    const fileName = this.assertIconFileName(this.assetUploadName(file.originalname, displayName));
+    const key = this.iconGroupPrefix(project.key, group) + fileName;
+    const existing = await this.oss.getObject(key);
+    if (existing) {
+      throw new ConflictException('file already exists');
+    }
+    const stored = await this.oss.putObject(key, file.buffer, file.mimetype || 'image/svg+xml');
+    return {
+      name: fileName,
+      key: stored.key,
+      url: stored.url,
+      size: file.size,
+    };
+  }
+
+  async deleteIconFile(projectId: string, groupName: string, fileName: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    const group = this.assertIconGroupName(groupName);
+    const name = this.assertIconFileName(fileName);
+    await this.oss.deleteObject(this.iconGroupPrefix(project.key, group) + name);
+  }
+
   async activateVersion(projectId: string, pageId: string, versionId: string): Promise<ProjectPageDto> {
     const page = await this.requirePage(projectId, pageId);
     const version = await this.requireVersion(projectId, pageId, versionId);
@@ -789,6 +898,40 @@ export class LowcodeService {
 
   private assetKeepKey(projectKey: string, group: string) {
     return `${this.assetGroupPrefix(projectKey, group)}.keep`;
+  }
+
+  private iconRoot(projectKey: string) {
+    return `lowcode/${projectKey}/icons/`;
+  }
+
+  private iconGroupPrefix(projectKey: string, group: string) {
+    return `${this.iconRoot(projectKey)}${group}/`;
+  }
+
+  private iconKeepKey(projectKey: string, group: string) {
+    return `${this.iconGroupPrefix(projectKey, group)}.keep`;
+  }
+
+  private assertIconGroupName(name: string) {
+    const trimmed = safeDecode(name).trim();
+    if (!trimmed || trimmed.length > 64 || trimmed === '.' || trimmed === '..' || trimmed.startsWith('.')) {
+      throw new BadRequestException('invalid group name');
+    }
+    if (/[\\/]/.test(trimmed)) {
+      throw new BadRequestException('invalid group name');
+    }
+    return trimmed;
+  }
+
+  private assertIconFileName(name: string) {
+    const trimmed = safeDecode(name).trim().replace(/[\\/]/g, '');
+    if (!trimmed || trimmed === '.' || trimmed === '..' || trimmed === '.keep' || trimmed.length > 200) {
+      throw new BadRequestException('invalid file name');
+    }
+    if (!/\.svg$/i.test(trimmed)) {
+      throw new BadRequestException('only svg files are allowed');
+    }
+    return trimmed;
   }
 
   private assertAssetGroupName(name: string) {

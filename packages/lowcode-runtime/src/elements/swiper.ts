@@ -2,8 +2,8 @@ import { createElement, type ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
 import { DEFAULT_SWIPER_HEIGHT, DEFAULT_SWIPER_WIDTH, sanitizeWidgetStyle } from '@vanstack/xml';
 import { SwiperView } from '../swiper';
-import { boxCss, flexItemCss, hiddenCss, mergeCss, sizeCss } from '../css';
-import { widgetCssOptions, type WidgetRenderContext } from '../widget-render';
+import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, sizeCss, widgetClassName } from '../css';
+import { widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
 export function renderSwiper(
   widget: Extract<PageWidget, { type: 'swiper' }>,
@@ -15,7 +15,7 @@ export function renderSwiper(
       width: sizeCss(style?.width ?? DEFAULT_SWIPER_WIDTH),
       height: sizeCss(style?.height ?? DEFAULT_SWIPER_HEIGHT),
     },
-    boxCss(style, widgetCssOptions(ctx)),
+    dynamicStyleCss(style, widgetCssOptions(ctx)),
     flexItemCss(widget.item),
     hiddenCss(widget.hidden, ctx.editing),
   );
@@ -24,7 +24,11 @@ export function renderSwiper(
     widget,
     editing: ctx.editing,
     style: shell,
-    itemCss: (itemStyle) => boxCss(sanitizeWidgetStyle('swiper-item', itemStyle), widgetCssOptions(ctx)),
+    className: widgetClassName(widget.id),
+    dataState: widgetStateAttr(widget, ctx),
+    itemClassName: (item) => widgetClassName(item.id),
+    itemDataState: (item) => widgetStateAttr(item, ctx),
+    itemCss: (itemStyle) => dynamicStyleCss(sanitizeWidgetStyle('swiper-item', itemStyle), widgetCssOptions(ctx)),
     renderChild: ctx.render,
     onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
     onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,

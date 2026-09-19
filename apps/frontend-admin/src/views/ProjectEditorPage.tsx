@@ -1,4 +1,5 @@
 import {
+  AppstoreOutlined,
   ArrowLeftOutlined,
   CodeOutlined,
   CopyOutlined,
@@ -86,6 +87,7 @@ import {
   rememberVersionId,
 } from '../utils/editorSelection';
 import { AssetLibraryPanel } from '../components/AssetLibraryPanel';
+import { IconLibraryPanel } from '../components/IconLibraryPanel';
 import { EditorHelpModal } from '../components/EditorHelpModal';
 import { PageDataPanel } from '../components/PageDataPanel';
 import { LanguageLibraryPanel } from '../components/LanguageLibraryModal';
@@ -173,6 +175,7 @@ import {
   patchResolvedWidget,
   pruneViewingByOwner,
   stateLayersForWidget,
+  stateOwnKeys,
   updateWidgetState,
   updateHostTransition,
   viewingAfterSelect,
@@ -548,7 +551,7 @@ export function ProjectEditorPage() {
   const [pageData, setPageData] = useState<PageVariable[]>([]);
   const [pageI18n, setPageI18n] = useState<PageI18n | undefined>(undefined);
   const [previewLocale, setPreviewLocale] = useState<string | null>(null);
-  const [leftNav, setLeftNav] = useState<'develop' | 'i18n' | 'assets'>('develop');
+  const [leftNav, setLeftNav] = useState<'develop' | 'i18n' | 'assets' | 'icons'>('develop');
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
   const [viewingOwnerId, setViewingOwnerId] = useState<string | null>(null);
   const [viewingState, setViewingState] = useState<string | null>(null);
@@ -1188,24 +1191,25 @@ export function ProjectEditorPage() {
   }, [widgets]);
 
   useEffect(() => {
-    if (!isSpacingNudgeGroup(openBoxGroupRef.current)) {
+    const widgetId = selectedWidgetIdRef.current;
+    if (!widgetId) {
       return;
     }
-    const widgetId = selectedWidgetIdRef.current;
-    const widget = viewedWidget(widgetId ? findWidget(widgetsRef.current, widgetId) : null);
+    const widget = viewedWidget(findWidget(widgetsRef.current, widgetId));
     if (!widget) {
       return;
     }
+    const nudging = isSpacingNudgeGroup(openBoxGroupRef.current);
     iframeRef.current?.contentWindow?.postMessage(
       {
         source: LOWCODE_MESSAGE_SOURCE,
         type: 'widget-style',
         widgetId: widget.id,
-        css: liveWidgetCss(widget.style),
+        css: liveWidgetCss(nudging ? widget.style : undefined),
       },
       window.location.origin,
     );
-  }, [xml]);
+  }, [xml, viewingOwnerId, viewingState, viewingByOwner, selectedWidgetId]);
 
   const previewLangKeys = (pageI18n?.langs ?? []).map((lang) => lang.key);
   useEffect(() => {
@@ -2168,15 +2172,17 @@ export function ProjectEditorPage() {
     const widget: PageWidget =
       type === 'image'
         ? { type: 'image', id: nextId, src: 'https://picsum.photos/200/200?random='+Math.random(), style:{width:{mode:'%',value:100},height:{mode:'%',value:100}} }
-        : type === 'text'
-          ? { type: 'text', id: nextId, value: t('lowcode.defaultText') }
-          : type === 'button'
-            ? { type: 'button', id: nextId, text: t('lowcode.defaultButton'), style: { background: '#ffffff' } }
-            : type === 'flex'
-              ? { type: 'flex', id: nextId, children: [] }
-              : type === 'swiper-item'
-                ? emptySwiperItem(nextId)
-                : createSwiperWidget(nextId, nextWidgetId);
+        : type === 'icon'
+          ? { type: 'icon', id: nextId, src: '', size: 24 }
+          : type === 'text'
+            ? { type: 'text', id: nextId, value: t('lowcode.defaultText') }
+            : type === 'button'
+              ? { type: 'button', id: nextId, text: t('lowcode.defaultButton'), style: { background: '#ffffff' } }
+              : type === 'flex'
+                ? { type: 'flex', id: nextId, children: [] }
+                : type === 'swiper-item'
+                  ? emptySwiperItem(nextId)
+                  : createSwiperWidget(nextId, nextWidgetId);
     const nextWidgets = addWidgetToTree(widgetsRef.current, selectedWidgetIdRef.current, widget);
     const added = findWidget(nextWidgets, widget.id);
     commitWidgets(nextWidgets, added ? widget.id : selectedWidgetIdRef.current);
@@ -3502,6 +3508,9 @@ export function ProjectEditorPage() {
   const selectedDisplayWidget = selectedWidget
     ? widgetWithStateLayers(selectedWidget, stateLayersForWidget(widgets, selectedWidget.id, viewingByOwner))
     : null;
+  const selectedOwnKeys = selectedWidget
+    ? stateOwnKeys(selectedWidget, stateLayersForWidget(widgets, selectedWidget.id, viewingByOwner))
+    : null;
   const selectedCanvasLabel = selectedWidget ? widgetCanvasLabel(selectedWidget, t) : null;
   const widgetTreeData = toWidgetTreeData(widgets, (widget) => widgetTreeLabel(widget, t));
   const canDragWidgetToData = centerTab === 'data' && !readOnly;
@@ -3575,6 +3584,15 @@ export function ProjectEditorPage() {
               onClick={() => setLeftNav('assets')}
             >
               <FolderOpenOutlined />
+            </button>
+          </Tooltip>
+          <Tooltip title={t('lowcode.iconLibrary')} placement="right">
+            <button
+              type="button"
+              className={['editor-rail-btn', leftNav === 'icons' ? 'is-active' : ''].filter(Boolean).join(' ')}
+              onClick={() => setLeftNav('icons')}
+            >
+              <AppstoreOutlined />
             </button>
           </Tooltip>
         </nav>
@@ -3873,6 +3891,7 @@ export function ProjectEditorPage() {
                           <WidgetStyleBubble
                             widget={selectedDisplayWidget}
                             style={selectedDisplayWidget.style}
+                            ownKeys={selectedOwnKeys ?? undefined}
                             i18nCatalog={pageI18n}
                             projectId={project.id}
                             variables={pageData}
@@ -3887,7 +3906,7 @@ export function ProjectEditorPage() {
                               )
                             }
                             onSrcChange={
-                              selectedDisplayWidget.type === 'image'
+                              selectedDisplayWidget.type === 'image' || selectedDisplayWidget.type === 'icon'
                                 ? (src) =>
                                   updateWidget(selectedDisplayWidget.id, { src }, `edit:${selectedDisplayWidget.id}:src`)
                                 : undefined
@@ -4181,6 +4200,11 @@ export function ProjectEditorPage() {
               <AssetLibraryPanel projectId={project.id} />
             </Card>
           ) : null}
+          {leftNav === 'icons' ? (
+            <Card size="small" className="editor-panel language-library-card" title={t('lowcode.iconLibrary')}>
+              <IconLibraryPanel projectId={project.id} />
+            </Card>
+          ) : null}
         </div>
       </div>
 
@@ -4236,6 +4260,7 @@ export function ProjectEditorPage() {
                 disabled={readOnly}
                 i18nCatalog={pageI18n}
                 projectId={project.id}
+                ownKeys={selectedOwnKeys ?? undefined}
                 onPatch={(patch, coalesceKey) => updateWidget(selectedDisplayWidget.id, patch, coalesceKey)}
                 onInvalidChange={setInspectorInvalid}
               />
@@ -4261,7 +4286,7 @@ export function ProjectEditorPage() {
         destroyOnHidden
       >
         <div className="widget-type-picker">
-          {(['text', 'button', 'flex', 'swiper', 'swiper-item', 'image'] as const).map((type) => (
+          {(['text', 'button', 'flex', 'swiper', 'swiper-item', 'image', 'icon'] as const).map((type) => (
             <Button
               key={type}
               block
@@ -4273,6 +4298,7 @@ export function ProjectEditorPage() {
               {
                 {
                   'image': t('lowcode.defaultImage'),
+                  'icon': t('lowcode.defaultIcon'),
                   'text': t('lowcode.defaultText'),
                   'button': t('lowcode.defaultButton'),
                   'flex': t('lowcode.defaultFlex'),

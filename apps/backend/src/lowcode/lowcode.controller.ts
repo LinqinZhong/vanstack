@@ -19,12 +19,15 @@ import type {
   ProjectAssetFileDto,
   ProjectAssetGroupDto,
   ProjectDto,
+  ProjectIconFileDto,
+  ProjectIconGroupDto,
   ProjectLangCatalogDto,
   ProjectPageDto,
   ProjectPageVersionDto,
 } from '@vanstack/shared';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { CreateAssetGroupDto, UpdateAssetGroupDto, UploadAssetFileDto } from './dto/asset.dto';
+import { CreateIconGroupDto, UpdateIconGroupDto, UploadIconFileDto } from './dto/icon.dto';
 import { PutProjectLangsDto } from './dto/lang.dto';
 import { CreateProjectPageDto, UpdateProjectPageDto } from './dto/page.dto';
 import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
@@ -247,5 +250,73 @@ export class LowcodeController {
     @Param('name') name: string,
   ): Promise<void> {
     return this.lowcode.deleteAssetFile(id, group, name);
+  }
+
+  @Get(':id/icons/groups')
+  listIconGroups(@Param('id', ParseUUIDPipe) id: string): Promise<ProjectIconGroupDto[]> {
+    return this.lowcode.listIconGroups(id);
+  }
+
+  @Post(':id/icons/groups')
+  createIconGroup(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateIconGroupDto,
+  ): Promise<ProjectIconGroupDto> {
+    return this.lowcode.createIconGroup(id, dto.name);
+  }
+
+  @Patch(':id/icons/groups/:group')
+  renameIconGroup(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('group') group: string,
+    @Body() dto: UpdateIconGroupDto,
+  ): Promise<ProjectIconGroupDto> {
+    return this.lowcode.renameIconGroup(id, group, dto.name);
+  }
+
+  @Delete(':id/icons/groups/:group')
+  @HttpCode(204)
+  deleteIconGroup(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('group') group: string,
+  ): Promise<void> {
+    return this.lowcode.deleteIconGroup(id, group);
+  }
+
+  @Get(':id/icons/groups/:group/files')
+  listIconFiles(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('group') group: string,
+  ): Promise<ProjectIconFileDto[]> {
+    return this.lowcode.listIconFiles(id, group);
+  }
+
+  @Post(':id/icons/groups/:group/files')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 2 * 1024 * 1024 },
+    }),
+  )
+  uploadIconFile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('group') group: string,
+    @UploadedFile() file?: Express.Multer.File,
+    @Body() dto?: UploadIconFileDto,
+  ): Promise<ProjectIconFileDto> {
+    if (!file) {
+      throw new BadRequestException('file is required');
+    }
+    return this.lowcode.uploadIconFile(id, group, file, dto?.name);
+  }
+
+  @Delete(':id/icons/groups/:group/files/:name')
+  @HttpCode(204)
+  deleteIconFile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('group') group: string,
+    @Param('name') name: string,
+  ): Promise<void> {
+    return this.lowcode.deleteIconFile(id, group, name);
   }
 }

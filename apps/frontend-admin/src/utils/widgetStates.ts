@@ -289,6 +289,56 @@ export function widgetWithViewing(
   );
 }
 
+export function widgetWithStateLayerDelta(widget: PageWidget, layers: WidgetStateLayer[]): PageWidget {
+  if (layers.length === 0) {
+    return widget;
+  }
+  const base = resolveWidgetStateStack(widget, layers.slice(0, -1));
+  const full = resolveWidgetStateStack(widget, layers);
+  const delta = diffWidgetState(widget, full, base);
+  const next = { ...widget } as PageWidget;
+  if (delta.style) {
+    next.style = delta.style;
+  } else {
+    delete next.style;
+  }
+  if (next.type === 'flex') {
+    if (delta.flex) {
+      next.flex = delta.flex;
+    } else {
+      delete next.flex;
+    }
+  }
+  if (next.type !== 'swiper-item') {
+    if (delta.item) {
+      next.item = delta.item;
+    } else {
+      delete next.item;
+    }
+  }
+  if (next.type === 'swiper') {
+    if (delta.swiper) {
+      next.swiper = delta.swiper;
+    } else {
+      delete next.swiper;
+    }
+  }
+  return next;
+}
+
+export function stateOwnKeys(widget: PageWidget, layers: WidgetStateLayer[]): Set<string> | undefined {
+  if (layers.length === 0) {
+    return undefined;
+  }
+  const keys = new Set<string>();
+  const delta = widgetWithStateLayerDelta(widget, layers);
+  for (const key of Object.keys(delta.style ?? {})) keys.add(key);
+  if (delta.type === 'flex') for (const key of Object.keys(delta.flex ?? {})) keys.add(key);
+  if (delta.type !== 'swiper-item') for (const key of Object.keys(delta.item ?? {})) keys.add(key);
+  if (delta.type === 'swiper') for (const key of Object.keys(delta.swiper ?? {})) keys.add(key);
+  return keys;
+}
+
 export function nextCopiedStateName(existing: Iterable<string>, source: string | null): string {
   const names = new Set(existing);
   if (!source) {
@@ -760,6 +810,9 @@ export function patchResolvedWidget(
   if (patch.src != null) {
     content.src = patch.src;
   }
+  if (patch.size != null) {
+    content.size = patch.size;
+  }
   if ('loop' in patch) {
     content.loop = patch.loop;
   }
@@ -872,6 +925,9 @@ export function patchWidgetInState(
   }
   if (patch.src != null) {
     content.src = patch.src;
+  }
+  if (patch.size != null) {
+    content.size = patch.size;
   }
   if ('loop' in patch) {
     content.loop = patch.loop;

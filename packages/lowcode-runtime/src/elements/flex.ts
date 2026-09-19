@@ -1,7 +1,7 @@
 import { createElement, type ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
-import { flexContainerCss, flexItemCss, hiddenCss, mergeCss, widgetCss } from '../css';
-import { widgetCssOptions, type WidgetRenderContext } from '../widget-render';
+import { dynamicStyleCss, flexContainerCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
+import { widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
 export function renderFlex(
   widget: Extract<PageWidget, { type: 'flex' }>,
@@ -11,11 +11,12 @@ export function renderFlex(
     'div',
     {
       key: ctx.instanceKey,
-      className: 'lowcode-flex',
+      className: `lowcode-flex ${widgetClassName(widget.id)}`,
       'data-widget-id': widget.id,
       'data-widget-type': 'flex',
+      'data-state': widgetStateAttr(widget, ctx),
       style: mergeCss(
-        widgetCss(widget.style, widgetCssOptions(ctx)),
+        dynamicStyleCss(widget.style, widgetCssOptions(ctx)),
         flexContainerCss(widget.flex),
         flexItemCss(widget.item),
         hiddenCss(widget.hidden, ctx.editing),

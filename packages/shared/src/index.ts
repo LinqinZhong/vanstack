@@ -171,3 +171,22 @@ export interface CreateProjectAssetGroupInput {
 export interface UpdateProjectAssetGroupInput {
   name: string;
 }
+
+export interface ProjectIconGroupDto {
+  name: string;
+}
+
+export interface ProjectIconFileDto {
+  name: string;
+  key: string;
+  url: string;
+  size: number;
+}
+
+export interface CreateProjectIconGroupInput {
+  name: string;
+}
+
+export interface UpdateProjectIconGroupInput {
+  name: string;
+}

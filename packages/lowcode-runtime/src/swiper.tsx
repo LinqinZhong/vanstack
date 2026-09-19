@@ -63,6 +63,10 @@ export function SwiperView({
   widget,
   editing,
   style,
+  className,
+  dataState,
+  itemClassName,
+  itemDataState,
   itemCss,
   renderChild,
   onMouseEnter,
@@ -72,6 +76,10 @@ export function SwiperView({
   widget: Extract<PageWidget, { type: 'swiper' }>;
   editing: boolean;
   style?: CSSProperties;
+  className?: string;
+  dataState?: string;
+  itemClassName?: (item: Extract<PageWidget, { type: 'swiper-item' }>) => string;
+  itemDataState?: (item: Extract<PageWidget, { type: 'swiper-item' }>) => string | undefined;
   itemCss: (style: WidgetStyle | undefined) => CSSProperties | undefined;
   renderChild: (child: PageWidget) => ReactElement;
   onMouseEnter?: () => void;
@@ -203,11 +211,12 @@ export function SwiperView({
     'div',
     {
       ref: rootRef,
-      className: ['lowcode-swiper', editing ? 'is-editing' : undefined].filter(Boolean).join(' '),
+      className: ['lowcode-swiper', className, editing ? 'is-editing' : undefined].filter(Boolean).join(' '),
       'data-widget-id': widget.id,
       'data-widget-type': 'swiper',
       'data-swiper-index': String(index),
       'data-swiper-vertical': vertical ? 'true' : 'false',
+      'data-state': dataState,
       onMouseEnter,
       onMouseLeave,
       style: {
@@ -246,9 +255,10 @@ export function SwiperView({
             createElement(
               'div',
               {
-                className: 'lowcode-swiper-item-body',
+                className: ['lowcode-swiper-item-body', itemClassName?.(item)].filter(Boolean).join(' '),
                 'data-widget-id': item.id,
                 'data-widget-type': 'swiper-item',
+                'data-state': itemDataState?.(item),
                 onMouseEnter: itemHover?.(item)?.onMouseEnter,
                 onMouseLeave: itemHover?.(item)?.onMouseLeave,
                 style: {

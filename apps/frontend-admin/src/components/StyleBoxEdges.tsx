@@ -91,6 +91,7 @@ function EdgeRow({
   max,
   units,
   popupContainer,
+  inherited,
   onChange,
 }: {
   label: string;
@@ -100,6 +101,7 @@ function EdgeRow({
   max?: number;
   units: readonly BoxLengthMode[];
   popupContainer?: () => HTMLElement;
+  inherited?: boolean;
   onChange: (value: BoxLength | undefined) => void;
 }) {
   const showUnits = units.length > 1;
@@ -108,7 +110,7 @@ function EdgeRow({
   const auto = mode === 'auto';
 
   return (
-    <div className="style-box-row">
+    <div className={`style-box-row${inherited ? ' is-inherited' : ''}`}>
       <span className="style-box-row-label">{label}</span>
       <InputNumber
         size="small"
@@ -234,6 +236,9 @@ export function StyleBoxEdges({
   units = ['px'],
   lengthKind = 'margin',
   popupContainer,
+  ownKeys,
+  edgeKeys,
+  baseValues,
   onChange,
 }: {
   resetKey?: string;
@@ -247,11 +252,38 @@ export function StyleBoxEdges({
   units?: readonly BoxLengthMode[];
   lengthKind?: 'margin' | 'padding' | 'inset';
   popupContainer?: () => HTMLElement;
+  ownKeys?: Set<string>;
+  edgeKeys?: { top?: string; right?: string; bottom?: string; left?: string };
+  baseValues?: LengthQuad | BoxQuad;
   onChange: (values: LengthQuad) => void;
 }) {
   const { t } = useTranslation();
   const current = toLengthQuad(values);
   const numericOnly = units.length <= 1 && units[0] === 'px';
+
+  const edgeInherited = (edge: 'top' | 'right' | 'bottom' | 'left'): boolean => {
+    if (!ownKeys || !edgeKeys || !baseValues) return false;
+    const key = edgeKeys[edge];
+    if (!key || ownKeys.has(key)) return false;
+    const base = baseValues[edge];
+    return base != null;
+  };
+  const topInh = edgeInherited('top');
+  const rightInh = edgeInherited('right');
+  const bottomInh = edgeInherited('bottom');
+  const leftInh = edgeInherited('left');
+  const allInh = topInh && rightInh && bottomInh && leftInh;
+  const verticalInh = topInh && bottomInh;
+  const horizontalInh = leftInh && rightInh;
+  const rowInherited: Record<string, boolean> = {
+    all: allInh,
+    vertical: verticalInh,
+    horizontal: horizontalInh,
+    top: topInh,
+    left: leftInh,
+    bottom: bottomInh,
+    right: rightInh,
+  };
 
   function emit(next: LengthQuad) {
     const compact = {
@@ -301,29 +333,33 @@ export function StyleBoxEdges({
     label: string;
     value?: BoxLength;
     onChange: (value: BoxLength | undefined) => void;
+    inherited: boolean;
   }> = [
-    { key: 'all', label: labels.all, value: unifiedLength(current), onChange: writeAll },
+    { key: 'all', label: labels.all, value: unifiedLength(current), onChange: writeAll, inherited: rowInherited.all },
     {
       key: 'vertical',
       label: labels.vertical,
       value: pairedLength(current.top, current.bottom),
       onChange: writeVertical,
+      inherited: rowInherited.vertical,
     },
     {
       key: 'horizontal',
       label: labels.horizontal,
       value: pairedLength(current.left, current.right),
       onChange: writeHorizontal,
+      inherited: rowInherited.horizontal,
     },
-    { key: 'top', label: labels.top, value: current.top, onChange: (value) => emit({ ...current, top: value }) },
-    { key: 'left', label: labels.left, value: current.left, onChange: (value) => emit({ ...current, left: value }) },
+    { key: 'top', label: labels.top, value: current.top, onChange: (value) => emit({ ...current, top: value }), inherited: rowInherited.top },
+    { key: 'left', label: labels.left, value: current.left, onChange: (value) => emit({ ...current, left: value }), inherited: rowInherited.left },
     {
       key: 'bottom',
       label: labels.bottom,
       value: current.bottom,
       onChange: (value) => emit({ ...current, bottom: value }),
+      inherited: rowInherited.bottom,
     },
-    { key: 'right', label: labels.right, value: current.right, onChange: (value) => emit({ ...current, right: value }) },
+    { key: 'right', label: labels.right, value: current.right, onChange: (value) => emit({ ...current, right: value }), inherited: rowInherited.right },
   ];
 
   return (
@@ -339,6 +375,7 @@ export function StyleBoxEdges({
           max={max}
           units={units}
           popupContainer={popupContainer}
+          inherited={row.inherited}
           onChange={row.onChange}
         />
       ))}

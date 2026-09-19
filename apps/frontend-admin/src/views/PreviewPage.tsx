@@ -3,7 +3,7 @@ import { renderPageXml } from '@vanstack/lowcode-runtime';
 import type { PageI18n } from '@vanstack/xml';
 import { isLowcodeMessage, LOWCODE_MESSAGE_SOURCE } from '../utils/lowcode-protocol';
 import { isBoxGroupShortcut, isTextStyleShortcut, matchWidgetShortcut } from '../utils/widgetShortcuts';
-import { previewVisualScale, setSpacingActiveEdge, setSpacingDragCursor, setSpacingHeldEdges, setSpacingMirror, setSpacingSnap, setRotateHeldAxes, spacingActionFromTarget, spacingEdgeFromTarget, rotateAxisFromTarget, rotateLayoutClientCenter, syncSpacingGuides, syncSpacingMask, widgetLayoutSize } from '../utils/spacingGuides';
+import { previewVisualScale, setSpacingActiveEdge, setSpacingDragCursor, setSpacingHeldEdges, setSpacingMirror, setSpacingSnap, setRotateHeldAxes, spacingActionFromTarget, spacingEdgeFromTarget, rotateAxisFromTarget, rotateLayoutClientCenter, syncSpacingGuides, syncSpacingMask, syncWidgetChrome, widgetLayoutSize } from '../utils/spacingGuides';
 import type { BoxDragKind, SpacingEdge } from '../utils/spacingDrag';
 import { isBoxDragKind, isSpacingNudgeKey, isSpacingValueKey, SPACING_EDGES } from '../utils/spacingDrag';
 import { pointerAngleDeg, type RotateAxis } from '../utils/rotateDrag';
@@ -151,6 +151,29 @@ function applyWidgetState(
   }
 }
 
+function paintWidgetChrome(
+  host: HTMLElement | null,
+  root: HTMLElement | null,
+  hoverTarget: EventTarget | null,
+  zoom: number,
+  editing: boolean,
+  spacingDrag: BoxDragKind | 'border' | null,
+) {
+  if (!editing) {
+    syncWidgetChrome(host, null, null, zoom);
+    return;
+  }
+  const selected = spacingDrag
+    ? null
+    : (root?.querySelector<HTMLElement>('.is-widget-selected') ?? null);
+  let hover: HTMLElement | null = null;
+  if (!spacingDrag && hoverTarget instanceof Element) {
+    const node = hoverTarget.closest('[data-widget-id]');
+    hover = node instanceof HTMLElement ? node : null;
+  }
+  syncWidgetChrome(host, hover, selected, zoom);
+}
+
 /** widgetIdFromTarget：从事件目标向上找到控件 id。 */
 function widgetIdFromTarget(target: EventTarget | null) {
   if (!(target instanceof Element)) {
@@ -251,6 +274,7 @@ export function PreviewPage() {
   const lastPostedSelectRef = useRef<string | null | undefined>(undefined);
   const climbTimerRef = useRef(0);
   const selectClickAtRef = useRef(0);
+  const chromeTargetRef = useRef<EventTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(true);
 
@@ -343,6 +367,14 @@ export function PreviewPage() {
             snapRef.current,
             mirrorRef.current,
             heldEdgesRef.current,
+          );
+          paintWidgetChrome(
+            hostRef.current,
+            mountRef.current,
+            chromeTargetRef.current,
+            viewScaleRef.current,
+            editingRef.current,
+            spacingDragRef.current,
           );
           postSelectedLayoutSize();
         }
@@ -443,6 +475,14 @@ export function PreviewPage() {
         mountRef.current,
         selectedId,
         isBoxDragKind(spacingDragRef.current) ? spacingDragRef.current : null,
+      );
+      paintWidgetChrome(
+        hostRef.current,
+        mountRef.current,
+        chromeTargetRef.current,
+        viewScaleRef.current,
+        nextEditing,
+        spacingDragRef.current,
       );
       syncSpacingGuides(
         hostRef.current,
@@ -600,7 +640,16 @@ export function PreviewPage() {
       }
       hoverFrame = window.requestAnimationFrame(() => {
         hoverFrame = 0;
+        chromeTargetRef.current = target;
         reportHover(target);
+        paintWidgetChrome(
+          hostRef.current,
+          mountRef.current,
+          target,
+          viewScaleRef.current,
+          editingRef.current,
+          spacingDragRef.current,
+        );
       });
     }
 
@@ -614,6 +663,15 @@ export function PreviewPage() {
         lastHoverKey = 'null';
         postWidgetHover(null);
       }
+      chromeTargetRef.current = null;
+      paintWidgetChrome(
+        hostRef.current,
+        mountRef.current,
+        null,
+        viewScaleRef.current,
+        editingRef.current,
+        spacingDragRef.current,
+      );
     }
 
     /** clearClimbTimer：取消 Ctrl 单击上钻的延时。 */
@@ -634,7 +692,16 @@ export function PreviewPage() {
         );
         if (widget) {
           lastHoverKey = '';
+          chromeTargetRef.current = widget;
           postWidgetHover(widget);
+          paintWidgetChrome(
+            hostRef.current,
+            mountRef.current,
+            widget,
+            viewScaleRef.current,
+            editingRef.current,
+            spacingDragRef.current,
+          );
           return;
         }
       }

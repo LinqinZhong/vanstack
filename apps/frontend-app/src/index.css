@@ -59,9 +59,17 @@ button {
 
 .h5-runtime .lowcode-flex > .lowcode-text,
 .h5-runtime .lowcode-flex > .lowcode-button,
+.h5-runtime .lowcode-flex > .lowcode-image,
 .h5-runtime .lowcode-flex > .lowcode-flex,
 .h5-runtime .lowcode-flex > .lowcode-swiper {
   margin: 0;
+}
+
+.h5-runtime .lowcode-swiper,
+.h5-runtime .lowcode-swiper-viewport,
+.h5-runtime .lowcode-swiper-item,
+.h5-runtime .lowcode-swiper-item-body {
+  overflow: hidden;
 }
 
 .h5-runtime .lowcode-swiper-item-body {
@@ -75,6 +83,23 @@ button {
   vertical-align: baseline;
   box-sizing: border-box;
   margin-right: 0.25em;
+}
+
+.h5-runtime .lowcode-image {
+  display: inline-block;
+  vertical-align: baseline;
+  box-sizing: border-box;
+  line-height: 0;
+  overflow: hidden;
+}
+
+.h5-runtime .lowcode-image > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  -webkit-user-drag: none;
+  user-select: none;
 }
 
 .h5-runtime .lowcode-button {

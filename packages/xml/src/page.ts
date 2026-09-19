@@ -19,6 +19,9 @@ export type BoxLength =
 export const POSITION_MODES = ['static', 'relative', 'absolute', 'fixed', 'sticky'] as const;
 export type PositionMode = (typeof POSITION_MODES)[number];
 export type WidgetPosition = Exclude<PositionMode, 'static'>;
+
+export const OVERFLOW_MODES = ['visible', 'hidden', 'scroll', 'auto'] as const;
+export type OverflowMode = (typeof OVERFLOW_MODES)[number];
 const STORED_POSITIONS = ['relative', 'absolute', 'fixed', 'sticky'] as const satisfies ReadonlyArray<WidgetPosition>;
 
 export const ANGLE_UNITS = ['deg', 'rad', 'grad', 'turn'] as const;
@@ -49,6 +52,7 @@ export type WidgetStyle = {
   boxShadow?: string;
   width?: SizeValue;
   height?: SizeValue;
+  overflow?: OverflowMode;
   position?: WidgetPosition;
   zIndex?: number;
   top?: BoxLength;
@@ -187,6 +191,7 @@ export type WidgetLoop = {
 type WidgetCommon = WidgetStates & { loop?: WidgetLoop };
 
 export type PageWidget =
+  | ({ type: 'image'; id: string; src: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({ type: 'text'; id: string; value: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({ type: 'button'; id: string; text: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({
@@ -528,6 +533,7 @@ const STYLE_KEYS = [
   'radiusBottomRight',
   'radiusBottomLeft',
   'boxShadow',
+  'overflow',
   'position',
   'zIndex',
   'top',
@@ -980,6 +986,9 @@ export function compactWidgetStyle(style: WidgetStyle | undefined): WidgetStyle 
     if (key === 'position' && !STORED_POSITIONS.includes(value as WidgetPosition)) {
       continue;
     }
+    if (key === 'overflow' && !(OVERFLOW_MODES as readonly string[]).includes(value as string)) {
+      continue;
+    }
     if (
       key === 'top' ||
       key === 'right' ||
@@ -1107,8 +1116,12 @@ export function sanitizeWidgetStyle(
     delete next.paddingRight;
     delete next.paddingBottom;
     delete next.paddingLeft;
+    delete next.overflow;
     next.width = compactSize(next.width) ?? DEFAULT_SWIPER_WIDTH;
     next.height = compactSize(next.height) ?? DEFAULT_SWIPER_HEIGHT;
+  }
+  if (type === 'image' || type === 'swiper-item') {
+    delete next.overflow;
   }
   return compactWidgetStyle(next);
 }
@@ -1304,6 +1317,7 @@ function parseStyle(node: OrderedNode): WidgetStyle | undefined {
     boxShadow: attr(node, 'box-shadow') || undefined,
     width: parseSize(attr(node, 'width')),
     height: parseSize(attr(node, 'height')),
+    overflow: parseEnum(attr(node, 'overflow'), OVERFLOW_MODES),
     position: parseEnum(attr(node, 'position'), STORED_POSITIONS),
     zIndex: parseInteger(attr(node, 'z-index')),
     top: parseBoxLength(attr(node, 'top'), { allowAuto: false }) ?? inset?.top,
@@ -1435,6 +1449,9 @@ function styleAttrs(style: WidgetStyle | undefined): Record<string, string> {
   }
   if (compact.height) {
     attrs['@_height'] = formatSize(compact.height);
+  }
+  if (compact.overflow) {
+    attrs['@_overflow'] = compact.overflow;
   }
   if (compact.position) {
     attrs['@_position'] = compact.position;
@@ -2259,6 +2276,25 @@ function parseWidgets(
   const allowContent = parent !== 'swiper';
 
   for (const child of nodes) {
+    if (allowContent && Object.prototype.hasOwnProperty.call(child, 'image')) {
+      ids.n += 1;
+      const style = parseStyle(child);
+      const item = asItem ? parseItem(child) : undefined;
+      const extra = widgetStateSpread(child, nodeList(child.image), ancestorNames);
+      widgets.push({
+        type: 'image',
+        id: attr(child, 'id') || `n${ids.n}`,
+        src: attr(child, 'src'),
+        ...(style ? { style } : {}),
+        ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
     if (allowContent && Object.prototype.hasOwnProperty.call(child, 'text')) {
       ids.n += 1;
       const style = parseStyle(child);
@@ -2389,6 +2425,12 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
     const style = styleAttrs(sanitizeWidgetStyle(widget.type, widget.style));
     const item = asItem && widget.type !== 'swiper-item' ? itemAttrs(widget.item) : {};
     const inner = serializeStateChildren(widget, ids, parent);
+    if (widget.type === 'image') {
+      return {
+        image: inner,
+        ':@': widgetHostAttrs(widget, id, style, { '@_src': widget.src, ...item }),
+      };
+    }
     if (widget.type === 'text') {
       return {
         text: inner,

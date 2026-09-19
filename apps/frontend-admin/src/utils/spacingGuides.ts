@@ -1166,3 +1166,54 @@ export function syncSpacingGuides(
   setSpacingHeldEdges(host, heldEdges, mirror, activeEdge);
   setSpacingSnap(host, snap);
 }
+
+const CHROME_ATTR = 'data-widget-chrome';
+
+function paintChromeFrame(frame: HTMLElement, host: HTMLElement, widget: HTMLElement, zoom: number) {
+  const box = rotateLayoutBox(host, widget, zoom);
+  const computed = widget.ownerDocument.defaultView?.getComputedStyle(widget);
+  frame.style.left = `${box.left}px`;
+  frame.style.top = `${box.top}px`;
+  frame.style.width = `${box.width}px`;
+  frame.style.height = `${box.height}px`;
+  frame.style.borderRadius = computed?.borderRadius ?? '';
+  frame.style.transform = computed && computed.transform !== 'none' ? computed.transform : '';
+  frame.style.transformOrigin = 'center center';
+}
+
+/** syncWidgetChrome：把悬停粉框和选中彩虹框画在预览叠层上，避免 overflow:hidden 裁切。 */
+export function syncWidgetChrome(
+  host: HTMLElement | null,
+  hover: HTMLElement | null,
+  selected: HTMLElement | null,
+  zoom: number,
+) {
+  if (!host || (!hover && !selected)) {
+    host?.querySelector(`[${CHROME_ATTR}]`)?.remove();
+    return;
+  }
+  let overlay = host.querySelector<HTMLElement>(`[${CHROME_ATTR}]`);
+  if (!overlay) {
+    overlay = host.ownerDocument.createElement('div');
+    overlay.setAttribute(CHROME_ATTR, '');
+    overlay.className = 'widget-chrome';
+    overlay.innerHTML =
+      '<div class="widget-chrome-frame is-hover" hidden></div><div class="widget-chrome-frame is-selected" hidden></div>';
+    host.append(overlay);
+  }
+  const hoverFrame = overlay.querySelector<HTMLElement>('.widget-chrome-frame.is-hover');
+  const selectedFrame = overlay.querySelector<HTMLElement>('.widget-chrome-frame.is-selected');
+  const showHover = Boolean(hover && hover !== selected);
+  if (hoverFrame) {
+    hoverFrame.hidden = !showHover;
+    if (showHover && hover) {
+      paintChromeFrame(hoverFrame, host, hover, zoom);
+    }
+  }
+  if (selectedFrame) {
+    selectedFrame.hidden = !selected;
+    if (selected) {
+      paintChromeFrame(selectedFrame, host, selected, zoom);
+    }
+  }
+}

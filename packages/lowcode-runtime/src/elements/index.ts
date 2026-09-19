@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
 import { renderButton } from './button';
 import { renderFlex } from './flex';
+import { renderImage } from './image';
 import { renderSwiper } from './swiper';
 import { renderSwiperItem } from './swiper-item';
 import { renderText } from './text';
@@ -9,6 +10,8 @@ import type { WidgetRenderContext } from '../widget-render';
 
 export function widgetElement(widget: PageWidget, ctx: WidgetRenderContext): ReactElement {
   switch (widget.type) {
+    case 'image':
+      return renderImage(widget, ctx);
     case 'text':
       return renderText(widget, ctx);
     case 'button':

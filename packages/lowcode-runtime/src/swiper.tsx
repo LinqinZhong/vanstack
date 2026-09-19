@@ -161,19 +161,21 @@ export function SwiperView({
     ? `translate3d(0, calc(${-percent}% + ${drag}px), 0)`
     : `translate3d(calc(${-percent}% + ${drag}px), 0, 0)`;
 
-  const viewportStyle: CSSProperties = editing
-    ? { overflow: 'visible', flex: 1, minHeight: 0, width: '100%', height: '100%' }
-    : {
-        overflow: 'hidden',
-        flex: 1,
-        minHeight: 0,
-        width: '100%',
-        height: '100%',
-        boxSizing: 'border-box',
-        ...(vertical
-          ? { paddingTop: previousMargin, paddingBottom: nextMargin }
-          : { paddingLeft: previousMargin, paddingRight: nextMargin }),
-      };
+  const viewportStyle: CSSProperties = {
+    overflow: 'hidden',
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+    height: '100%',
+    ...(editing
+      ? {}
+      : {
+          boxSizing: 'border-box',
+          ...(vertical
+            ? { paddingTop: previousMargin, paddingBottom: nextMargin }
+            : { paddingLeft: previousMargin, paddingRight: nextMargin }),
+        }),
+  };
 
   const trackStyle: CSSProperties = {
     display: 'flex',
@@ -213,7 +215,7 @@ export function SwiperView({
         display: 'flex',
         flexDirection: 'column',
         boxSizing: 'border-box',
-        overflow: editing ? 'visible' : 'hidden',
+        overflow: 'hidden',
         width: '100%',
         ...(hasExplicitHeight ? {} : { height: 150 }),
         ...style,
@@ -254,6 +256,7 @@ export function SwiperView({
                   ...itemCss(item.style),
                   width: '100%',
                   height: '100%',
+                  overflow: 'hidden',
                 },
               },
               item.children.map((child) => renderChild(child)),

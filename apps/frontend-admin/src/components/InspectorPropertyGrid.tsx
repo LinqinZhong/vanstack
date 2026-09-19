@@ -10,6 +10,7 @@ import {
   FLEX_DISPLAYS,
   FLEX_JUSTIFY_CONTENTS,
   FLEX_WRAPS,
+  OVERFLOW_MODES,
   SWIPER_EASINGS,
   compactFlexContainer,
   compactFlexItem,
@@ -549,7 +550,7 @@ function PropertyGrid({
                   onChange={item.onChange}
                   onInvalidChange={reportInvalid}
                 />
-                {item.key === 'value' || item.key === 'text' ? (
+                {item.key === 'value' || item.key === 'text' || item.key === 'src' ? (
                   <>
                     <CopyI18nPicker
                       catalog={i18nCatalog}
@@ -601,7 +602,7 @@ function PropertyGrid({
           disabled={disabled}
           onChange={(event) => setEditorDraft(event.target.value)}
         />
-        {editing?.key === 'value' || editing?.key === 'text' ? (
+        {editing?.key === 'value' || editing?.key === 'text' || editing?.key === 'src' ? (
           <div className="inspector-text-modal-i18n">
             <CopyI18nPicker
               catalog={i18nCatalog}
@@ -700,6 +701,16 @@ export function WidgetPropertyInspector({
 
   const items: InspectorProp[] = [];
 
+  if (widget.type === 'image') {
+    items.push({
+      key: 'src',
+      value: widget.src,
+      onChange: (raw) => {
+        onPatch({ src: raw }, `edit:${widget.id}:src`);
+        return true;
+      },
+    });
+  }
   if (widget.type === 'text') {
     items.push({
       key: 'value',
@@ -766,6 +777,20 @@ export function WidgetPropertyInspector({
         },
       },
     );
+    if (widget.type === 'text' || widget.type === 'flex') {
+      items.push({
+        key: 'overflow',
+        value: style.overflow ?? '',
+        onChange: (raw) => {
+          const trimmed = raw.trim();
+          if (!trimmed) {
+            patchStyle({ overflow: undefined });
+            return true;
+          }
+          return accepted(parseEnum(raw, OVERFLOW_MODES), (overflow) => patchStyle({ overflow }));
+        },
+      });
+    }
     if (style.position) {
       items.push(
         lengthBoxProp(

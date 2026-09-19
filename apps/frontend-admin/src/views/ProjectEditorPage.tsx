@@ -1038,11 +1038,11 @@ export function ProjectEditorPage() {
         viewingStates: mode === 'edit' && !versionLocked ? viewingListFromMap(viewingByOwner) : null,
         spacingDrag:
           mode !== 'preview' &&
-          centerTab === 'layout' &&
-          isSpacingNudgeGroup(openBoxGroup) &&
-          !readOnlyRef.current &&
-          (openBoxGroup !== 'position' ||
-            canEditPositionInsets(findViewed(selectedWidgetId)?.style))
+            centerTab === 'layout' &&
+            isSpacingNudgeGroup(openBoxGroup) &&
+            !readOnlyRef.current &&
+            (openBoxGroup !== 'position' ||
+              canEditPositionInsets(findViewed(selectedWidgetId)?.style))
             ? openBoxGroup
             : null,
       },
@@ -2158,15 +2158,17 @@ export function ProjectEditorPage() {
     }
     const nextId = nextWidgetId();
     const widget: PageWidget =
-      type === 'text'
-        ? { type: 'text', id: nextId, value: t('lowcode.defaultText') }
-        : type === 'button'
-          ? { type: 'button', id: nextId, text: t('lowcode.defaultButton'), style: { background: '#ffffff' } }
-          : type === 'flex'
-            ? { type: 'flex', id: nextId, children: [] }
-            : type === 'swiper-item'
-              ? emptySwiperItem(nextId)
-              : createSwiperWidget(nextId, nextWidgetId);
+      type === 'image'
+        ? { type: 'image', id: nextId, src: 'https://picsum.photos/200/200?random='+Math.random(), style:{width:{mode:'%',value:100},height:{mode:'%',value:100}} }
+        : type === 'text'
+          ? { type: 'text', id: nextId, value: t('lowcode.defaultText') }
+          : type === 'button'
+            ? { type: 'button', id: nextId, text: t('lowcode.defaultButton'), style: { background: '#ffffff' } }
+            : type === 'flex'
+              ? { type: 'flex', id: nextId, children: [] }
+              : type === 'swiper-item'
+                ? emptySwiperItem(nextId)
+                : createSwiperWidget(nextId, nextWidgetId);
     const nextWidgets = addWidgetToTree(widgetsRef.current, selectedWidgetIdRef.current, widget);
     const added = findWidget(nextWidgets, widget.id);
     commitWidgets(nextWidgets, added ? widget.id : selectedWidgetIdRef.current);
@@ -2914,11 +2916,11 @@ export function ProjectEditorPage() {
         spacing.kind === 'position'
           ? seedPositionQuad(widget.style, spacing.widgetId, spacing.edge)
           : styleBoxQuad(
-              widget.style,
-              spacing.kind,
-              spacing.kind === 'size' ? measuredWidgetSize(spacing.widgetId) : null,
-              spacing.kind === 'size' ? sizeLock(spacing.edge, altKey) : undefined,
-            );
+            widget.style,
+            spacing.kind,
+            spacing.kind === 'size' ? measuredWidgetSize(spacing.widgetId) : null,
+            spacing.kind === 'size' ? sizeLock(spacing.edge, altKey) : undefined,
+          );
       spacing.x = screenX;
       spacing.y = screenY;
       spacing.mirror = altKey;
@@ -2936,6 +2938,15 @@ export function ProjectEditorPage() {
     const quad =
       spacing.kind === 'radius'
         ? applyRadiusDrag({
+          start: spacing.start,
+          dx,
+          dy,
+          edge,
+          snap: shiftKey,
+          mirror: altKey,
+        })
+        : spacing.kind === 'size'
+          ? applySizeDrag({
             start: spacing.start,
             dx,
             dy,
@@ -2943,16 +2954,7 @@ export function ProjectEditorPage() {
             snap: shiftKey,
             mirror: altKey,
           })
-        : spacing.kind === 'size'
-          ? applySizeDrag({
-              start: spacing.start,
-              dx,
-              dy,
-              edge,
-              snap: shiftKey,
-              mirror: altKey,
-            })
-        : applySpacingDrag({
+          : applySpacingDrag({
             start: spacing.start,
             dx,
             dy,
@@ -3058,11 +3060,11 @@ export function ProjectEditorPage() {
           kind === 'position'
             ? seedPositionQuad(widget.style, widgetId, data.spacingEdge)
             : styleBoxQuad(
-                widget.style,
-                kind,
-                kind === 'size' ? measuredWidgetSize(widgetId) : null,
-                kind === 'size' ? sizeLock(data.spacingEdge, Boolean(data.altKey)) : undefined,
-              ),
+              widget.style,
+              kind,
+              kind === 'size' ? measuredWidgetSize(widgetId) : null,
+              kind === 'size' ? sizeLock(data.spacingEdge, Boolean(data.altKey)) : undefined,
+            ),
         edge: data.spacingEdge,
         mirror: Boolean(data.altKey),
       };
@@ -3199,17 +3201,17 @@ export function ProjectEditorPage() {
       void saveCurrentVersion();
       return;
     }
-      if (isBoxGroupShortcut(shortcut)) {
-        if (readOnlyRef.current || !selectedWidgetIdRef.current) {
-          return;
-        }
-        const widget = findViewed(selectedWidgetIdRef.current);
-        if (!widget || !isBoxGroupAllowed(widget.type, shortcut)) {
-          return;
-        }
-        handleOpenBoxGroupChange(shortcut);
+    if (isBoxGroupShortcut(shortcut)) {
+      if (readOnlyRef.current || !selectedWidgetIdRef.current) {
         return;
       }
+      const widget = findViewed(selectedWidgetIdRef.current);
+      if (!widget || !isBoxGroupAllowed(widget.type, shortcut)) {
+        return;
+      }
+      handleOpenBoxGroupChange(shortcut);
+      return;
+    }
     if (isTextStyleShortcut(shortcut)) {
       const widgetId = selectedWidgetIdRef.current;
       const widget = findViewed(widgetId);
@@ -3538,559 +3540,559 @@ export function ProjectEditorPage() {
           </Tooltip>
         </nav>
         <div className="editor-main">
-        <div
-          className={[
-            versionsOpen ? 'editor-grid' : 'editor-grid is-versions-collapsed',
-            leftNav === 'i18n' ? 'is-covered' : '',
-          ]
-            .filter(Boolean)
-            .join(' ')}
-        >
-          <div className="editor-left">
-          <Card
-            size="small"
-            className="editor-panel"
-            title={t('lowcode.pages')}
-            extra={
-              <Button size="small" icon={<PlusOutlined />} onClick={openCreatePage}>
-                {t('lowcode.createPage')}
-              </Button>
-            }
+          <div
+            className={[
+              versionsOpen ? 'editor-grid' : 'editor-grid is-versions-collapsed',
+              leftNav === 'i18n' ? 'is-covered' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
           >
-            {pages.length === 0 ? (
-              <Empty description={t('lowcode.emptyPages')} />
-            ) : (
-              <List
-                dataSource={pages}
-                renderItem={(page) => (
-                  <List.Item
-                    className={page.id === selectedPageId ? 'is-selected' : undefined}
-                    actions={[
-                      <Button key="edit" type="link" onClick={() => openEditPage(page)}>
-                        {t('lowcode.edit')}
-                      </Button>,
-                      <Popconfirm
-                        key="del"
-                        title={t('lowcode.confirmDelete')}
-                        onConfirm={() => void removePage(page)}
-                      >
-                        <Button type="link" danger>
-                          {t('lowcode.delete')}
-                        </Button>
-                      </Popconfirm>,
-                    ]}
-                    onClick={() => setSelectedPageId(page.id)}
-                  >
-                    <List.Item.Meta title={page.name} description={page.key} />
-                  </List.Item>
-                )}
-              />
-            )}
-          </Card>
-
-          <Card
-            size="small"
-            className="editor-panel"
-            title={t('lowcode.widgetTree')}
-            extra={
-              <div className="widget-tree-actions">
-                <TreeActionButton
-                  title={`${t('lowcode.undo')} (${modifier}+Z)`}
-                  icon={<UndoOutlined />}
-                  disabled={!canUndo}
-                  onClick={undoWidgetEdit}
-                />
-                <TreeActionButton
-                  title={`${t('lowcode.redo')} (${modifier}+Shift+Z)`}
-                  icon={<RedoOutlined />}
-                  disabled={!canRedo}
-                  onClick={redoWidgetEdit}
-                />
-                <TreeActionButton
-                  title={`${t('lowcode.copyWidget')} (${modifier}+C)`}
-                  icon={<CopyOutlined />}
-                  disabled={!canCopy}
-                  onClick={copySelectedWidget}
-                />
-                <TreeActionButton
-                  title={`${t('lowcode.pasteWidget')} (${modifier}+V)`}
-                  icon={<SnippetsOutlined />}
-                  disabled={!canPaste}
-                  onClick={pasteClipboard}
-                />
-                <TreeActionButton
-                  title={`${t('lowcode.deleteWidget')} (Del)`}
-                  icon={<DeleteOutlined />}
-                  disabled={!canDelete}
-                  danger
-                  onClick={deleteSelectedWidget}
-                />
-                <Tooltip title={t('lowcode.addWidget')}>
-                  <Button
-                    size="small"
-                    icon={<PlusOutlined />}
-                    disabled={!selectedPage || readOnly}
-                    onClick={() => setWidgetModalOpen(true)}
-                  />
-                </Tooltip>
-              </div>
-            }
-          >
-            {widgets.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('lowcode.emptyWidgets')} />
-            ) : (
-              <div ref={widgetTreeHostRef}>
-                <Tree
-                className="widget-tree"
-                blockNode
-                autoExpandParent={false}
-                expandedKeys={expandedKeys}
-                selectedKeys={selectedWidgetId ? [selectedWidgetId] : []}
-                treeData={widgetTreeData}
-                titleRender={(node) => {
-                  const widgetId = String(node.key);
-                  const looped = isLoopConfigured(findWidget(widgets, widgetId)?.loop);
-                  return (
-                    <span className="widget-tree-title">
-                      <span
-                        className={canDragWidgetToData ? 'widget-tree-drag-title' : 'widget-tree-title-label'}
-                        draggable={canDragWidgetToData}
-                        onDragStart={(event) => {
-                          event.stopPropagation();
-                          event.dataTransfer.effectAllowed = 'copy';
-                          writeWidgetDrag(event.dataTransfer, widgetId);
-                        }}
-                      >
-                        {typeof node.title === 'string' ? node.title : widgetId}
-                      </span>
-                      {looped ? (
-                        <button
-                          type="button"
-                          className="widget-tree-loop"
-                          title={t('lowcode.styleLoop')}
-                          onMouseDown={(event) => event.stopPropagation()}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openWidgetLoopPanel(widgetId);
-                          }}
-                        >
-                          <UnorderedListOutlined />
-                        </button>
-                      ) : null}
-                    </span>
-                  );
-                }}
-                onExpand={(keys) => setExpandedKeys(keys.map(String))}
-                onSelect={(keys) => {
-                  if (keys[0]) {
-                    selectWidget(String(keys[0]));
-                  }
-                }}
-                onDoubleClick={(_event, node) => {
-                  const widgetId = String(node.key);
-                  if (widgetId) {
-                    focusWidgetById(widgetId);
-                  }
-                }}
-              />
-              </div>
-            )}
-          </Card>
-        </div>
-
-        <Card
-          size="small"
-          className="editor-canvas-card"
-          tabList={[
-            { key: 'layout', tab: t('lowcode.tabLayout') },
-            { key: 'data', tab: t('lowcode.tabData') },
-            { key: 'events', tab: t('lowcode.tabEvents') },
-          ]}
-          activeTabKey={centerTab}
-          onTabChange={(key) => {
-            const next = key as CenterTab;
-            setCenterTab(next);
-            if (next === 'layout' && !userAdjustedRef.current) {
-              window.requestAnimationFrame(() => fitCanvas(false));
-            }
-          }}
-          tabBarExtraContent={
-            <Select
-              size="small"
-              className="canvas-locale-select"
-              placeholder={t('lowcode.i18nLibrary')}
-              suffixIcon={<GlobalOutlined />}
-              value={previewLocale ?? undefined}
-              options={(pageI18n?.langs ?? []).map((lang) => ({
-                value: lang.key,
-                label: lang.name || lang.key,
-              }))}
-              onChange={(value: string) => setPreviewLocale(value)}
-              disabled={(pageI18n?.langs ?? []).length === 0}
-            />
-          }
-        >
-          <div className="canvas-card-body">
-            <div
-              className={['canvas-wrap', centerTab === 'layout' ? '' : 'is-hidden'].filter(Boolean).join(' ')}
-              onPointerDownCapture={onCanvasPanPointerDown}
-              onPointerMove={onCanvasPointerMove}
-              onPointerUp={onCanvasPointerUp}
-              onPointerCancel={onCanvasPointerUp}
-              onMouseDownCapture={(event) => {
-                if (event.button === 1) {
-                  event.preventDefault();
+            <div className="editor-left">
+              <Card
+                size="small"
+                className="editor-panel"
+                title={t('lowcode.pages')}
+                extra={
+                  <Button size="small" icon={<PlusOutlined />} onClick={openCreatePage}>
+                    {t('lowcode.createPage')}
+                  </Button>
                 }
-              }}
-              onAuxClick={(event) => event.preventDefault()}
-            >
-              <div
-                ref={stageRef}
-                className={[
-                  'canvas-stage',
-                  panning || panningRef.current ? 'is-panning' : '',
-                  previewing ? 'is-preview' : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                onPointerDown={onCanvasPointerDown}
-                onMouseDown={onCanvasMouseDown}
               >
-                <div ref={phoneScreenRef} className="phone-screen">
-                  <iframe
-                    ref={iframeRef}
-                    className="preview-frame"
-                    title={t('lowcode.preview')}
-                    src="/preview"
-                    scrolling="no"
-                    onLoad={() => {
-                      window.setTimeout(() => {
-                        if (!readyRef.current) {
-                          sendPreview();
-                        }
-                      }, 300);
-                    }}
-                  />
-                </div>
-                <div ref={phoneFrameRef} className="phone-page-frame" />
-                {showStyleChrome && selectedCanvasLabel ? (
-                  <div className="canvas-selection-label" title={selectedCanvasLabel}>
-                    {selectedCanvasLabel}
-                  </div>
-                ) : null}
-                {showStyleChrome ? (
-                  <div
-                    className="widget-style-bubble-host"
-                    onPointerDown={(event) => {
-                      // Stop a canvas spacing drag from flushing measured insets over bubble edits.
-                      if (spacingDragRef.current) {
-                        spacingDragRef.current = null;
-                        setSpacingDragCursor(null, null);
-                        syncSelectChrome();
-                      }
-                      event.stopPropagation();
-                    }}
-                  >
-                    {selectedDisplayWidget ? (
-                      <WidgetStyleBubble
-                        widget={selectedDisplayWidget}
-                        style={selectedDisplayWidget.style}
-                        i18nCatalog={pageI18n}
-                        variables={pageData}
-                        disabled={readOnly}
-                        openGroup={openBoxGroup}
-                        onOpenGroupChange={handleOpenBoxGroupChange}
-                        onChange={(nextStyle) =>
-                          updateWidget(
-                            selectedDisplayWidget.id,
-                            { style: nextStyle },
-                            `edit:${selectedDisplayWidget.id}:style`,
-                          )
-                        }
-                        onTextChange={
-                          selectedDisplayWidget.type === 'text' || selectedDisplayWidget.type === 'button'
-                            ? (text) =>
-                                updateWidget(
-                                  selectedDisplayWidget.id,
-                                  selectedDisplayWidget.type === 'text' ? { value: text } : { text },
-                                  `edit:${selectedDisplayWidget.id}:${selectedDisplayWidget.type === 'text' ? 'value' : 'text'}`,
-                                )
-                            : undefined
-                        }
-                        onLoopChange={(loop) =>
-                          updateWidget(selectedDisplayWidget.id, { loop }, `loop:${selectedDisplayWidget.id}`)
-                        }
-                        onStateFnChange={(stateFn) =>
-                          updateWidget(
-                            selectedDisplayWidget.id,
-                            { stateFn },
-                            `stateFn:${selectedDisplayWidget.id}`,
-                          )
-                        }
-                        onOpenInspector={() => setInspectorOpen(true)}
-                        onToolbarPopupChange={(open) => {
-                          toolbarPopupOpenRef.current = open;
-                          if (!open) {
-                            iframeRef.current?.classList.remove('is-color-picking');
-                          }
-                        }}
-                      />
-                    ) : (
-                      <ConfigProvider theme={{ algorithm: theme.defaultAlgorithm }}>
-                        <div className="widget-style-bubble">
-                          <Tooltip
-                            title={selectedWidget ? t('lowcode.widgetInspector') : t('lowcode.pageInspector')}
-                          >
-                            <Button
-                              size="small"
-                              type="text"
-                              icon={<SettingOutlined />}
-                              onClick={() => setInspectorOpen(true)}
-                            />
-                          </Tooltip>
-                        </div>
-                      </ConfigProvider>
-                    )}
-                  </div>
-                ) : null}
-              </div>
-              {showStyleChrome && selectedWidget && !readOnly ? (
-                <WidgetStateList
-                  items={visibleStates}
-                  viewingOwnerId={viewingOwnerId}
-                  viewingState={viewingState}
-                  ownedNames={ownedStateNames(selectedWidget)}
-                  onSelect={(row) => {
-                    if (!row.owned && row.name) {
-                      const inheritedName = row.name;
-                      setViewingOwnerId(row.ownerId);
-                      setViewingState(inheritedName);
-                      setViewingByOwner((prev) => ({
-                        ...prev,
-                        [row.ownerId]: inheritedName,
-                        [selectedWidget.id]: null,
-                      }));
-                      return;
-                    }
-                    const scopeOwnerId = row.scopeOwnerId;
-                    const scopeName = row.scopeName;
-                    if (scopeName && scopeOwnerId) {
-                      setViewingOwnerId(row.name ? row.ownerId : scopeOwnerId);
-                      setViewingState(row.name ?? scopeName);
-                      setViewingByOwner((prev) => ({
-                        ...prev,
-                        [scopeOwnerId]: scopeName,
-                        [row.ownerId]: row.name ?? null,
-                      }));
-                      return;
-                    }
-                    setViewingOwnerId(row.ownerId);
-                    setViewingState(row.name);
-                    setViewingByOwner((prev) => {
-                      const next: ViewingByOwner = { ...prev, [row.ownerId]: row.name };
-                      if (row.name == null) {
-                        for (const key of Object.keys(next)) {
-                          if (key !== row.ownerId) {
-                            next[key] = null;
-                          }
-                        }
-                      }
-                      return next;
-                    });
-                  }}
-                  onCreate={(name, from, transition) => {
-                    const scopeName = from.scopeName ?? (!from.owned ? from.name : null);
-                    const scopeOwnerId = from.scopeOwnerId ?? (!from.owned ? from.ownerId : undefined);
-                    const created = createWidgetState(
-                      widgets,
-                      selectedWidget.id,
-                      name,
-                      from.name,
-                      from.owned && !from.scopeName,
-                      transition,
-                      scopeName,
-                    );
-                    commitWidgets(created, selectedWidgetId);
-                    setViewingOwnerId(selectedWidget.id);
-                    setViewingState(name);
-                    setViewingByOwner((prev) => {
-                      const next: ViewingByOwner = { ...prev, [selectedWidget.id]: name };
-                      if (scopeName && scopeOwnerId) {
-                        next[scopeOwnerId] = scopeName;
-                      }
-                      return next;
-                    });
-                  }}
-                  onEdit={(from, name, transition) => {
-                    if (from.name == null) {
-                      commitWidgets(updateHostTransition(widgets, selectedWidget.id, transition), selectedWidgetId);
-                      return;
-                    }
-                    if (!name) {
-                      return;
-                    }
-                    commitWidgets(
-                      updateWidgetState(widgets, selectedWidget.id, from.name, name, transition, from.scopeName),
-                      selectedWidgetId,
-                    );
-                    if (viewingOwnerId === selectedWidget.id && viewingState === from.name) {
-                      setViewingState(name);
-                    }
-                    setViewingByOwner((prev) => {
-                      if (prev[selectedWidget.id] !== from.name) {
-                        return prev;
-                      }
-                      return { ...prev, [selectedWidget.id]: name };
-                    });
-                  }}
-                  onDelete={(row) => {
-                    if (!row.name) {
-                      return;
-                    }
-                    commitWidgets(deleteWidgetState(widgets, selectedWidget.id, row.name, row.scopeName), selectedWidgetId);
-                    if (viewingOwnerId === selectedWidget.id && viewingState === row.name) {
-                      setViewingOwnerId(row.scopeOwnerId ?? selectedWidget.id);
-                      setViewingState(row.scopeName ?? null);
-                    }
-                    setViewingByOwner((prev) => {
-                      if (prev[selectedWidget.id] !== row.name) {
-                        return prev;
-                      }
-                      return { ...prev, [selectedWidget.id]: null };
-                    });
-                  }}
-                />
-              ) : null}
-              <div className="canvas-toolbar">
-                <Button size="small" icon={<ZoomOutOutlined />} onClick={() => zoomBy(1 / ZOOM_STEP)} />
-                <Typography.Text ref={zoomLabelRef} className="canvas-zoom">
-                  {Math.round(view.scale * 100)}%
-                </Typography.Text>
-                <Button size="small" icon={<ZoomInOutlined />} onClick={() => zoomBy(ZOOM_STEP)} />
-                <Button size="small" icon={<ExpandOutlined />} onClick={() => fitCanvas(false)}>
-                  {t('lowcode.canvasReset')}
-                </Button>
-                <Segmented
-                  size="small"
-                  value={mode}
-                  onChange={(value) => setMode(value as CanvasMode)}
-                  options={[
-                    { label: t('lowcode.modeEdit'), value: 'edit' },
-                    { label: t('lowcode.modePreview'), value: 'preview' },
-                  ]}
-                />
-              </div>
-            </div>
-            {centerTab === 'data' ? (
-              <PageDataPanel
-                variables={pageData}
-                widgets={widgets}
-                disabled={readOnly}
-                onChange={commitPageData}
-                onEndCoalesce={endCoalesce}
-              />
-            ) : null}
-            {centerTab === 'events' ? (
-              <div className="page-events-panel">
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('lowcode.eventsEmpty')} />
-              </div>
-            ) : null}
-          </div>
-        </Card>
-
-        {versionsOpen ? (
-          <div className="editor-versions">
-            <button
-              type="button"
-              className="versions-collapse"
-              aria-label={t('lowcode.collapseVersions')}
-              title={t('lowcode.collapseVersions')}
-              onClick={() => setVersionsOpen(false)}
-            >
-              <RightOutlined />
-            </button>
-            <Card
-              size="small"
-              className="editor-panel"
-              title={t('lowcode.versions')}
-              extra={
-                <Button size="small" disabled={!selectedPage} onClick={openCreateVersion}>
-                  {t('lowcode.createVersion')}
-                </Button>
-              }
-            >
-              {versions.length === 0 ? (
-                <Empty description={t('lowcode.emptyVersions')} />
-              ) : (
-                <Radio.Group
-                  value={selectedVersionId}
-                  onChange={(event) => {
-                    const version = versions.find((item) => item.id === event.target.value);
-                    if (version) {
-                      selectVersion(version);
-                    }
-                  }}
-                  style={{ width: '100%' }}
-                >
+                {pages.length === 0 ? (
+                  <Empty description={t('lowcode.emptyPages')} />
+                ) : (
                   <List
-                    className="version-list"
-                    dataSource={versions}
-                    renderItem={(version) => (
-                      <List.Item>
-                        <div className="version-item">
-                          <Radio value={version.id}>
-                            <Space size={6}>
-                              <span>v{version.versionNo}</span>
-                              <Tag
-                                color={
-                                  version.status === 'in_use'
-                                    ? 'success'
-                                    : version.status === 'published'
-                                      ? 'blue'
-                                      : 'default'
-                                }
-                              >
-                                {t(`lowcode.versionStatus.${version.status}`)}
-                              </Tag>
-                            </Space>
-                          </Radio>
-                          <div className="version-item-actions">
-                            {version.status === 'draft' ? (
-                              <Button type="link" onClick={() => void publishVersion(version)}>
-                                {t('lowcode.publishVersion')}
-                              </Button>
-                            ) : null}
-                            {version.status === 'published' ? (
-                              <Button type="link" onClick={() => void activateVersion(version)}>
-                                {t('lowcode.useVersion')}
-                              </Button>
-                            ) : null}
-                            {version.status === 'in_use' ? null : (
-                              <Popconfirm
-                                title={t('lowcode.confirmDelete')}
-                                onConfirm={() => void removeVersion(version)}
-                              >
-                                <Button type="link" danger>
-                                  {t('lowcode.delete')}
-                                </Button>
-                              </Popconfirm>
-                            )}
-                          </div>
-                        </div>
+                    dataSource={pages}
+                    renderItem={(page) => (
+                      <List.Item
+                        className={page.id === selectedPageId ? 'is-selected' : undefined}
+                        actions={[
+                          <Button key="edit" type="link" onClick={() => openEditPage(page)}>
+                            {t('lowcode.edit')}
+                          </Button>,
+                          <Popconfirm
+                            key="del"
+                            title={t('lowcode.confirmDelete')}
+                            onConfirm={() => void removePage(page)}
+                          >
+                            <Button type="link" danger>
+                              {t('lowcode.delete')}
+                            </Button>
+                          </Popconfirm>,
+                        ]}
+                        onClick={() => setSelectedPageId(page.id)}
+                      >
+                        <List.Item.Meta title={page.name} description={page.key} />
                       </List.Item>
                     )}
                   />
-                </Radio.Group>
-              )}
+                )}
+              </Card>
+
+              <Card
+                size="small"
+                className="editor-panel"
+                title={t('lowcode.widgetTree')}
+                extra={
+                  <div className="widget-tree-actions">
+                    <TreeActionButton
+                      title={`${t('lowcode.undo')} (${modifier}+Z)`}
+                      icon={<UndoOutlined />}
+                      disabled={!canUndo}
+                      onClick={undoWidgetEdit}
+                    />
+                    <TreeActionButton
+                      title={`${t('lowcode.redo')} (${modifier}+Shift+Z)`}
+                      icon={<RedoOutlined />}
+                      disabled={!canRedo}
+                      onClick={redoWidgetEdit}
+                    />
+                    <TreeActionButton
+                      title={`${t('lowcode.copyWidget')} (${modifier}+C)`}
+                      icon={<CopyOutlined />}
+                      disabled={!canCopy}
+                      onClick={copySelectedWidget}
+                    />
+                    <TreeActionButton
+                      title={`${t('lowcode.pasteWidget')} (${modifier}+V)`}
+                      icon={<SnippetsOutlined />}
+                      disabled={!canPaste}
+                      onClick={pasteClipboard}
+                    />
+                    <TreeActionButton
+                      title={`${t('lowcode.deleteWidget')} (Del)`}
+                      icon={<DeleteOutlined />}
+                      disabled={!canDelete}
+                      danger
+                      onClick={deleteSelectedWidget}
+                    />
+                    <Tooltip title={t('lowcode.addWidget')}>
+                      <Button
+                        size="small"
+                        icon={<PlusOutlined />}
+                        disabled={!selectedPage || readOnly}
+                        onClick={() => setWidgetModalOpen(true)}
+                      />
+                    </Tooltip>
+                  </div>
+                }
+              >
+                {widgets.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('lowcode.emptyWidgets')} />
+                ) : (
+                  <div ref={widgetTreeHostRef}>
+                    <Tree
+                      className="widget-tree"
+                      blockNode
+                      autoExpandParent={false}
+                      expandedKeys={expandedKeys}
+                      selectedKeys={selectedWidgetId ? [selectedWidgetId] : []}
+                      treeData={widgetTreeData}
+                      titleRender={(node) => {
+                        const widgetId = String(node.key);
+                        const looped = isLoopConfigured(findWidget(widgets, widgetId)?.loop);
+                        return (
+                          <span className="widget-tree-title">
+                            <span
+                              className={canDragWidgetToData ? 'widget-tree-drag-title' : 'widget-tree-title-label'}
+                              draggable={canDragWidgetToData}
+                              onDragStart={(event) => {
+                                event.stopPropagation();
+                                event.dataTransfer.effectAllowed = 'copy';
+                                writeWidgetDrag(event.dataTransfer, widgetId);
+                              }}
+                            >
+                              {typeof node.title === 'string' ? node.title : widgetId}
+                            </span>
+                            {looped ? (
+                              <button
+                                type="button"
+                                className="widget-tree-loop"
+                                title={t('lowcode.styleLoop')}
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openWidgetLoopPanel(widgetId);
+                                }}
+                              >
+                                <UnorderedListOutlined />
+                              </button>
+                            ) : null}
+                          </span>
+                        );
+                      }}
+                      onExpand={(keys) => setExpandedKeys(keys.map(String))}
+                      onSelect={(keys) => {
+                        if (keys[0]) {
+                          selectWidget(String(keys[0]));
+                        }
+                      }}
+                      onDoubleClick={(_event, node) => {
+                        const widgetId = String(node.key);
+                        if (widgetId) {
+                          focusWidgetById(widgetId);
+                        }
+                      }}
+                    />
+                  </div>
+                )}
+              </Card>
+            </div>
+
+            <Card
+              size="small"
+              className="editor-canvas-card"
+              tabList={[
+                { key: 'layout', tab: t('lowcode.tabLayout') },
+                { key: 'data', tab: t('lowcode.tabData') },
+                { key: 'events', tab: t('lowcode.tabEvents') },
+              ]}
+              activeTabKey={centerTab}
+              onTabChange={(key) => {
+                const next = key as CenterTab;
+                setCenterTab(next);
+                if (next === 'layout' && !userAdjustedRef.current) {
+                  window.requestAnimationFrame(() => fitCanvas(false));
+                }
+              }}
+              tabBarExtraContent={
+                <Select
+                  size="small"
+                  className="canvas-locale-select"
+                  placeholder={t('lowcode.i18nLibrary')}
+                  suffixIcon={<GlobalOutlined />}
+                  value={previewLocale ?? undefined}
+                  options={(pageI18n?.langs ?? []).map((lang) => ({
+                    value: lang.key,
+                    label: lang.name || lang.key,
+                  }))}
+                  onChange={(value: string) => setPreviewLocale(value)}
+                  disabled={(pageI18n?.langs ?? []).length === 0}
+                />
+              }
+            >
+              <div className="canvas-card-body">
+                <div
+                  className={['canvas-wrap', centerTab === 'layout' ? '' : 'is-hidden'].filter(Boolean).join(' ')}
+                  onPointerDownCapture={onCanvasPanPointerDown}
+                  onPointerMove={onCanvasPointerMove}
+                  onPointerUp={onCanvasPointerUp}
+                  onPointerCancel={onCanvasPointerUp}
+                  onMouseDownCapture={(event) => {
+                    if (event.button === 1) {
+                      event.preventDefault();
+                    }
+                  }}
+                  onAuxClick={(event) => event.preventDefault()}
+                >
+                  <div
+                    ref={stageRef}
+                    className={[
+                      'canvas-stage',
+                      panning || panningRef.current ? 'is-panning' : '',
+                      previewing ? 'is-preview' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    onPointerDown={onCanvasPointerDown}
+                    onMouseDown={onCanvasMouseDown}
+                  >
+                    <div ref={phoneScreenRef} className="phone-screen">
+                      <iframe
+                        ref={iframeRef}
+                        className="preview-frame"
+                        title={t('lowcode.preview')}
+                        src="/preview"
+                        scrolling="no"
+                        onLoad={() => {
+                          window.setTimeout(() => {
+                            if (!readyRef.current) {
+                              sendPreview();
+                            }
+                          }, 300);
+                        }}
+                      />
+                    </div>
+                    <div ref={phoneFrameRef} className="phone-page-frame" />
+                    {showStyleChrome && selectedCanvasLabel ? (
+                      <div className="canvas-selection-label" title={selectedCanvasLabel}>
+                        {selectedCanvasLabel}
+                      </div>
+                    ) : null}
+                    {showStyleChrome ? (
+                      <div
+                        className="widget-style-bubble-host"
+                        onPointerDown={(event) => {
+                          // Stop a canvas spacing drag from flushing measured insets over bubble edits.
+                          if (spacingDragRef.current) {
+                            spacingDragRef.current = null;
+                            setSpacingDragCursor(null, null);
+                            syncSelectChrome();
+                          }
+                          event.stopPropagation();
+                        }}
+                      >
+                        {selectedDisplayWidget ? (
+                          <WidgetStyleBubble
+                            widget={selectedDisplayWidget}
+                            style={selectedDisplayWidget.style}
+                            i18nCatalog={pageI18n}
+                            variables={pageData}
+                            disabled={readOnly}
+                            openGroup={openBoxGroup}
+                            onOpenGroupChange={handleOpenBoxGroupChange}
+                            onChange={(nextStyle) =>
+                              updateWidget(
+                                selectedDisplayWidget.id,
+                                { style: nextStyle },
+                                `edit:${selectedDisplayWidget.id}:style`,
+                              )
+                            }
+                            onTextChange={
+                              selectedDisplayWidget.type === 'text' || selectedDisplayWidget.type === 'button'
+                                ? (text) =>
+                                  updateWidget(
+                                    selectedDisplayWidget.id,
+                                    selectedDisplayWidget.type === 'text' ? { value: text } : { text },
+                                    `edit:${selectedDisplayWidget.id}:${selectedDisplayWidget.type === 'text' ? 'value' : 'text'}`,
+                                  )
+                                : undefined
+                            }
+                            onLoopChange={(loop) =>
+                              updateWidget(selectedDisplayWidget.id, { loop }, `loop:${selectedDisplayWidget.id}`)
+                            }
+                            onStateFnChange={(stateFn) =>
+                              updateWidget(
+                                selectedDisplayWidget.id,
+                                { stateFn },
+                                `stateFn:${selectedDisplayWidget.id}`,
+                              )
+                            }
+                            onOpenInspector={() => setInspectorOpen(true)}
+                            onToolbarPopupChange={(open) => {
+                              toolbarPopupOpenRef.current = open;
+                              if (!open) {
+                                iframeRef.current?.classList.remove('is-color-picking');
+                              }
+                            }}
+                          />
+                        ) : (
+                          <ConfigProvider theme={{ algorithm: theme.defaultAlgorithm }}>
+                            <div className="widget-style-bubble">
+                              <Tooltip
+                                title={selectedWidget ? t('lowcode.widgetInspector') : t('lowcode.pageInspector')}
+                              >
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  icon={<SettingOutlined />}
+                                  onClick={() => setInspectorOpen(true)}
+                                />
+                              </Tooltip>
+                            </div>
+                          </ConfigProvider>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                  {showStyleChrome && selectedWidget && !readOnly ? (
+                    <WidgetStateList
+                      items={visibleStates}
+                      viewingOwnerId={viewingOwnerId}
+                      viewingState={viewingState}
+                      ownedNames={ownedStateNames(selectedWidget)}
+                      onSelect={(row) => {
+                        if (!row.owned && row.name) {
+                          const inheritedName = row.name;
+                          setViewingOwnerId(row.ownerId);
+                          setViewingState(inheritedName);
+                          setViewingByOwner((prev) => ({
+                            ...prev,
+                            [row.ownerId]: inheritedName,
+                            [selectedWidget.id]: null,
+                          }));
+                          return;
+                        }
+                        const scopeOwnerId = row.scopeOwnerId;
+                        const scopeName = row.scopeName;
+                        if (scopeName && scopeOwnerId) {
+                          setViewingOwnerId(row.name ? row.ownerId : scopeOwnerId);
+                          setViewingState(row.name ?? scopeName);
+                          setViewingByOwner((prev) => ({
+                            ...prev,
+                            [scopeOwnerId]: scopeName,
+                            [row.ownerId]: row.name ?? null,
+                          }));
+                          return;
+                        }
+                        setViewingOwnerId(row.ownerId);
+                        setViewingState(row.name);
+                        setViewingByOwner((prev) => {
+                          const next: ViewingByOwner = { ...prev, [row.ownerId]: row.name };
+                          if (row.name == null) {
+                            for (const key of Object.keys(next)) {
+                              if (key !== row.ownerId) {
+                                next[key] = null;
+                              }
+                            }
+                          }
+                          return next;
+                        });
+                      }}
+                      onCreate={(name, from, transition) => {
+                        const scopeName = from.scopeName ?? (!from.owned ? from.name : null);
+                        const scopeOwnerId = from.scopeOwnerId ?? (!from.owned ? from.ownerId : undefined);
+                        const created = createWidgetState(
+                          widgets,
+                          selectedWidget.id,
+                          name,
+                          from.name,
+                          from.owned && !from.scopeName,
+                          transition,
+                          scopeName,
+                        );
+                        commitWidgets(created, selectedWidgetId);
+                        setViewingOwnerId(selectedWidget.id);
+                        setViewingState(name);
+                        setViewingByOwner((prev) => {
+                          const next: ViewingByOwner = { ...prev, [selectedWidget.id]: name };
+                          if (scopeName && scopeOwnerId) {
+                            next[scopeOwnerId] = scopeName;
+                          }
+                          return next;
+                        });
+                      }}
+                      onEdit={(from, name, transition) => {
+                        if (from.name == null) {
+                          commitWidgets(updateHostTransition(widgets, selectedWidget.id, transition), selectedWidgetId);
+                          return;
+                        }
+                        if (!name) {
+                          return;
+                        }
+                        commitWidgets(
+                          updateWidgetState(widgets, selectedWidget.id, from.name, name, transition, from.scopeName),
+                          selectedWidgetId,
+                        );
+                        if (viewingOwnerId === selectedWidget.id && viewingState === from.name) {
+                          setViewingState(name);
+                        }
+                        setViewingByOwner((prev) => {
+                          if (prev[selectedWidget.id] !== from.name) {
+                            return prev;
+                          }
+                          return { ...prev, [selectedWidget.id]: name };
+                        });
+                      }}
+                      onDelete={(row) => {
+                        if (!row.name) {
+                          return;
+                        }
+                        commitWidgets(deleteWidgetState(widgets, selectedWidget.id, row.name, row.scopeName), selectedWidgetId);
+                        if (viewingOwnerId === selectedWidget.id && viewingState === row.name) {
+                          setViewingOwnerId(row.scopeOwnerId ?? selectedWidget.id);
+                          setViewingState(row.scopeName ?? null);
+                        }
+                        setViewingByOwner((prev) => {
+                          if (prev[selectedWidget.id] !== row.name) {
+                            return prev;
+                          }
+                          return { ...prev, [selectedWidget.id]: null };
+                        });
+                      }}
+                    />
+                  ) : null}
+                  <div className="canvas-toolbar">
+                    <Button size="small" icon={<ZoomOutOutlined />} onClick={() => zoomBy(1 / ZOOM_STEP)} />
+                    <Typography.Text ref={zoomLabelRef} className="canvas-zoom">
+                      {Math.round(view.scale * 100)}%
+                    </Typography.Text>
+                    <Button size="small" icon={<ZoomInOutlined />} onClick={() => zoomBy(ZOOM_STEP)} />
+                    <Button size="small" icon={<ExpandOutlined />} onClick={() => fitCanvas(false)}>
+                      {t('lowcode.canvasReset')}
+                    </Button>
+                    <Segmented
+                      size="small"
+                      value={mode}
+                      onChange={(value) => setMode(value as CanvasMode)}
+                      options={[
+                        { label: t('lowcode.modeEdit'), value: 'edit' },
+                        { label: t('lowcode.modePreview'), value: 'preview' },
+                      ]}
+                    />
+                  </div>
+                </div>
+                {centerTab === 'data' ? (
+                  <PageDataPanel
+                    variables={pageData}
+                    widgets={widgets}
+                    disabled={readOnly}
+                    onChange={commitPageData}
+                    onEndCoalesce={endCoalesce}
+                  />
+                ) : null}
+                {centerTab === 'events' ? (
+                  <div className="page-events-panel">
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('lowcode.eventsEmpty')} />
+                  </div>
+                ) : null}
+              </div>
             </Card>
+
+            {versionsOpen ? (
+              <div className="editor-versions">
+                <button
+                  type="button"
+                  className="versions-collapse"
+                  aria-label={t('lowcode.collapseVersions')}
+                  title={t('lowcode.collapseVersions')}
+                  onClick={() => setVersionsOpen(false)}
+                >
+                  <RightOutlined />
+                </button>
+                <Card
+                  size="small"
+                  className="editor-panel"
+                  title={t('lowcode.versions')}
+                  extra={
+                    <Button size="small" disabled={!selectedPage} onClick={openCreateVersion}>
+                      {t('lowcode.createVersion')}
+                    </Button>
+                  }
+                >
+                  {versions.length === 0 ? (
+                    <Empty description={t('lowcode.emptyVersions')} />
+                  ) : (
+                    <Radio.Group
+                      value={selectedVersionId}
+                      onChange={(event) => {
+                        const version = versions.find((item) => item.id === event.target.value);
+                        if (version) {
+                          selectVersion(version);
+                        }
+                      }}
+                      style={{ width: '100%' }}
+                    >
+                      <List
+                        className="version-list"
+                        dataSource={versions}
+                        renderItem={(version) => (
+                          <List.Item>
+                            <div className="version-item">
+                              <Radio value={version.id}>
+                                <Space size={6}>
+                                  <span>v{version.versionNo}</span>
+                                  <Tag
+                                    color={
+                                      version.status === 'in_use'
+                                        ? 'success'
+                                        : version.status === 'published'
+                                          ? 'blue'
+                                          : 'default'
+                                    }
+                                  >
+                                    {t(`lowcode.versionStatus.${version.status}`)}
+                                  </Tag>
+                                </Space>
+                              </Radio>
+                              <div className="version-item-actions">
+                                {version.status === 'draft' ? (
+                                  <Button type="link" onClick={() => void publishVersion(version)}>
+                                    {t('lowcode.publishVersion')}
+                                  </Button>
+                                ) : null}
+                                {version.status === 'published' ? (
+                                  <Button type="link" onClick={() => void activateVersion(version)}>
+                                    {t('lowcode.useVersion')}
+                                  </Button>
+                                ) : null}
+                                {version.status === 'in_use' ? null : (
+                                  <Popconfirm
+                                    title={t('lowcode.confirmDelete')}
+                                    onConfirm={() => void removeVersion(version)}
+                                  >
+                                    <Button type="link" danger>
+                                      {t('lowcode.delete')}
+                                    </Button>
+                                  </Popconfirm>
+                                )}
+                              </div>
+                            </div>
+                          </List.Item>
+                        )}
+                      />
+                    </Radio.Group>
+                  )}
+                </Card>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-        </div>
-        {leftNav === 'i18n' ? (
-          <Card size="small" className="editor-panel language-library-card" title={t('lowcode.i18nLibrary')}>
-            <LanguageLibraryPanel catalog={pageI18n} onChange={commitPageI18n} />
-          </Card>
-        ) : null}
+          {leftNav === 'i18n' ? (
+            <Card size="small" className="editor-panel language-library-card" title={t('lowcode.i18nLibrary')}>
+              <LanguageLibraryPanel catalog={pageI18n} onChange={commitPageI18n} />
+            </Card>
+          ) : null}
         </div>
       </div>
 
@@ -4112,63 +4114,54 @@ export function ProjectEditorPage() {
           },
         }}
       >
-      <EditorHelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
-      <Modal
-        className="inspector-modal"
-        open={inspectorOpen}
-        title={
-          selectedWidget
-            ? t('lowcode.widgetInspectorTitle', {
-                type:
-                  selectedWidget.type === 'text'
-                    ? t('lowcode.defaultText')
-                    : selectedWidget.type === 'button'
-                      ? t('lowcode.defaultButton')
-                      : selectedWidget.type === 'swiper'
-                        ? t('lowcode.defaultSwiper')
-                        : selectedWidget.type === 'swiper-item'
-                          ? t('lowcode.defaultSwiperItem')
-                          : t('lowcode.defaultFlex'),
+        <EditorHelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
+        <Modal
+          className="inspector-modal"
+          open={inspectorOpen}
+          title={
+            selectedWidget
+              ? t('lowcode.widgetInspectorTitle', {
+                type: widgetTypeName(selectedWidget.type, t),
                 id: selectedWidget.id,
               })
-            : t('lowcode.pageInspector')
-        }
-        footer={null}
-        width={920}
-        maskClosable={!inspectorInvalid}
-        keyboard={!inspectorInvalid}
-        styles={{ body: { maxHeight: 'none', overflow: 'visible' } }}
-        onCancel={() => {
-          if (inspectorInvalid) {
-            message.warning(t('lowcode.propInvalidClose'));
-            return;
+              : t('lowcode.pageInspector')
           }
-          setInspectorOpen(false);
-        }}
-        destroyOnHidden
-      >
-        {selectedDisplayWidget ? (
-          <CoalesceField onLeave={endCoalesce}>
-            <WidgetPropertyInspector
-              widget={selectedDisplayWidget}
-              parentType={selectedParent?.type}
-              disabled={readOnly}
-              i18nCatalog={pageI18n}
-              onPatch={(patch, coalesceKey) => updateWidget(selectedDisplayWidget.id, patch, coalesceKey)}
-              onInvalidChange={setInspectorInvalid}
-            />
-          </CoalesceField>
-        ) : (
-          <CoalesceField onLeave={endCoalesce}>
-            <PagePropertyInspector
-              style={pageStyle}
-              disabled={readOnly}
-              onChange={(style, field) => updatePageStyle(style, `edit:page:${field}`)}
-              onInvalidChange={setInspectorInvalid}
-            />
-          </CoalesceField>
-        )}
-      </Modal>
+          footer={null}
+          width={920}
+          maskClosable={!inspectorInvalid}
+          keyboard={!inspectorInvalid}
+          styles={{ body: { maxHeight: 'none', overflow: 'visible' } }}
+          onCancel={() => {
+            if (inspectorInvalid) {
+              message.warning(t('lowcode.propInvalidClose'));
+              return;
+            }
+            setInspectorOpen(false);
+          }}
+          destroyOnHidden
+        >
+          {selectedDisplayWidget ? (
+            <CoalesceField onLeave={endCoalesce}>
+              <WidgetPropertyInspector
+                widget={selectedDisplayWidget}
+                parentType={selectedParent?.type}
+                disabled={readOnly}
+                i18nCatalog={pageI18n}
+                onPatch={(patch, coalesceKey) => updateWidget(selectedDisplayWidget.id, patch, coalesceKey)}
+                onInvalidChange={setInspectorInvalid}
+              />
+            </CoalesceField>
+          ) : (
+            <CoalesceField onLeave={endCoalesce}>
+              <PagePropertyInspector
+                style={pageStyle}
+                disabled={readOnly}
+                onChange={(style, field) => updatePageStyle(style, `edit:page:${field}`)}
+                onInvalidChange={setInspectorInvalid}
+              />
+            </CoalesceField>
+          )}
+        </Modal>
       </ConfigProvider>
 
       <Modal
@@ -4179,7 +4172,7 @@ export function ProjectEditorPage() {
         destroyOnHidden
       >
         <div className="widget-type-picker">
-          {(['text', 'button', 'flex', 'swiper', 'swiper-item'] as const).map((type) => (
+          {(['text', 'button', 'flex', 'swiper', 'swiper-item', 'image'] as const).map((type) => (
             <Button
               key={type}
               block
@@ -4188,15 +4181,16 @@ export function ProjectEditorPage() {
                 setWidgetModalOpen(false);
               }}
             >
-              {type === 'text'
-                ? t('lowcode.defaultText')
-                : type === 'button'
-                  ? t('lowcode.defaultButton')
-                  : type === 'flex'
-                    ? t('lowcode.defaultFlex')
-                    : type === 'swiper'
-                      ? t('lowcode.defaultSwiper')
-                      : t('lowcode.defaultSwiperItem')}
+              {
+                {
+                  'image': t('lowcode.defaultImage'),
+                  'text': t('lowcode.defaultText'),
+                  'button': t('lowcode.defaultButton'),
+                  'flex': t('lowcode.defaultFlex'),
+                  'swiper': t('lowcode.defaultSwiper'),
+                  'swiper-item': t('lowcode.defaultSwiperItem'),
+                }[type]
+              }
             </Button>
           ))}
         </div>

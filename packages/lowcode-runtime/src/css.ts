@@ -160,6 +160,9 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
 
   css.width = sizeCss(style.width);
   css.height = sizeCss(style.height);
+  if (style.overflow) {
+    css.overflow = style.overflow;
+  }
   if (style.position) {
     css.position = style.position;
     if (style.top) {

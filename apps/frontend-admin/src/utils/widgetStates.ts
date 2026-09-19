@@ -757,6 +757,9 @@ export function patchResolvedWidget(
   if (patch.text != null) {
     content.text = patch.text;
   }
+  if (patch.src != null) {
+    content.src = patch.src;
+  }
   if ('loop' in patch) {
     content.loop = patch.loop;
   }
@@ -866,6 +869,9 @@ export function patchWidgetInState(
   }
   if (patch.text != null) {
     content.text = patch.text;
+  }
+  if (patch.src != null) {
+    content.src = patch.src;
   }
   if ('loop' in patch) {
     content.loop = patch.loop;

@@ -1440,7 +1440,7 @@ body:has(.preview-host.is-editing) #root {
 .preview-host.is-editing .lowcode-swiper-track,
 .preview-host.is-editing .lowcode-swiper-item,
 .preview-host.is-editing .lowcode-swiper-item-body {
-  overflow: visible;
+  overflow: hidden;
 }
 
 .preview-mount .lowcode-swiper-item-body {
@@ -1451,6 +1451,7 @@ body:has(.preview-host.is-editing) #root {
 
 .preview-mount .lowcode-flex > .lowcode-text,
 .preview-mount .lowcode-flex > .lowcode-button,
+.preview-mount .lowcode-flex > .lowcode-image,
 .preview-mount .lowcode-flex > .lowcode-flex,
 .preview-mount .lowcode-flex > .lowcode-swiper {
   margin: 0;
@@ -1461,6 +1462,24 @@ body:has(.preview-host.is-editing) #root {
   vertical-align: baseline;
   box-sizing: border-box;
   margin-right: 0.25em;
+}
+
+.preview-mount .lowcode-image {
+  display: inline-block;
+  vertical-align: baseline;
+  box-sizing: border-box;
+  line-height: 0;
+  overflow: hidden;
+}
+
+.preview-mount .lowcode-image > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  -webkit-user-drag: none;
+  user-select: none;
 }
 
 .preview-mount .lowcode-button {
@@ -1479,7 +1498,12 @@ body:has(.preview-host.is-editing) #root {
 
 .preview-host.is-editing [data-widget-id] {
   cursor: pointer;
-  overflow: visible;
+}
+
+.preview-host.is-editing [data-widget-type="image"],
+.preview-host.is-editing [data-widget-type="swiper"],
+.preview-host.is-editing [data-widget-type="swiper-item"] {
+  overflow: hidden;
 }
 
 .preview-host.is-editing [data-widget-type="swiper-item"] {
@@ -1487,64 +1511,39 @@ body:has(.preview-host.is-editing) #root {
   min-height: 32px;
 }
 
-.preview-host.is-editing [data-widget-id]:not([style*="position:"]):hover:not(.is-widget-selected),
-.preview-host.is-editing [data-widget-id]:not([style*="position:"]).is-widget-selected {
-  position: relative;
-}
-
-.preview-host.is-editing [data-widget-id]:hover:not(.is-widget-selected) {
-  z-index: 2;
-}
-
 .preview-host.is-editing [data-widget-id].is-widget-selected.is-spacing-drag {
   cursor: default;
   z-index: 11;
 }
 
-.preview-host.is-editing [data-widget-id].is-widget-selected.is-spacing-drag::after {
-  opacity: 0;
-  animation-play-state: paused;
-}
-
-.preview-host.is-editing [data-widget-id]:hover:not(.is-widget-selected)::after,
-.preview-host.is-editing [data-widget-id].is-widget-selected::after {
-  content: "";
+.widget-chrome {
   position: absolute;
   inset: 0;
-  border-radius: inherit;
+  z-index: 11;
+  overflow: visible;
   pointer-events: none;
-  z-index: 4;
+}
+
+.widget-chrome-frame {
+  position: absolute;
   box-sizing: border-box;
+  pointer-events: none;
   opacity: 1;
   transition: opacity 200ms ease;
 }
 
-.preview-host.is-select-faded [data-widget-id]:hover:not(.is-widget-selected)::after,
-.preview-host.is-select-faded [data-widget-id].is-widget-selected::after {
+.preview-host.is-select-faded .widget-chrome-frame {
   opacity: 0;
   transition-duration: 80ms;
   animation-play-state: paused;
 }
 
-@property --select-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
-@keyframes widget-select-rainbow {
-  to {
-    --select-angle: 360deg;
-  }
-}
-
-.preview-host.is-editing [data-widget-id]:hover:not(.is-widget-selected)::after {
+.widget-chrome-frame.is-hover {
   outline: var(--editor-hairline, 1px) dashed #ff7eb6;
   outline-offset: 0;
 }
 
-.preview-host.is-editing [data-widget-id].is-widget-selected::after {
-  inset: calc(var(--editor-select, 2px) / -2);
+.widget-chrome-frame.is-selected {
   padding: var(--editor-select, 2px);
   background: conic-gradient(
     from var(--select-angle, 0deg),
@@ -1566,6 +1565,18 @@ body:has(.preview-host.is-editing) #root {
     linear-gradient(#fff 0 0);
   mask-composite: exclude;
   animation: widget-select-rainbow 1.8s linear infinite;
+}
+
+@property --select-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes widget-select-rainbow {
+  to {
+    --select-angle: 360deg;
+  }
 }
 
 .spacing-drag-shield {

@@ -14,6 +14,7 @@ import {
 export type WidgetPatch = {
   value?: string;
   text?: string;
+  src?: string;
   loop?: WidgetLoop | undefined;
   stateFn?: string | undefined;
   style?: WidgetStyle | undefined;
@@ -208,6 +209,13 @@ function applyCommon<T extends PageWidget>(widget: T, patch: WidgetPatch): T {
 }
 
 export function patchWidget(widget: PageWidget, patch: WidgetPatch): PageWidget {
+  if (widget.type === 'image') {
+    const next = applyCommon(widget, patch);
+    if (patch.src != null) {
+      next.src = patch.src;
+    }
+    return next;
+  }
   if (widget.type === 'text') {
     const next = applyCommon(widget, patch);
     if (patch.value != null) {
@@ -407,6 +415,17 @@ export function nextWidgetId(): string {
 
 export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidgetId): PageWidget {
   const states = cloneStateFields(widget);
+  if (widget.type === 'image') {
+    return {
+      type: 'image',
+      id: nextId(),
+      src: widget.src,
+      style: cloneOptional(widget.style),
+      item: cloneOptional(widget.item),
+      ...states,
+      ...cloneLoop(widget),
+    };
+  }
   if (widget.type === 'text') {
     return {
       type: 'text',
@@ -515,6 +534,9 @@ export function nextExpandedKeys(
 }
 
 export function widgetTypeName(type: PageWidget['type'], t: (key: string) => string): string {
+  if (type === 'image') {
+    return t('lowcode.defaultImage');
+  }
   if (type === 'text') {
     return t('lowcode.defaultText');
   }

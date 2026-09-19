@@ -15,10 +15,15 @@ export function renderSwiperItem(
       className: 'lowcode-swiper-item',
       'data-widget-id': widget.id,
       'data-widget-type': 'swiper-item',
-      style: mergeCss({ boxSizing: 'border-box' }, boxCss(sanitizeWidgetStyle('swiper-item', widget.style), widgetCssOptions(ctx)), {
-        width: '100%',
-        height: '100%',
-      }),
+      style: mergeCss(
+        { boxSizing: 'border-box' },
+        boxCss(sanitizeWidgetStyle('swiper-item', widget.style), widgetCssOptions(ctx)),
+        {
+          width: '100%',
+          height: '100%',
+          overflow: 'hidden',
+        },
+      ),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,
     },

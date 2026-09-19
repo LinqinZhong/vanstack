@@ -5,13 +5,14 @@ import {
   BorderOuterOutlined,
   ColumnWidthOutlined,
   ControlOutlined,
+  CodeOutlined,
   DragOutlined,
   EditOutlined,
+  ExpandOutlined,
   HighlightOutlined,
   ItalicOutlined,
   RadiusSettingOutlined,
   RotateRightOutlined,
-  SettingOutlined,
   UnorderedListOutlined,
   StrikethroughOutlined,
   UnderlineOutlined,
@@ -22,11 +23,13 @@ import { useTranslation } from 'react-i18next';
 import {
   DEFAULT_SWIPER_HEIGHT,
   DEFAULT_SWIPER_WIDTH,
+  OVERFLOW_MODES,
   POSITION_MODES,
   isCopyBinding,
   isLoopConfigured,
   isStateFnConfigured,
   sanitizeWidgetStyle,
+  type OverflowMode,
   type PageI18n,
   type PageVariable,
   type PageWidget,
@@ -51,11 +54,14 @@ type ShadowValue = {
 const DEFAULT_SHADOW: ShadowValue = { x: 0, y: 0, blur: 4, color: '' };
 const DEFAULT_BUTTON_BACKGROUND = '#ffffff';
 
-export type BoxGroup = 'content' | 'margin' | 'padding' | 'radius' | 'border' | 'size' | 'position' | 'rotate' | 'loop';
+export type BoxGroup = 'content' | 'margin' | 'padding' | 'radius' | 'border' | 'size' | 'overflow' | 'position' | 'rotate' | 'loop';
 
 export function isBoxGroupAllowed(type: PageWidget['type'], group: BoxGroup) {
   if (group === 'loop') {
     return true;
+  }
+  if (group === 'overflow') {
+    return type === 'text' || type === 'flex';
   }
   if (
     type === 'swiper-item' &&
@@ -551,11 +557,21 @@ export function WidgetStyleBubble({
               onClick={() => toggleGroup('loop')}
             />
           </Tooltip>
+          {isBoxGroupAllowed(widget.type, 'overflow') ? (
+            <Tooltip title={t('lowcode.styleOverflow')}>
+              <Button
+                size="small"
+                type={openGroup === 'overflow' ? 'primary' : 'text'}
+                icon={<ExpandOutlined />}
+                onClick={() => toggleGroup('overflow')}
+              />
+            </Tooltip>
+          ) : null}
           <Tooltip title={t('lowcode.styleSettings')}>
             <Button
               size="small"
               type="text"
-              icon={<SettingOutlined />}
+              icon={<CodeOutlined />}
               onClick={onOpenInspector}
             />
           </Tooltip>
@@ -595,6 +611,22 @@ export function WidgetStyleBubble({
                   allowFit={widget.type !== 'swiper'}
                   fallback={widget.type === 'swiper' ? DEFAULT_SWIPER_HEIGHT : undefined}
                   onChange={(height) => patch({ height })}
+                />
+              </div>
+            ) : null}
+            {openGroup === 'overflow' && isBoxGroupAllowed(widget.type, 'overflow') ? (
+              <div className="style-size-panel">
+                <Select
+                  size="small"
+                  value={current.overflow ?? 'visible'}
+                  getPopupContainer={popupContainer}
+                  onChange={(overflow: OverflowMode) =>
+                    patch({ overflow: overflow === 'visible' ? undefined : overflow })
+                  }
+                  options={OVERFLOW_MODES.map((value) => ({
+                    value,
+                    label: t(`lowcode.styleOverflow${value.charAt(0).toUpperCase()}${value.slice(1)}`),
+                  }))}
                 />
               </div>
             ) : null}

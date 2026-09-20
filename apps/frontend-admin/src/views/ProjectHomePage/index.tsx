@@ -1,11 +1,12 @@
+import './styles.less';
 import { PlusOutlined } from '@ant-design/icons';
 import { Button, Card, Empty, Form, Input, Modal, Popconfirm, Space, Table, Typography, message } from 'antd';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import type { ProjectDto } from '@vanstack/shared';
-import { api } from '../apis/api';
-import { h5ProjectUrl, localeFromI18n } from '../utils/h5';
+import { api } from '../../apis/api';
+import { h5ProjectUrl, localeFromI18n } from '../../utils/h5';
 
 const KEY_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 

@@ -2,7 +2,6 @@ import { CaretRightOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '
 import { Button, Dropdown, Form, Input, InputNumber, Modal, type MenuProps } from 'antd';
 import { useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { isJsIdentifier } from '@vanstack/xml';
 import { nextCopiedStateName, nextStateId, type VisibleWidgetState } from '../utils/widgetStates';
 
 type WidgetStateListProps = {
@@ -17,7 +16,6 @@ type WidgetStateListProps = {
 };
 
 type CreateForm = {
-  id: string;
   name: string;
   transition?: number | null;
 };
@@ -58,7 +56,6 @@ export function WidgetStateList({
       .filter((item) => item.owned && item.name != null)
       .map((item) => item.name as string);
     createForm.setFieldsValue({
-      id: nextStateId(usedIds),
       name: nextCopiedStateName(ownedNames, row.name ?? null),
       transition: row.transition ?? 0,
     });
@@ -239,7 +236,7 @@ export function WidgetStateList({
             if (!creatingFrom) {
               return;
             }
-            onCreate(values.id.trim(), values.name.trim(), creatingFrom, values.transition ?? 0);
+            onCreate(nextStateId(usedIds), values.name.trim(), creatingFrom, values.transition ?? 0);
             setCreateOpen(false);
             setCreatingFrom(null);
           });
@@ -251,26 +248,6 @@ export function WidgetStateList({
         destroyOnHidden
       >
         <Form form={createForm} layout="vertical">
-          <Form.Item
-            name="id"
-            label={t('lowcode.stateId')}
-            rules={[
-              { required: true, whitespace: true, message: t('lowcode.stateIdRequired') },
-              {
-                validator: async (_, value: string) => {
-                  const next = value?.trim();
-                  if (next && usedIds.has(next)) {
-                    throw new Error(t('lowcode.stateIdDuplicate'));
-                  }
-                  if (next && !isJsIdentifier(next)) {
-                    throw new Error(t('lowcode.stateIdInvalid'));
-                  }
-                },
-              },
-            ]}
-          >
-            <Input placeholder={t('lowcode.stateId')} />
-          </Form.Item>
           <Form.Item
             name="name"
             label={t('lowcode.stateName')}

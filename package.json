@@ -5,6 +5,7 @@
   "description": "NestJS + React 19 TypeScript monorepo with i18n, XML, TypeORM, and OSS",
   "packageManager": "pnpm@10.33.0",
   "scripts": {
+    "minio": "cd minio && pnpm start:win",
     "dev": "pnpm --filter @vanstack/shared --filter @vanstack/xml --filter @vanstack/lowcode-runtime build && pnpm -r --parallel --filter @vanstack/shared --filter @vanstack/xml --filter @vanstack/lowcode-runtime --filter @vanstack/backend --filter @vanstack/frontend-app --filter @vanstack/frontend-admin dev",
     "dev:backend": "pnpm --filter @vanstack/backend dev",
     "dev:app": "pnpm --filter @vanstack/frontend-app dev",

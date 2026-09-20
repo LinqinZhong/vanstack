@@ -1,3 +1,4 @@
+import './styles.less';
 import {
   AppstoreOutlined,
   ArrowLeftOutlined,
@@ -61,23 +62,19 @@ import { Link, useParams } from 'react-router-dom';
 import type { ProjectDto, ProjectPageDto, ProjectPageVersionDto } from '@vanstack/shared';
 import {
   EMPTY_PAGE_XML,
-  angleCss,
-  boxLengthCss,
   compactPageI18n,
-  compactSize,
   compactWidgetStyle,
   isLoopConfigured,
   parsePageXml,
   serializePageXml,
-  type BoxLength,
   type PageI18n,
   type PageStyle,
   type PageVariable,
   type PageWidget,
   type WidgetStyle,
 } from '@vanstack/xml';
-import { api } from '../apis/api';
-import { deleteDraft, getDraft, putDraft, putDraftNow } from '../utils/draftStore';
+import { api } from '../../apis/api';
+import { deleteDraft, getDraft, putDraft, putDraftNow } from '../../utils/draftStore';
 import {
   forgetPageSelection,
   getRememberedPageId,
@@ -85,23 +82,22 @@ import {
   pickRememberedId,
   rememberPageId,
   rememberVersionId,
-} from '../utils/editorSelection';
-import { AssetLibraryPanel } from '../components/AssetLibraryPanel';
-import { IconLibraryPanel } from '../components/IconLibraryPanel';
-import { EditorHelpModal } from '../components/EditorHelpModal';
-import { PageDataPanel } from '../components/PageDataPanel';
-import { LanguageLibraryPanel } from '../components/LanguageLibraryModal';
-import { isLowcodeMessage, LOWCODE_MESSAGE_SOURCE } from '../utils/lowcode-protocol';
-import { PagePropertyInspector, WidgetPropertyInspector } from '../components/InspectorPropertyGrid';
-import { WidgetStyleBubble, isBoxGroupAllowed, type BoxGroup } from '../components/WidgetStyleBubble';
-import { WidgetStateList } from '../components/WidgetStateList';
+} from '../../utils/editorSelection';
+import { AssetLibraryPanel } from '../../components/AssetLibraryPanel';
+import { IconLibraryPanel } from '../../components/IconLibraryPanel';
+import { EditorHelpModal } from '../../components/EditorHelpModal';
+import { PageDataPanel } from '../../components/PageDataPanel';
+import { LanguageLibraryPanel } from '../../components/LanguageLibraryModal';
+import { isLowcodeMessage, LOWCODE_MESSAGE_SOURCE } from '../../utils/lowcode-protocol';
+import { PagePropertyInspector, WidgetPropertyInspector } from '../../components/InspectorPropertyGrid';
+import { WidgetStyleBubble, isBoxGroupAllowed, type BoxGroup } from '../../components/WidgetStyleBubble';
+import { WidgetStateList } from '../../components/WidgetStateList';
 import {
   applyRadiusDrag,
   applySizeDrag,
   applySpacingDrag,
   applySpacingNudge,
   applySpacingValue,
-  isBoxDragKind,
   pickSpacingEdge,
   spacingDigitFromNumpad,
   spacingEdgesFromSelectKeys,
@@ -116,7 +112,7 @@ import {
   SPACING_VALUE_MAX_DIGITS,
   type BoxDragKind,
   type SpacingEdge,
-} from '../utils/spacingDrag';
+} from '../../utils/spacingDrag';
 import {
   applyRotateDrag,
   applyRotateNudge,
@@ -132,9 +128,9 @@ import {
   ROTATE_VALUE_MAX_CHARS,
   type RotateAxis,
   type RotateTriple,
-} from '../utils/rotateDrag';
-import { previewScreenElement, previewVisualScale, setSpacingDragCursor } from '../utils/spacingGuides';
-import type { BoxQuad } from '../components/StyleBoxEdges';
+} from '../../utils/rotateDrag';
+import { previewScreenElement, previewVisualScale, setSpacingDragCursor } from '../../utils/spacingGuides';
+import type { BoxQuad } from '../../components/StyleBoxEdges';
 import {
   isBoxGroupShortcut,
   isEditableKeyboardTarget,
@@ -142,7 +138,7 @@ import {
   matchWidgetShortcut,
   modifierShortcutLabel,
   type WidgetShortcut,
-} from '../utils/widgetShortcuts';
+} from '../../utils/widgetShortcuts';
 import {
   addWidgetToTree,
   canMoveWidget,
@@ -168,7 +164,7 @@ import {
   widgetTypeName,
   type WidgetDropPlacement,
   type WidgetPatch,
-} from '../utils/widgetTree';
+} from '../../utils/widgetTree';
 import {
   collectStateTree,
   createWidgetState,
@@ -183,360 +179,9 @@ import {
   viewingListFromMap,
   widgetWithStateLayers,
   type ViewingByOwner,
-} from '../utils/widgetStates';
-import { writeWidgetDrag } from '../utils/pageData';
-
-function widgetCanvasLabel(widget: PageWidget, t: (key: string) => string) {
-  return `${widgetTypeName(widget.type, t)}(${widget.id})`;
-}
-
-const KEY_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
-const SCREEN_WIDTH = 375;
-const SCREEN_HEIGHT = 667;
-const HISTORY_LIMIT = 100;
-const LANGS_DEBOUNCE_MS = 400;
-
-type HistoryEntry = {
-  widgets: PageWidget[];
-  pageStyle?: PageStyle;
-  pageData: PageVariable[];
-  selectedWidgetId: string | null;
-};
-type CenterTab = 'layout' | 'data' | 'events';
-const FIT_PADDING_X = 32;
-const FIT_PADDING_TOP = 24;
-const FIT_PADDING_BOTTOM = 64;
-const FOCUS_PADDING = 48;
-const CANVAS_RASTER_SCALE = 2;
-const EDIT_OVERFLOW_X = 4;
-const EDIT_OVERFLOW_Y = 2;
-const MIN_SCALE = 0.1;
-const MAX_SCALE = 5;
-const ZOOM_STEP = 1.15;
-const ZOOM_IDLE_MS = 80;
-const SERVER_IDLE_MS = 1500;
-const ENTER_DOUBLE_MS = 300;
-
-type CanvasMode = 'edit' | 'preview';
-type SaveStatus = 'saved' | 'saving' | 'unsaved';
-type ViewTransform = { x: number; y: number; scale: number };
-
-function clampScale(value: number) {
-  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
-}
-
-function snapDevicePixel(value: number) {
-  const dpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
-  return Math.round(value * dpr) / dpr;
-}
-
-function cameraTransform(view: ViewTransform, hasEditOverflow: boolean) {
-  const shiftX = hasEditOverflow ? SCREEN_WIDTH * (EDIT_OVERFLOW_X / 2) * view.scale : 0;
-  const shiftY = hasEditOverflow ? SCREEN_HEIGHT * (EDIT_OVERFLOW_Y / 2) * view.scale : 0;
-  return `translate3d(${view.x - shiftX}px, ${view.y - shiftY}px, 0) scale(${view.scale / CANVAS_RASTER_SCALE})`;
-}
-
-function paintCanvasView(
-  iframe: HTMLIFrameElement | null,
-  frame: HTMLDivElement | null,
-  view: ViewTransform,
-  hasEditOverflow: boolean,
-) {
-  const camera = iframe?.contentDocument?.querySelector<HTMLElement>('.preview-camera');
-  if (camera) {
-    camera.style.transform = cameraTransform(view, hasEditOverflow);
-  }
-  if (frame) {
-    frame.style.transform = `translate3d(${view.x}px, ${view.y}px, 0)`;
-    frame.style.width = `${snapDevicePixel(SCREEN_WIDTH * view.scale)}px`;
-    frame.style.height = `${snapDevicePixel(SCREEN_HEIGHT * view.scale)}px`;
-  }
-}
-
-function computeFitView(stageWidth: number, stageHeight: number, screenWidth: number): ViewTransform {
-  const availableWidth = Math.max(1, stageWidth - FIT_PADDING_X * 2);
-  const availableHeight = Math.max(1, stageHeight - FIT_PADDING_TOP - FIT_PADDING_BOTTOM);
-  const scale = clampScale(Math.min(availableWidth / screenWidth, availableHeight / SCREEN_HEIGHT));
-  return {
-    scale,
-    x: FIT_PADDING_X + (availableWidth - screenWidth * scale) / 2,
-    y: FIT_PADDING_TOP + (availableHeight - SCREEN_HEIGHT * scale) / 2,
-  };
-}
-
-function mapIframePoint(iframe: HTMLIFrameElement | null, localX: number, localY: number) {
-  if (!iframe) {
-    return { x: localX, y: localY };
-  }
-  const rect = iframe.getBoundingClientRect();
-  const width = iframe.clientWidth || 1;
-  const height = iframe.clientHeight || 1;
-  return {
-    x: rect.left + (localX / width) * rect.width,
-    y: rect.top + (localY / height) * rect.height,
-  };
-}
-
-function iframePointToClient(
-  localX: number,
-  localY: number,
-  _view: ViewTransform,
-  stageRect: DOMRect,
-  _hasEditOverflow: boolean,
-) {
-  return {
-    x: stageRect.left + localX,
-    y: stageRect.top + localY,
-  };
-}
-
-function zoomViewAt(
-  view: ViewTransform,
-  stageLeft: number,
-  stageTop: number,
-  clientX: number,
-  clientY: number,
-  factor: number,
-): ViewTransform {
-  const nextScale = clampScale(view.scale * factor);
-  const cx = clientX - stageLeft;
-  const cy = clientY - stageTop;
-  const wx = (cx - view.x) / Math.max(view.scale, 0.01);
-  const wy = (cy - view.y) / Math.max(view.scale, 0.01);
-  return {
-    scale: nextScale,
-    x: cx - wx * nextScale,
-    y: cy - wy * nextScale,
-  };
-}
-
-function sizeLock(edge?: SpacingEdge | null, mirror = false): { width: boolean; height: boolean } {
-  if (mirror) {
-    return { width: true, height: true };
-  }
-  return {
-    width: edge === 'left' || edge === 'right',
-    height: edge === 'top' || edge === 'bottom',
-  };
-}
-
-function sizeAxisValue(
-  size: WidgetStyle['width'],
-  measured: number | undefined,
-  lock: boolean,
-): number | undefined {
-  if (!lock) {
-    return undefined;
-  }
-  if (size?.mode === 'px') {
-    return size.value;
-  }
-  return measured ?? 0;
-}
-
-function dragLengthPx(length?: BoxLength): number | undefined {
-  return length?.mode === 'px' ? length.value : undefined;
-}
-
-function pxBoxLength(value?: number): BoxLength | undefined {
-  return value == null ? undefined : { mode: 'px', value };
-}
-
-function styleBoxQuad(
-  style: WidgetStyle | undefined,
-  kind: BoxDragKind,
-  measured?: { width: number; height: number } | null,
-  lock?: { width?: boolean; height?: boolean },
-): BoxQuad {
-  if (kind === 'margin') {
-    return {
-      top: dragLengthPx(style?.marginTop),
-      right: dragLengthPx(style?.marginRight),
-      bottom: dragLengthPx(style?.marginBottom),
-      left: dragLengthPx(style?.marginLeft),
-    };
-  }
-  if (kind === 'radius') {
-    return {
-      top: style?.radiusTopLeft,
-      right: style?.radiusTopRight,
-      bottom: style?.radiusBottomRight,
-      left: style?.radiusBottomLeft,
-    };
-  }
-  if (kind === 'size') {
-    const width = sizeAxisValue(style?.width, measured?.width, Boolean(lock?.width));
-    const height = sizeAxisValue(style?.height, measured?.height, Boolean(lock?.height));
-    return { top: height, right: width, bottom: height, left: width };
-  }
-  if (kind === 'position') {
-    return {
-      top: dragLengthPx(style?.top),
-      right: dragLengthPx(style?.right),
-      bottom: dragLengthPx(style?.bottom),
-      left: dragLengthPx(style?.left),
-    };
-  }
-  return {
-    top: dragLengthPx(style?.paddingTop),
-    right: dragLengthPx(style?.paddingRight),
-    bottom: dragLengthPx(style?.paddingBottom),
-    left: dragLengthPx(style?.paddingLeft),
-  };
-}
-
-function keepOrPx(current: BoxLength | undefined, px: number | undefined): BoxLength | undefined {
-  if (px != null) {
-    return { mode: 'px', value: px };
-  }
-  if (current?.mode === 'auto' || current?.mode === '%') {
-    return current;
-  }
-  return undefined;
-}
-
-function isAutoLength(length?: BoxLength) {
-  return length?.mode === 'auto';
-}
-
-function edgeBoxLength(style: WidgetStyle | undefined, kind: BoxDragKind, edge: SpacingEdge) {
-  if (kind === 'position') {
-    return style?.[edge];
-  }
-  if (kind === 'margin') {
-    const keys = {
-      top: 'marginTop',
-      right: 'marginRight',
-      bottom: 'marginBottom',
-      left: 'marginLeft',
-    } as const;
-    return style?.[keys[edge]];
-  }
-  return undefined;
-}
-
-function styleFromBoxQuad(
-  style: WidgetStyle | undefined,
-  kind: BoxDragKind,
-  quad: BoxQuad,
-): WidgetStyle | undefined {
-  if (kind === 'margin') {
-    return compactWidgetStyle({
-      ...style,
-      marginTop: keepOrPx(style?.marginTop, quad.top),
-      marginRight: keepOrPx(style?.marginRight, quad.right),
-      marginBottom: keepOrPx(style?.marginBottom, quad.bottom),
-      marginLeft: keepOrPx(style?.marginLeft, quad.left),
-    });
-  }
-  if (kind === 'radius') {
-    return compactWidgetStyle({
-      ...style,
-      radiusTopLeft: quad.top,
-      radiusTopRight: quad.right,
-      radiusBottomRight: quad.bottom,
-      radiusBottomLeft: quad.left,
-    });
-  }
-  if (kind === 'size') {
-    const width = quad.right ?? quad.left;
-    const height = quad.top ?? quad.bottom;
-    return compactWidgetStyle({
-      ...style,
-      width: width != null ? compactSize({ mode: 'px', value: Math.max(0, width) }) : style?.width,
-      height: height != null ? compactSize({ mode: 'px', value: Math.max(0, height) }) : style?.height,
-    });
-  }
-  if (kind === 'position') {
-    return compactWidgetStyle({
-      ...style,
-      top: keepOrPx(style?.top, quad.top),
-      right: keepOrPx(style?.right, quad.right),
-      bottom: keepOrPx(style?.bottom, quad.bottom),
-      left: keepOrPx(style?.left, quad.left),
-    });
-  }
-  return compactWidgetStyle({
-    ...style,
-    paddingTop: pxBoxLength(quad.top),
-    paddingRight: pxBoxLength(quad.right),
-    paddingBottom: pxBoxLength(quad.bottom),
-    paddingLeft: pxBoxLength(quad.left),
-  });
-}
-
-function isBoxDragGroup(group: BoxGroup | null): group is BoxDragKind {
-  return isBoxDragKind(group);
-}
-
-function isSpacingNudgeGroup(group: BoxGroup | null): group is BoxDragKind | 'border' {
-  return isBoxDragKind(group) || group === 'border';
-}
-
-function spacingAllowsNegative(kind: BoxDragKind | 'border') {
-  return kind === 'margin' || kind === 'position';
-}
-
-function canEditPositionInsets(style?: WidgetStyle) {
-  return Boolean(style?.position);
-}
-
-function isStyleToolbarPopupOpen() {
-  return Boolean(
-    document.querySelector(
-      '[data-toolbar-popup], .ant-popover:not(.ant-popover-hidden) .ant-color-picker-inner, .ant-select-dropdown:not(.ant-select-dropdown-hidden)',
-    ),
-  );
-}
-
-function closeStyleToolbarPopups() {
-  const open = isStyleToolbarPopupOpen();
-  document.querySelectorAll('[data-toolbar-popup]').forEach((node) => {
-    node.dispatchEvent(new Event('vanstack-close-toolbar-popup'));
-  });
-  return open;
-}
-
-function liveWidgetCss(style: WidgetStyle | undefined) {
-  const px = (value: number | undefined) => (value != null ? `${value}px` : '');
-  const length = (value?: BoxLength) => (value ? boxLengthCss(value) : '');
-  const positioned = Boolean(style?.position);
-  return {
-    paddingTop: length(style?.paddingTop),
-    paddingRight: length(style?.paddingRight),
-    paddingBottom: length(style?.paddingBottom),
-    paddingLeft: length(style?.paddingLeft),
-    marginTop: length(style?.marginTop),
-    marginRight: length(style?.marginRight),
-    marginBottom: length(style?.marginBottom),
-    marginLeft: length(style?.marginLeft),
-    borderTopWidth: px(style?.borderTopWidth),
-    borderRightWidth: px(style?.borderRightWidth),
-    borderBottomWidth: px(style?.borderBottomWidth),
-    borderLeftWidth: px(style?.borderLeftWidth),
-    borderTopLeftRadius: px(style?.radiusTopLeft),
-    borderTopRightRadius: px(style?.radiusTopRight),
-    borderBottomRightRadius: px(style?.radiusBottomRight),
-    borderBottomLeftRadius: px(style?.radiusBottomLeft),
-    borderStyle: style?.borderStyle ?? '',
-    borderColor: style?.borderColor ?? '',
-    width: style?.width?.mode === 'px' ? `${style.width.value}px` : style?.width?.mode === '%' ? `${style.width.value}%` : '',
-    height: style?.height?.mode === 'px' ? `${style.height.value}px` : style?.height?.mode === '%' ? `${style.height.value}%` : '',
-    position: style?.position ?? '',
-    top: positioned ? length(style?.top) : '',
-    right: positioned ? length(style?.right) : '',
-    bottom: positioned ? length(style?.bottom) : '',
-    left: positioned ? length(style?.left) : '',
-    zIndex: positioned && style?.zIndex != null ? String(style.zIndex) : '',
-    transform: [
-      style?.rotateX ? `rotateX(${angleCss(style.rotateX)})` : '',
-      style?.rotateY ? `rotateY(${angleCss(style.rotateY)})` : '',
-      style?.rotateZ ? `rotateZ(${angleCss(style.rotateZ)})` : '',
-    ]
-      .filter(Boolean)
-      .join(' '),
-  } satisfies Record<string, string>;
-}
+} from '../../utils/widgetStates';
+import { writeWidgetDrag } from '../../utils/pageData';
+import { CANVAS_RASTER_SCALE, canEditPositionInsets, clampScale, closeStyleToolbarPopups, computeFitView, dragLengthPx, edgeBoxLength, EDIT_OVERFLOW_X, EDIT_OVERFLOW_Y, ENTER_DOUBLE_MS, FOCUS_PADDING, HISTORY_LIMIT, iframePointToClient, isAutoLength, isBoxDragGroup, isSpacingNudgeGroup, KEY_PATTERN, LANGS_DEBOUNCE_MS, liveWidgetCss, mapIframePoint, MAX_SCALE, paintCanvasView, SCREEN_HEIGHT, SCREEN_WIDTH, SERVER_IDLE_MS, sizeLock, snapDevicePixel, spacingAllowsNegative, styleBoxQuad, styleFromBoxQuad, widgetCanvasLabel, zoomViewAt, ZOOM_IDLE_MS, ZOOM_STEP, type CanvasMode, type CenterTab, type HistoryEntry, type SaveStatus, type ViewTransform } from './helpers';
 
 export function ProjectEditorPage() {
   const { t } = useTranslation();
@@ -3996,10 +3641,10 @@ export function ProjectEditorPage() {
                             onLoopChange={(loop) =>
                               updateWidget(selectedDisplayWidget.id, { loop }, `loop:${selectedDisplayWidget.id}`)
                             }
-                            onStateFnChange={(stateFn) =>
+                            onStateFnChange={(stateFn, hoverStateId) =>
                               updateWidget(
                                 selectedDisplayWidget.id,
-                                { stateFn },
+                                { stateFn, hoverStateId },
                                 `stateFn:${selectedDisplayWidget.id}`,
                               )
                             }
@@ -4304,7 +3949,7 @@ export function ProjectEditorPage() {
           }
           footer={null}
           width={920}
-          maskClosable={!inspectorInvalid}
+          mask={{closable: !inspectorInvalid}}
           keyboard={!inspectorInvalid}
           styles={{ body: { maxHeight: 'none', overflow: 'visible' } }}
           onCancel={() => {

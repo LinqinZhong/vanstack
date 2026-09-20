@@ -270,7 +270,7 @@ export function WidgetStyleBubble({
   onSrcChange?: (src: string) => void;
   projectId?: string;
   onLoopChange?: (loop: WidgetLoop | undefined) => void;
-  onStateFnChange?: (stateFn: string | undefined) => void;
+  onStateFnChange?: (stateFn: string | undefined, hoverStateId?: string) => void;
   onOpenInspector: () => void;
   i18nCatalog?: PageI18n;
   variables?: PageVariable[];
@@ -610,7 +610,7 @@ export function WidgetStyleBubble({
             <Tooltip title={t('lowcode.styleState')}>
               <Button
                 size="small"
-                type={isStateFnConfigured(widget.stateFn) ? 'primary' : 'text'}
+                type={isStateFnConfigured(widget.stateFn) || widget.hoverStateId ? 'primary' : 'text'}
                 icon={<ControlOutlined />}
                 onClick={() => setStateFnOpen(true)}
               />
@@ -952,8 +952,8 @@ export function WidgetStyleBubble({
             variables={variables ?? []}
             disabled={disabled}
             onCancel={() => setStateFnOpen(false)}
-            onChange={(stateFn) => {
-              onStateFnChange(stateFn);
+            onChange={(stateFn, hoverStateId) => {
+              onStateFnChange(stateFn, hoverStateId);
               setStateFnOpen(false);
             }}
           />

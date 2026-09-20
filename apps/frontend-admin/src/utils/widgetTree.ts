@@ -21,6 +21,7 @@ export type WidgetPatch = {
   alias?: string;
   loop?: WidgetLoop | undefined;
   stateFn?: string | undefined;
+  hoverStateId?: string | undefined;
   style?: WidgetStyle | undefined;
   flex?: FlexContainerStyle | undefined;
   swiper?: SwiperStyle | undefined;
@@ -151,6 +152,9 @@ function cloneStateFields(widget: PageWidget, stateIdMap: Map<string, string>) {
       ? { stateOverrides: widget.stateOverrides.map((item) => remapStateDelta(item, stateIdMap)) }
       : {}),
     ...(widget.stateFn ? { stateFn: remapStateFn(widget.stateFn, stateIdMap) } : {}),
+    ...(widget.hoverStateId
+      ? { hoverStateId: stateIdMap.get(widget.hoverStateId) ?? widget.hoverStateId }
+      : {}),
     ...(widget.appliedState ? { appliedState: stateIdMap.get(widget.appliedState) ?? widget.appliedState } : {}),
     ...(widget.transition != null ? { transition: widget.transition } : {}),
   };
@@ -272,6 +276,7 @@ export function updateWidgetById(
   id: string,
   patcher: (widget: PageWidget) => PageWidget,
 ): PageWidget[] {
+  debugger
   return widgets.map((widget) => {
     if (widget.id === id) {
       return patcher(widget);
@@ -330,6 +335,14 @@ function applyCommon<T extends PageWidget>(widget: T, patch: WidgetPatch): T {
       next.stateFn = stateFn;
     } else {
       delete next.stateFn;
+    }
+  }
+  if ('hoverStateId' in patch) {
+    const hoverStateId = patch.hoverStateId?.trim();
+    if (hoverStateId) {
+      next.hoverStateId = hoverStateId;
+    } else {
+      delete next.hoverStateId;
     }
   }
   return next;

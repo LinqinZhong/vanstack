@@ -1,18 +1,19 @@
+import './styles.less';
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Form, Input, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AuthSessionDto } from '@vanstack/shared';
-import { api } from '../apis/api';
-import { LanguageSwitch } from '../components/LanguageSwitch';
-import { ServerAddressFields } from '../components/ServerAddressFields';
+import { api } from '../../apis/api';
+import { LanguageSwitch } from '../../components/LanguageSwitch';
+import { ServerAddressFields } from '../../components/ServerAddressFields';
 import {
   getServerConfig,
   isDesktopShell,
   loadServerConfig,
   parseServerConfig,
   saveServerConfig,
-} from '../apis/serverConfig';
+} from '../../apis/serverConfig';
 
 type LoginFormValues = {
   host?: string;

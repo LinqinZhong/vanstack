@@ -1,0 +1,60 @@
+﻿html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  min-height: 100%;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
+body {
+  background:
+    radial-gradient(circle at top right, rgba(61, 186, 154, 0.12), transparent 28%),
+    linear-gradient(180deg, #121920 0%, #0d1318 100%);
+}
+
+.app-shell {
+  min-height: 100vh;
+  height: 100vh;
+}
+
+.sidebar {
+  padding: 24px 16px;
+  overflow: auto;
+}
+
+.brand {
+  color: #e8eef2 !important;
+  font-family: Fraunces, Georgia, serif !important;
+  margin-top: 0 !important;
+}
+
+.sider-block {
+  margin: 16px 0;
+}
+
+.logout {
+  margin: 16px 0;
+}
+
+.workspace {
+  padding: 24px;
+  display: grid;
+  gap: 16px;
+}
+
+.workspace-fill {
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}

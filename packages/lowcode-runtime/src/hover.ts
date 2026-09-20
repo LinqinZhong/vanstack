@@ -1,10 +1,14 @@
-import { findOwnedStateByName, resolveStateFnId, type PageWidget } from '@vanstack/xml';
+import { ownedStateIds, resolveStateFnId, type PageWidget } from '@vanstack/xml';
 import { widgetInstanceKey, widgetInstanceMeta } from './loop';
 
 export const HOVER_STATE_NAME = 'hover';
 
 export function hoverStateId(widget: PageWidget): string | null {
-  return findOwnedStateByName(widget, HOVER_STATE_NAME)?.id ?? null;
+  const explicit = widget.hoverStateId;
+  if (explicit && ownedStateIds(widget).includes(explicit)) {
+    return explicit;
+  }
+  return null;
 }
 
 export function widgetHasHoverState(widget: PageWidget): boolean {
@@ -15,14 +19,13 @@ export function resolveRuntimeOwnState(
   widget: PageWidget,
   hoverInstanceKeys: readonly string[],
 ): string | null {
-  const fromFn = resolveStateFnId(widget, widgetInstanceMeta(widget)?.scope);
-  if (fromFn) {
-    return fromFn;
-  }
   if (hoverInstanceKeys.includes(widgetInstanceKey(widget))) {
-    return hoverStateId(widget);
+    const hover = hoverStateId(widget);
+    if (hover) {
+      return hover;
+    }
   }
-  return null;
+  return resolveStateFnId(widget, widgetInstanceMeta(widget)?.scope);
 }
 
 export function mergeHoverViewing(

@@ -125,7 +125,7 @@ function BootScreen() {
   const { t } = useTranslation();
   return (
     <div className="login-shell">
-      <Spin size="large" tip={t('login.checking')}>
+      <Spin size="large" description={t('login.checking')}>
         <div style={{ minHeight: 120 }} />
       </Spin>
     </div>

@@ -836,6 +836,9 @@ export function patchResolvedWidget(
   if ('stateFn' in patch) {
     baseContent.stateFn = patch.stateFn;
   }
+  if ('hoverStateId' in patch) {
+    baseContent.hoverStateId = patch.hoverStateId;
+  }
   const hasPropPatch =
     patch.value != null || patch.text != null || patch.src != null || patch.size != null;
   const hasVisual = 'style' in patch || 'flex' in patch || 'item' in patch || 'swiper' in patch;

@@ -181,6 +181,7 @@ type WidgetStates = {
   stateOverrides?: WidgetStateDelta[];
   appliedState?: string;
   stateFn?: string;
+  hoverStateId?: string;
   transition?: number;
 };
 
@@ -2393,7 +2394,9 @@ function widgetStateSpread(
   widgetNode: OrderedNode,
   inner: OrderedNode[],
   ancestorIds: string[],
-): Pick<WidgetStates, 'states' | 'stateOverrides' | 'stateFn' | 'transition'> & { rest: OrderedNode[] } {
+): Pick<WidgetStates, 'states' | 'stateOverrides' | 'stateFn' | 'hoverStateId' | 'transition'> & {
+  rest: OrderedNode[];
+} {
   const { states, overrides, rest } = splitStateNodes(inner);
   const known = new Set(ancestorIds);
   const stateOverrides = overrides
@@ -2421,12 +2424,15 @@ function widgetStateSpread(
     ...stateOverrides.flatMap((item) => item.states?.map((state) => state.id) ?? []),
   ];
   const stateFn = parseHostStateFn(attr(widgetNode, 'state'), ownedIds);
+  const hoverAttr = attr(widgetNode, 'hover');
+  const hoverStateId = hoverAttr && ownedIds.includes(hoverAttr) ? hoverAttr : undefined;
   const transition = compactTransition(parseNonNegativeInteger(attr(widgetNode, 'transition')));
   return {
     rest,
     ...(states.length > 0 ? { states } : {}),
     ...(stateOverrides.length > 0 ? { stateOverrides } : {}),
     ...(stateFn ? { stateFn } : {}),
+    ...(hoverStateId ? { hoverStateId } : {}),
     ...(transition ? { transition } : {}),
   };
 }
@@ -2460,6 +2466,7 @@ function parseWidgets(
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -2486,6 +2493,7 @@ function parseWidgets(
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -2507,6 +2515,7 @@ function parseWidgets(
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -2528,6 +2537,7 @@ function parseWidgets(
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -2552,6 +2562,7 @@ function parseWidgets(
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -2576,6 +2587,7 @@ function parseWidgets(
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -2596,6 +2608,7 @@ function parseWidgets(
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
     }
@@ -2611,6 +2624,8 @@ function widgetHostAttrs(
   extra: Record<string, string>,
 ): Record<string, string> {
   const applied = compactStateFn(widget.stateFn);
+  const hover = widget.hoverStateId;
+  const hoverValid = hover && ownedStateIds(widget).includes(hover) ? hover : null;
   const transition = compactTransition(widget.transition);
   return {
     '@_id': id,
@@ -2620,6 +2635,7 @@ function widgetHostAttrs(
     ...(widget.hidden ? { '@_hidden': 'true' } : {}),
     ...(widget.alias?.trim() ? { '@_alias': widget.alias.trim() } : {}),
     ...(applied ? { '@_state': applied } : {}),
+    ...(hoverValid ? { '@_hover': hoverValid } : {}),
     ...(transition ? { '@_transition': String(transition) } : {}),
   };
 }

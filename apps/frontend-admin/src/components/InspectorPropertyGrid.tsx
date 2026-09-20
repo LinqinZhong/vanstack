@@ -65,6 +65,8 @@ type InspectorProp = {
   picker?: 'image' | 'icon';
   category?: 'basic' | 'style';
   inherited?: boolean;
+  placeholder?: string;
+  suffix?: string;
 };
 
 type LengthQuad = {
@@ -416,12 +418,16 @@ function PropertyInput({
   disabled,
   onChange,
   onInvalidChange,
+  placeholder,
+  suffix,
 }: {
   propKey: string;
   value: string;
   disabled?: boolean;
   onChange: (raw: string) => boolean;
   onInvalidChange: (key: string, invalid: boolean) => void;
+  placeholder?: string;
+  suffix?: string;
 }) {
   const [draft, setDraft] = useState(value);
   const [invalid, setInvalid] = useState(false);
@@ -460,6 +466,8 @@ function PropertyInput({
       size="small"
       disabled={disabled}
       status={invalid ? 'error' : undefined}
+      placeholder={placeholder}
+      suffix={suffix}
       value={draft}
       onFocus={() => setFocused(true)}
       onChange={(event) => {
@@ -553,6 +561,8 @@ function PropertyGrid({
           value={item.value}
           onChange={item.onChange}
           onInvalidChange={reportInvalid}
+          placeholder={item.placeholder}
+          suffix={item.suffix}
         />
         {item.key === 'value' || item.key === 'text' ? (
           <>
@@ -829,6 +839,8 @@ export function WidgetPropertyInspector({
       key: 'size',
       value: widget.size != null ? String(widget.size) : '',
       category: 'basic',
+      placeholder: '24',
+      suffix: 'px',
       onChange: (raw) => {
         const trimmed = raw.trim();
         if (!trimmed) {
@@ -868,7 +880,7 @@ export function WidgetPropertyInspector({
   }
 
   if (widget.type !== 'swiper-item') {
-    items.push(
+    if (widget.type !== 'icon') items.push(
       {
         key: 'width',
         value: formatSize(style.width) || (widget.type === 'swiper' ? formatSize(DEFAULT_SWIPER_WIDTH) : ''),
@@ -897,6 +909,8 @@ export function WidgetPropertyInspector({
           return accepted(parseSize(raw), (height) => patchStyle({ height }));
         },
       },
+    );
+    items.push(
       {
         key: 'position',
         value: style.position ?? '',

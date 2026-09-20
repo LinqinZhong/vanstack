@@ -44,7 +44,7 @@ export function LowcodePage({ xml, editing, locale, catalog, viewing }: LowcodeP
     const sink = new WeakMap<object, WidgetStateLayer[]>();
     const expanded = expandLoopTree(page.widgets, { data: dataScope, aliases: {} }, editing);
     const resolved = resolveWidgetTree(expanded, editing ? viewing : null, {
-      appliedNameFor: editing ? undefined : (widget) => resolveRuntimeOwnState(widget, hoverInstanceKeys),
+      appliedStateFor: editing ? undefined : (widget) => resolveRuntimeOwnState(widget, hoverInstanceKeys),
       stateLayersSink: sink,
     });
     return { widgets: resolved, stateLayers: sink };

@@ -341,8 +341,8 @@ export function cssDeclarationText(css: CSSProperties): string | undefined {
   return lines.length > 0 ? lines.join('; ') : undefined;
 }
 
-function escapeStateName(name: string): string {
-  return name.replace(/["\\]/g, '\\$&');
+function escapeStateId(id: string): string {
+  return id.replace(/["\\]/g, '\\$&');
 }
 
 function styleRuleText(style: WidgetStyle | undefined, includeDefaults: boolean): string | undefined {
@@ -375,11 +375,11 @@ export function pageCssText(widgets: PageWidget[]): string {
     for (const widget of list) {
       const cls = widgetClassName(widget.id);
       for (const override of widget.stateOverrides ?? []) {
-        const overrideName = escapeStateName(override.name);
-        push(`[data-state~="${overrideName}"] .${cls}`, override.style, false);
+        const overrideId = escapeStateId(override.id);
+        push(`[data-state~="${overrideId}"] .${cls}`, override.style, false);
         for (const nested of override.states ?? []) {
           push(
-            `[data-state~="${overrideName}"] .${cls}[data-state~="${escapeStateName(nested.name)}"]`,
+            `[data-state~="${overrideId}"] .${cls}[data-state~="${escapeStateId(nested.id)}"]`,
             nested.style,
             false,
           );
@@ -387,7 +387,7 @@ export function pageCssText(widgets: PageWidget[]): string {
       }
       push(`.${cls}`, widget.style, true);
       for (const state of widget.states ?? []) {
-        push(`.${cls}[data-state~="${escapeStateName(state.name)}"]`, state.style, false);
+        push(`.${cls}[data-state~="${escapeStateId(state.id)}"]`, state.style, false);
       }
       if ('children' in widget) {
         walk(widget.children);

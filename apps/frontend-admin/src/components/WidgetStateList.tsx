@@ -2,20 +2,22 @@ import { CaretRightOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '
 import { Button, Dropdown, Form, Input, InputNumber, Modal, type MenuProps } from 'antd';
 import { useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { nextCopiedStateName, type VisibleWidgetState } from '../utils/widgetStates';
+import { isJsIdentifier } from '@vanstack/xml';
+import { nextCopiedStateName, nextStateId, type VisibleWidgetState } from '../utils/widgetStates';
 
 type WidgetStateListProps = {
   items: VisibleWidgetState[];
   viewingOwnerId: string | null;
   viewingState: string | null;
-  ownedNames: string[];
+  usedIds: ReadonlySet<string>;
   onSelect: (row: VisibleWidgetState) => void;
-  onCreate: (name: string, from: VisibleWidgetState, transition?: number) => void;
+  onCreate: (id: string, name: string, from: VisibleWidgetState, transition?: number) => void;
   onEdit: (from: VisibleWidgetState, name: string | null, transition?: number) => void;
   onDelete: (row: VisibleWidgetState) => void;
 };
 
 type CreateForm = {
+  id: string;
   name: string;
   transition?: number | null;
 };
@@ -26,7 +28,7 @@ type EditForm = {
 };
 
 function rowKey(row: VisibleWidgetState) {
-  return `${row.scopeOwnerId ?? ''}:${row.scopeName ?? ''}/${row.ownerId}:${row.name ?? ''}`;
+  return `${row.scopeOwnerId ?? ''}:${row.scopeId ?? ''}/${row.ownerId}:${row.id ?? ''}`;
 }
 
 function isLeaf(row: VisibleWidgetState) {
@@ -37,7 +39,7 @@ export function WidgetStateList({
   items,
   viewingOwnerId,
   viewingState,
-  ownedNames,
+  usedIds,
   onSelect,
   onCreate,
   onEdit,
@@ -50,11 +52,14 @@ export function WidgetStateList({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [createForm] = Form.useForm<CreateForm>();
   const [renameForm] = Form.useForm<EditForm>();
-  const createNames = ownedNames;
 
   function openCreate(row: VisibleWidgetState) {
+    const ownedNames = items
+      .filter((item) => item.owned && item.name != null)
+      .map((item) => item.name as string);
     createForm.setFieldsValue({
-      name: '',
+      id: nextStateId(usedIds),
+      name: nextCopiedStateName(ownedNames, row.name ?? null),
       transition: row.transition ?? 0,
     });
     setCreatingFrom(row);
@@ -62,7 +67,7 @@ export function WidgetStateList({
   }
 
   function openEdit(row: VisibleWidgetState) {
-    if (!row.owned || (row.name == null && row.scopeName)) {
+    if (!row.owned || (row.id == null && row.scopeId)) {
       return;
     }
     renameForm.setFieldsValue({ name: row.name ?? '', transition: row.transition ?? 0 });
@@ -70,7 +75,7 @@ export function WidgetStateList({
   }
 
   function confirmDelete(row: VisibleWidgetState) {
-    if (!row.name) {
+    if (!row.id) {
       return;
     }
     Modal.confirm({
@@ -84,8 +89,8 @@ export function WidgetStateList({
   function menuFor(row: VisibleWidgetState): MenuProps['items'] {
     const items: MenuProps['items'] = [];
     const leaf = isLeaf(row);
-    const namedOwned = leaf && row.owned && row.name != null;
-    const rootInitial = leaf && row.owned && row.name == null && !row.scopeName;
+    const namedOwned = leaf && row.owned && row.id != null;
+    const rootInitial = leaf && row.owned && row.id == null && !row.scopeId;
     if (!leaf) {
       items.push({
         key: 'add',
@@ -183,7 +188,7 @@ export function WidgetStateList({
                   openCreate(row);
                 } else if (key === 'edit') {
                   openEdit(row);
-                } else if (key === 'delete' && row.name) {
+                } else if (key === 'delete' && row.id) {
                   confirmDelete(row);
                 }
               },
@@ -217,7 +222,7 @@ export function WidgetStateList({
         icon={<PlusOutlined />}
         className="canvas-state-list-add"
         onClick={() => {
-          const rootInitial = items.find((row) => row.owned && row.name == null && !row.scopeName) ?? items[0];
+          const rootInitial = items.find((row) => row.owned && row.id == null && !row.scopeId) ?? items[0];
           if (rootInitial) {
             openCreate(rootInitial);
           }
@@ -234,7 +239,7 @@ export function WidgetStateList({
             if (!creatingFrom) {
               return;
             }
-            onCreate(values.name.trim(), creatingFrom, values.transition ?? 0);
+            onCreate(values.id.trim(), values.name.trim(), creatingFrom, values.transition ?? 0);
             setCreateOpen(false);
             setCreatingFrom(null);
           });
@@ -247,20 +252,31 @@ export function WidgetStateList({
       >
         <Form form={createForm} layout="vertical">
           <Form.Item
-            name="name"
-            label={t('lowcode.stateName')}
+            name="id"
+            label={t('lowcode.stateId')}
             rules={[
-              { required: true, whitespace: true, message: t('lowcode.stateNameRequired') },
+              { required: true, whitespace: true, message: t('lowcode.stateIdRequired') },
               {
                 validator: async (_, value: string) => {
-                  if (value && createNames.includes(value.trim())) {
-                    throw new Error(t('lowcode.stateNameDuplicate'));
+                  const next = value?.trim();
+                  if (next && usedIds.has(next)) {
+                    throw new Error(t('lowcode.stateIdDuplicate'));
+                  }
+                  if (next && !isJsIdentifier(next)) {
+                    throw new Error(t('lowcode.stateIdInvalid'));
                   }
                 },
               },
             ]}
           >
-            <Input placeholder={nextCopiedStateName(createNames, creatingFrom?.name ?? null)} />
+            <Input placeholder={t('lowcode.stateId')} />
+          </Form.Item>
+          <Form.Item
+            name="name"
+            label={t('lowcode.stateName')}
+            rules={[{ required: true, whitespace: true, message: t('lowcode.stateNameRequired') }]}
+          >
+            <Input />
           </Form.Item>
           <Form.Item name="transition" label={t('lowcode.stateTransition')}>
             <InputNumber min={0} addonAfter="ms" style={{ width: '100%' }} />
@@ -269,14 +285,14 @@ export function WidgetStateList({
       </Modal>
       <Modal
         open={editing != null}
-        title={editing?.name ? t('lowcode.stateRename') : t('lowcode.stateEdit')}
+        title={editing?.id ? t('lowcode.stateRename') : t('lowcode.stateEdit')}
         okText={t('lowcode.propEditConfirm')}
         onOk={() => {
           void renameForm.validateFields().then((values) => {
             if (!editing) {
               return;
             }
-            onEdit(editing, editing.name ? values.name.trim() : null, values.transition ?? 0);
+            onEdit(editing, editing.id ? values.name.trim() : null, values.transition ?? 0);
             setEditing(null);
           });
         }}
@@ -284,21 +300,11 @@ export function WidgetStateList({
         destroyOnHidden
       >
         <Form form={renameForm} layout="vertical">
-          {editing?.name != null ? (
+          {editing?.id != null ? (
             <Form.Item
               name="name"
               label={t('lowcode.stateName')}
-              rules={[
-                { required: true, whitespace: true, message: t('lowcode.stateNameRequired') },
-                {
-                  validator: async (_, value: string) => {
-                    const next = value?.trim();
-                    if (next && next !== editing.name && ownedNames.includes(next)) {
-                      throw new Error(t('lowcode.stateNameDuplicate'));
-                    }
-                  },
-                },
-              ]}
+              rules={[{ required: true, whitespace: true, message: t('lowcode.stateNameRequired') }]}
             >
               <Input />
             </Form.Item>
@@ -313,14 +319,14 @@ export function WidgetStateList({
 }
 
 function isViewingRow(row: VisibleWidgetState, viewingOwnerId: string | null, viewingState: string | null) {
-  if (!row.owned && row.name) {
+  if (!row.owned && row.id) {
     return false;
   }
-  if (row.scopeName && row.scopeOwnerId && row.name == null) {
-    return viewingOwnerId === row.scopeOwnerId && viewingState === row.scopeName;
+  if (row.scopeId && row.scopeOwnerId && row.id == null) {
+    return viewingOwnerId === row.scopeOwnerId && viewingState === row.scopeId;
   }
-  if (row.scopeName && row.name) {
-    return viewingOwnerId === row.ownerId && viewingState === row.name;
+  if (row.scopeId && row.id) {
+    return viewingOwnerId === row.ownerId && viewingState === row.id;
   }
-  return row.ownerId === viewingOwnerId && row.name === viewingState && !row.scopeName;
+  return row.ownerId === viewingOwnerId && row.id === viewingState && !row.scopeId;
 }

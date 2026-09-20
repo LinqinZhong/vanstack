@@ -51,5 +51,5 @@ export function widgetStateAttr(widget: PageWidget, ctx: WidgetRenderContext): s
   if (!layers || layers.length === 0) {
     return undefined;
   }
-  return layers.map((layer) => layer.name).join(' ');
+  return layers.map((layer) => layer.id).join(' ');
 }

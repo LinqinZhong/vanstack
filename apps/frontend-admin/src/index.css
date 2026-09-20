@@ -537,6 +537,64 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   color: rgba(236, 239, 244, 0.62);
 }
 
+.state-fn-id-list {
+  margin-top: 8px;
+}
+
+.state-fn-id-list-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.state-fn-id-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.state-fn-id-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  margin: 0;
+  padding: 2px 8px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background: #fafafa;
+  cursor: copy;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.state-fn-id-chip:hover {
+  border-color: #36cfc9;
+  background: #e6fffb;
+}
+
+.state-fn-id-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.state-fn-id-chip-name {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.state-fn-id-chip-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.state-fn-id-chip:hover .state-fn-id-chip-value {
+  color: rgba(0, 0, 0, 0.75);
+}
+
 .canvas-state-list-row-add {
   flex: none;
   width: 18px;
@@ -609,14 +667,19 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 }
 
 .widget-tree.ant-tree {
+  display: block;
+  width: max-content;
+  min-width: 100%;
   background: transparent;
   color: inherit;
   font-size: 12px;
 }
 
 .widget-tree .ant-tree-treenode {
-  padding: 0 4px;
+  padding: 0;
   line-height: 1.4;
+  width: 100%;
+  overflow: visible;
 }
 
 .widget-tree .ant-tree-switcher {
@@ -634,8 +697,12 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 
 .widget-tree .ant-tree-node-content-wrapper {
   min-height: 18px;
-  padding: 0 4px;
+  padding: 0;
   line-height: 1.4;
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: 4px 0 0 4px !important;
+  padding-left: 2px;
 }
 
 .widget-tree .ant-tree-title {
@@ -644,7 +711,7 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 
 .widget-tree-panel .ant-card-body {
   scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
 .widget-tree-panel .ant-card-body:hover {
@@ -661,7 +728,7 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 }
 
 .widget-tree-panel .ant-card-body::-webkit-scrollbar-thumb {
-  background: transparent;
+  background: rgba(255, 255, 255, 0.2);
   border-radius: 8px;
 }
 
@@ -693,7 +760,7 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 .widget-tree-drag-title {
   display: block;
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -724,7 +791,6 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 }
 
 .widget-tree-visibility {
-  margin-left: auto;
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -753,11 +819,44 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 
 .widget-tree-title-label {
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.widget-tree-title-label.is-alias {
+  color: #3dba9a;
+}
+
+.widget-tree-actions-inline {
+  --actions-bg: #141414;
+  position: absolute;
+  right: -12px;
+  height: 100%;
+  z-index: 2;
+  box-sizing: border-box;
+  flex: none;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 40px;
+  padding-left: 6px;
+  margin-left: auto;
+  background: var(--actions-bg);
+  border-radius:  0 4px 4px 0;
+}
+
+.widget-tree-title:hover .widget-tree-actions-inline{
+  --actions-bg: #262626;
+}
+
+.widget-tree-title.is-row-selected .widget-tree-actions-inline {
+  --actions-bg: #192824;
+}
+
+
 
 .widget-tree-loop {
   flex: none;
@@ -766,19 +865,18 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   justify-content: center;
   width: 16px;
   height: 16px;
+  margin-right: 4px;
   padding: 0;
   border: none;
   border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  opacity: 0.72;
+  background: #7c3aed;
+  color: #fff;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .widget-tree-loop:hover {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.08);
+  background: #8b5cf6;
 }
 
 .style-section {

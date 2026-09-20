@@ -1,4 +1,4 @@
-import { isJsIdentifier, ownedStateNames, type PageWidget } from './page';
+import { isJsIdentifier, ownedStateIds, type PageWidget } from './page';
 
 export type BindingScope = {
   data: Record<string, unknown>;
@@ -61,7 +61,7 @@ export function evaluateStateFunction(body: string, scope: BindingScope): unknow
   )(scope.data, aliasValue(scope, '$item', 'item'), aliasValue(scope, '$index', 'index'));
 }
 
-export function resolveStateFnName(widget: PageWidget, scope?: BindingScope): string | null {
+export function resolveStateFnId(widget: PageWidget, scope?: BindingScope): string | null {
   const body = widget.stateFn?.trim();
   if (!body) {
     return null;
@@ -71,11 +71,11 @@ export function resolveStateFnName(widget: PageWidget, scope?: BindingScope): st
     if (result == null) {
       return null;
     }
-    const name = String(result).trim();
-    if (!name || name === 'initial') {
+    const id = String(result).trim();
+    if (!id || id === 'initial') {
       return null;
     }
-    return ownedStateNames(widget).includes(name) ? name : null;
+    return ownedStateIds(widget).includes(id) ? id : null;
   } catch {
     return null;
   }

@@ -1,24 +1,28 @@
 import {
   diffWidgetState,
   findOwnedDelta,
-  ownedStateNames,
-  resolveWidgetState,
+  ownedStateIds,
   resolveWidgetStateStack,
+  compactWidgetProps,
   type PageWidget,
+  type WidgetContentProps,
   type WidgetStateDelta,
   type WidgetStateFields,
   type WidgetStateLayer,
   type WidgetStateRole,
   type WidgetStyle,
 } from '@vanstack/xml';
-import { findParentWidget, findWidget, hasChildren, patchWidget, updateWidgetById, type WidgetPatch } from './widgetTree';
+import { findParentWidget, findWidget, hasChildren, nextStateId, patchWidget, updateWidgetById, type WidgetPatch } from './widgetTree';
+
+export { nextStateId };
 
 export type VisibleWidgetState = {
+  id: string | null;
   name: string | null;
   owned: boolean;
   ownerId: string;
   transition?: number;
-  scopeName?: string | null;
+  scopeId?: string | null;
   scopeOwnerId?: string | null;
   children?: VisibleWidgetState[];
 };
@@ -27,23 +31,23 @@ function flattenStateTree(nodes: VisibleWidgetState[]): VisibleWidgetState[] {
   return nodes.flatMap((node) => [node, ...flattenStateTree(node.children ?? [])]);
 }
 
-function ancestorOwnedNamed(widget: PageWidget): Array<{ name: string; transition?: number }> {
-  const rows: Array<{ name: string; transition?: number }> = [];
+function ancestorOwnedStates(widget: PageWidget): Array<{ id: string; name: string; transition?: number }> {
+  const rows: Array<{ id: string; name: string; transition?: number }> = [];
   const seen = new Set<string>();
   for (const state of widget.states ?? []) {
-    if (seen.has(state.name)) {
+    if (seen.has(state.id)) {
       continue;
     }
-    seen.add(state.name);
-    rows.push({ name: state.name, transition: state.transition });
+    seen.add(state.id);
+    rows.push({ id: state.id, name: state.name ?? state.id, transition: state.transition });
   }
   for (const override of widget.stateOverrides ?? []) {
     for (const state of override.states ?? []) {
-      if (seen.has(state.name)) {
+      if (seen.has(state.id)) {
         continue;
       }
-      seen.add(state.name);
-      rows.push({ name: state.name, transition: state.transition });
+      seen.add(state.id);
+      rows.push({ id: state.id, name: state.name ?? state.id, transition: state.transition });
     }
   }
   return rows;
@@ -63,11 +67,12 @@ export function collectStateTree(
     chain.unshift(current);
     current = findParentWidget(widgets, current.id);
   }
-  const used = new Set((selected.states ?? []).map((state) => state.name));
+  const used = new Set((selected.states ?? []).map((state) => state.id));
   const owned: VisibleWidgetState[] = [
-    { name: null, owned: true, ownerId: selected.id, transition: selected.transition },
+    { id: null, name: null, owned: true, ownerId: selected.id, transition: selected.transition },
     ...(selected.states ?? []).map((state) => ({
-      name: state.name,
+      id: state.id,
+      name: state.name ?? state.id,
       owned: true,
       ownerId: selected.id,
       transition: state.transition,
@@ -78,35 +83,38 @@ export function collectStateTree(
     if (widget.id === selected.id) {
       continue;
     }
-    for (const state of ancestorOwnedNamed(widget)) {
-      const override = selected.stateOverrides?.find((item) => item.name === state.name);
+    for (const state of ancestorOwnedStates(widget)) {
+      const override = selected.stateOverrides?.find((item) => item.id === state.id);
       inherited.push({
+        id: state.id,
         name: state.name,
         owned: false,
         ownerId: widget.id,
         transition: state.transition,
         children: [
           {
+            id: null,
             name: null,
             owned: true,
             ownerId: selected.id,
-            scopeName: state.name,
+            scopeId: state.id,
             scopeOwnerId: widget.id,
           },
           ...(override?.states ?? [])
             .filter((nested) => {
-              if (used.has(nested.name)) {
+              if (used.has(nested.id)) {
                 return false;
               }
-              used.add(nested.name);
+              used.add(nested.id);
               return true;
             })
             .map((nested) => ({
-              name: nested.name,
+              id: nested.id,
+              name: nested.name ?? nested.id,
               owned: true,
               ownerId: selected.id,
               transition: nested.transition,
-              scopeName: state.name,
+              scopeId: state.id,
               scopeOwnerId: widget.id,
             })),
         ],
@@ -139,7 +147,7 @@ export function pruneViewingByOwner(map: ViewingByOwner, widgets: PageWidget[]):
   return next;
 }
 
-export function ownerActiveName(widget: PageWidget, viewing: ViewingByOwner): string | null {
+export function ownerActiveId(widget: PageWidget, viewing: ViewingByOwner): string | null {
   if (Object.prototype.hasOwnProperty.call(viewing, widget.id)) {
     return viewing[widget.id];
   }
@@ -156,17 +164,17 @@ function ancestorChain(widgets: PageWidget[], id: string): PageWidget[] {
   return chain;
 }
 
-function layerRoleFor(widget: PageWidget, name: string): WidgetStateRole {
-  return findOwnedDelta(widget, name) ? 'owner' : 'descendant';
+function layerRoleFor(widget: PageWidget, id: string): WidgetStateRole {
+  return findOwnedDelta(widget, id) ? 'owner' : 'descendant';
 }
 
-function nestedOwnerScope(widget: PageWidget, name: string): string | null {
-  if (widget.states?.some((item) => item.name === name)) {
+function nestedOwnerScope(widget: PageWidget, id: string): string | null {
+  if (widget.states?.some((item) => item.id === id)) {
     return null;
   }
   for (const override of widget.stateOverrides ?? []) {
-    if (override.states?.some((item) => item.name === name)) {
-      return override.name;
+    if (override.states?.some((item) => item.id === id)) {
+      return override.id;
     }
   }
   return null;
@@ -183,12 +191,12 @@ export function stateLayersForWidget(
   }
   const layers: WidgetStateLayer[] = [];
   for (const widget of ancestorChain(widgets, widgetId)) {
-    const name = ownerActiveName(widget, viewing);
-    if (!name) {
+    const stateId = ownerActiveId(widget, viewing);
+    if (!stateId) {
       continue;
     }
-    const role = layerRoleFor(selected, name);
-    layers.push({ name, role });
+    const role = layerRoleFor(selected, stateId);
+    layers.push({ id: stateId, role });
   }
   return layers;
 }
@@ -197,35 +205,35 @@ export function viewingAfterSelect(
   widgets: PageWidget[],
   selectedId: string,
   viewing: ViewingByOwner,
-  sticky: { ownerId: string | null; name: string | null },
-): { ownerId: string; name: string | null; viewing: ViewingByOwner } {
+  sticky: { ownerId: string | null; id: string | null },
+): { ownerId: string; id: string | null; viewing: ViewingByOwner } {
   const selected = findWidget(widgets, selectedId);
   if (!selected) {
-    return { ownerId: selectedId, name: null, viewing };
+    return { ownerId: selectedId, id: null, viewing };
   }
   const visible = collectVisibleStates(widgets, selectedId);
-  if (sticky.name != null) {
-    const row = visible.find((item) => item.ownerId === sticky.ownerId && item.name === sticky.name) ?? visible.find((item) => item.name === sticky.name);
+  if (sticky.id != null) {
+    const row = visible.find((item) => item.ownerId === sticky.ownerId && item.id === sticky.id) ?? visible.find((item) => item.id === sticky.id);
     if (row) {
-      return { ownerId: row.ownerId, name: row.name, viewing };
+      return { ownerId: row.ownerId, id: row.id, viewing };
     }
   }
   if (Object.prototype.hasOwnProperty.call(viewing, selected.id)) {
-    const name = viewing[selected.id];
-    if (name == null || visible.some((item) => item.ownerId === selected.id && item.name === name)) {
-      return { ownerId: selected.id, name, viewing };
+    const stateId = viewing[selected.id];
+    if (stateId == null || visible.some((item) => item.ownerId === selected.id && item.id === stateId)) {
+      return { ownerId: selected.id, id: stateId, viewing };
     }
   }
   for (const widget of ancestorChain(widgets, selected.id).reverse()) {
     if (widget.id === selected.id) {
       continue;
     }
-    const name = ownerActiveName(widget, viewing);
-    if (name && visible.some((item) => item.name === name && item.ownerId === widget.id)) {
-      return { ownerId: widget.id, name, viewing };
+    const stateId = ownerActiveId(widget, viewing);
+    if (stateId && visible.some((item) => item.id === stateId && item.ownerId === widget.id)) {
+      return { ownerId: widget.id, id: stateId, viewing };
     }
   }
-  return { ownerId: selected.id, name: null, viewing };
+  return { ownerId: selected.id, id: null, viewing };
 }
 
 export function isUnderWidget(widgets: PageWidget[], ancestorId: string, id: string): boolean {
@@ -246,9 +254,35 @@ export function stateRole(owner: PageWidget | null, widget: PageWidget): WidgetS
   return owner && owner.id === widget.id ? 'owner' : 'descendant';
 }
 
+function applyPropsToWidget(widget: PageWidget, props: WidgetContentProps | undefined): PageWidget {
+  if (!props) {
+    return widget;
+  }
+  if (widget.type === 'text') {
+    return props.value != null ? { ...widget, value: props.value } : widget;
+  }
+  if (widget.type === 'button') {
+    return props.text != null ? { ...widget, text: props.text } : widget;
+  }
+  if (widget.type === 'image') {
+    return props.src != null ? { ...widget, src: props.src } : widget;
+  }
+  if (widget.type === 'icon') {
+    let next = widget;
+    if (props.src != null) {
+      next = { ...next, src: props.src };
+    }
+    if (props.size != null) {
+      next = { ...next, size: props.size };
+    }
+    return next;
+  }
+  return widget;
+}
+
 export function widgetWithStateLayers(widget: PageWidget, layers: WidgetStateLayer[]): PageWidget {
   const fields = resolveWidgetStateStack(widget, layers);
-  const next = { ...widget } as PageWidget;
+  const next = { ...applyPropsToWidget(widget, fields.props) } as PageWidget;
   if (fields.style) {
     next.style = fields.style;
   } else {
@@ -285,7 +319,7 @@ export function widgetWithViewing(
 ): PageWidget {
   return widgetWithStateLayers(
     widget,
-    viewingState ? [{ name: viewingState, role: stateRole(owner, widget) }] : [],
+    viewingState ? [{ id: viewingState, role: stateRole(owner, widget) }] : [],
   );
 }
 
@@ -296,7 +330,7 @@ export function widgetWithStateLayerDelta(widget: PageWidget, layers: WidgetStat
   const base = resolveWidgetStateStack(widget, layers.slice(0, -1));
   const full = resolveWidgetStateStack(widget, layers);
   const delta = diffWidgetState(widget, full, base);
-  const next = { ...widget } as PageWidget;
+  const next = { ...applyPropsToWidget(widget, delta.props) } as PageWidget;
   if (delta.style) {
     next.style = delta.style;
   } else {
@@ -330,12 +364,15 @@ export function stateOwnKeys(widget: PageWidget, layers: WidgetStateLayer[]): Se
   if (layers.length === 0) {
     return undefined;
   }
+  const base = resolveWidgetStateStack(widget, layers.slice(0, -1));
+  const full = resolveWidgetStateStack(widget, layers);
+  const delta = diffWidgetState(widget, full, base);
   const keys = new Set<string>();
-  const delta = widgetWithStateLayerDelta(widget, layers);
+  for (const key of Object.keys(delta.props ?? {})) keys.add(key);
   for (const key of Object.keys(delta.style ?? {})) keys.add(key);
-  if (delta.type === 'flex') for (const key of Object.keys(delta.flex ?? {})) keys.add(key);
-  if (delta.type !== 'swiper-item') for (const key of Object.keys(delta.item ?? {})) keys.add(key);
-  if (delta.type === 'swiper') for (const key of Object.keys(delta.swiper ?? {})) keys.add(key);
+  if (widget.type === 'flex') for (const key of Object.keys(delta.flex ?? {})) keys.add(key);
+  if (widget.type !== 'swiper-item') for (const key of Object.keys(delta.item ?? {})) keys.add(key);
+  if (widget.type === 'swiper') for (const key of Object.keys(delta.swiper ?? {})) keys.add(key);
   return keys;
 }
 
@@ -360,9 +397,11 @@ export function nextCopiedStateName(existing: Iterable<string>, source: string |
 
 function cloneDelta(delta: WidgetStateDelta): WidgetStateDelta {
   return {
-    name: delta.name,
+    id: delta.id,
+    ...(delta.name != null ? { name: delta.name } : {}),
     ...(delta.transition != null ? { transition: delta.transition } : {}),
     ...(delta.appliedState ? { appliedState: delta.appliedState } : {}),
+    ...(delta.props ? { props: { ...delta.props } } : {}),
     ...(delta.style ? { style: { ...delta.style } } : {}),
     ...(delta.flex ? { flex: { ...delta.flex } } : {}),
     ...(delta.item ? { item: { ...delta.item } } : {}),
@@ -373,18 +412,18 @@ function cloneDelta(delta: WidgetStateDelta): WidgetStateDelta {
 
 function sourceDeltaOnWidget(
   widget: PageWidget,
-  sourceName: string | null,
+  sourceId: string | null,
   sourceOwned: boolean,
 ): WidgetStateDelta {
-  if (!sourceName) {
-    return { name: '' };
+  if (!sourceId) {
+    return { id: '' };
   }
   if (sourceOwned) {
-    const owned = widget.states?.find((item) => item.name === sourceName);
-    return owned ? cloneDelta(owned) : { name: sourceName };
+    const owned = widget.states?.find((item) => item.id === sourceId);
+    return owned ? cloneDelta(owned) : { id: sourceId };
   }
-  const override = widget.stateOverrides?.find((item) => item.name === sourceName);
-  return override ? cloneDelta(override) : { name: sourceName };
+  const override = widget.stateOverrides?.find((item) => item.id === sourceId);
+  return override ? cloneDelta(override) : { id: sourceId };
 }
 
 function mapOverrideDeep(
@@ -409,54 +448,42 @@ function mapOverrideDeep(
 
 function copyOverrideDeep(widget: PageWidget, from: string, to: string): PageWidget {
   return mapOverrideDeep(widget, (list) => {
-    const match = list.find((item) => item.name === from);
-    if (!match || list.some((item) => item.name === to)) {
+    const match = list.find((item) => item.id === from);
+    if (!match || list.some((item) => item.id === to)) {
       return list;
     }
-    return [...list, { ...cloneDelta(match), name: to }];
+    return [...list, { ...cloneDelta(match), id: to, name: undefined }];
   });
 }
 
-function renameOverrideDeep(widget: PageWidget, from: string, to: string): PageWidget {
-  return mapOverrideDeep(widget, (list) => {
-    const next = list.map((item) => (item.name === from ? { ...item, name: to } : item));
-    const seen = new Set<string>();
-    return next.filter((item) => {
-      if (seen.has(item.name)) {
-        return false;
-      }
-      seen.add(item.name);
-      return true;
-    });
-  });
-}
-
-function deleteOverrideDeep(widget: PageWidget, name: string): PageWidget {
-  return mapOverrideDeep(widget, (list) => list.filter((item) => item.name !== name));
+function deleteOverrideDeep(widget: PageWidget, id: string): PageWidget {
+  return mapOverrideDeep(widget, (list) => list.filter((item) => item.id !== id));
 }
 
 export function createWidgetState(
   widgets: PageWidget[],
   ownerId: string,
+  newId: string,
   newName: string,
-  sourceName: string | null,
+  sourceId: string | null,
   sourceOwned = true,
   transition?: number,
-  scopeName?: string | null,
+  scopeId?: string | null,
 ): PageWidget[] {
   const owner = findWidget(widgets, ownerId);
+  const id = newId.trim();
   const name = newName.trim();
-  if (!owner || !name || ownedStateNames(owner).includes(name)) {
+  if (!owner || !id || !name || ownedStateIds(owner).includes(id)) {
     return widgets;
   }
-  if (scopeName) {
-    const added: WidgetStateDelta = { name };
+  if (scopeId) {
+    const added: WidgetStateDelta = { id, name };
     if (transition != null && Number.isFinite(transition) && transition > 0) {
       added.transition = Math.round(transition);
     }
-    return updateWidgetById(widgets, ownerId, (widget) => upsertNestedState(widget, scopeName, name, () => added));
+    return updateWidgetById(widgets, ownerId, (widget) => upsertNestedState(widget, scopeId, id, () => added));
   }
-  const added: WidgetStateDelta = { ...sourceDeltaOnWidget(owner, sourceName, sourceOwned), name };
+  const added: WidgetStateDelta = { ...sourceDeltaOnWidget(owner, sourceId, sourceOwned), id, name };
   if (transition != null && Number.isFinite(transition) && transition > 0) {
     added.transition = Math.round(transition);
   } else {
@@ -464,12 +491,12 @@ export function createWidgetState(
   }
   return updateWidgetById(widgets, ownerId, (widget) => {
     const withState: PageWidget = { ...widget, states: [...(widget.states ?? []), added] };
-    if (!sourceName || !hasChildren(withState)) {
+    if (!sourceId || !hasChildren(withState)) {
       return withState;
     }
     return {
       ...withState,
-      children: withState.children.map((child) => copyOverrideDeep(child, sourceName, name)),
+      children: withState.children.map((child) => copyOverrideDeep(child, sourceId, id)),
     };
   });
 }
@@ -486,15 +513,15 @@ function writeOverrideList(widget: PageWidget, list: WidgetStateDelta[]): PageWi
 
 function upsertNestedState(
   widget: PageWidget,
-  scopeName: string,
-  name: string,
+  scopeId: string,
+  stateId: string,
   mutate: (current: WidgetStateDelta | undefined) => WidgetStateDelta | undefined,
 ): PageWidget {
   const overrides = [...(widget.stateOverrides ?? [])];
-  const index = overrides.findIndex((item) => item.name === scopeName);
-  const parent: WidgetStateDelta = index >= 0 ? { ...overrides[index] } : { name: scopeName };
+  const index = overrides.findIndex((item) => item.id === scopeId);
+  const parent: WidgetStateDelta = index >= 0 ? { ...overrides[index] } : { id: scopeId };
   const states = [...(parent.states ?? [])];
-  const nestedIndex = states.findIndex((item) => item.name === name);
+  const nestedIndex = states.findIndex((item) => item.id === stateId);
   const nextNested = mutate(nestedIndex >= 0 ? states[nestedIndex] : undefined);
   if (nextNested) {
     if (nestedIndex >= 0) {
@@ -513,10 +540,11 @@ function upsertNestedState(
   } else {
     delete nextParent.states;
   }
-  if (nextParent.appliedState === name && !states.some((item) => item.name === nextParent.appliedState)) {
+  if (nextParent.appliedState === stateId && !states.some((item) => item.id === nextParent.appliedState)) {
     delete nextParent.appliedState;
   }
   const empty =
+    !nextParent.props &&
     !nextParent.style &&
     !nextParent.flex &&
     !nextParent.item &&
@@ -565,60 +593,33 @@ function applyTransition(delta: WidgetStateDelta, transition?: number): WidgetSt
 export function updateWidgetState(
   widgets: PageWidget[],
   ownerId: string,
-  from: string,
+  stateId: string,
   nextName: string,
   transition?: number,
-  scopeName?: string | null,
+  scopeId?: string | null,
 ): PageWidget[] {
   const owner = findWidget(widgets, ownerId);
   const name = nextName.trim();
-  if (!owner || !from || !name) {
+  if (!owner || !stateId || !name) {
     return widgets;
   }
-  if (name !== from && ownedStateNames(owner).includes(name)) {
-    return widgets;
-  }
-  if (scopeName) {
-    return updateWidgetById(widgets, ownerId, (widget) => {
-      const next = upsertNestedState(widget, scopeName, from, (current) => {
+  if (scopeId) {
+    return updateWidgetById(widgets, ownerId, (widget) =>
+      upsertNestedState(widget, scopeId, stateId, (current) => {
         if (!current) {
           return current;
         }
         return applyTransition({ ...current, name }, transition);
-      });
-      const overrides = (next.stateOverrides ?? []).map((item) => {
-        if (item.name !== scopeName || item.appliedState !== from) {
-          return item;
-        }
-        return { ...item, appliedState: name };
-      });
-      const renamed: PageWidget = overrides.length ? { ...next, stateOverrides: overrides } : next;
-      if (name === from || !hasChildren(renamed)) {
-        return renamed;
-      }
-      return {
-        ...renamed,
-        children: renamed.children.map((child) => renameOverrideDeep(child, from, name)),
-      };
-    });
+      }),
+    );
   }
   return updateWidgetById(widgets, ownerId, (widget) => {
-    if (!widget.states?.some((item) => item.name === from)) {
+    if (!widget.states?.some((item) => item.id === stateId)) {
       return widget;
     }
-    const next: PageWidget = {
-      ...widget,
-      states: widget.states.map((item) => (item.name === from ? applyTransition({ ...item, name }, transition) : item)),
-    };
-    if (next.appliedState === from) {
-      next.appliedState = name;
-    }
-    if (name === from || !hasChildren(next)) {
-      return next;
-    }
     return {
-      ...next,
-      children: next.children.map((child) => renameOverrideDeep(child, from, name)),
+      ...widget,
+      states: widget.states.map((item) => (item.id === stateId ? applyTransition({ ...item, name }, transition) : item)),
     };
   });
 }
@@ -626,43 +627,40 @@ export function updateWidgetState(
 export function deleteWidgetState(
   widgets: PageWidget[],
   ownerId: string,
-  name: string,
-  scopeName?: string | null,
+  stateId: string,
+  scopeId?: string | null,
 ): PageWidget[] {
   const owner = findWidget(widgets, ownerId);
-  if (!owner || !name) {
+  if (!owner || !stateId) {
     return widgets;
   }
-  if (scopeName) {
-    if (!owner.stateOverrides?.some((item) => item.name === scopeName && item.states?.some((nested) => nested.name === name))) {
+  if (scopeId) {
+    if (!owner.stateOverrides?.some((item) => item.id === scopeId && item.states?.some((nested) => nested.id === stateId))) {
       return widgets;
     }
     return updateWidgetById(widgets, ownerId, (widget) => {
-      const next = upsertNestedState(widget, scopeName, name, () => undefined);
-      if (next.appliedState === name) {
-        delete next.appliedState;
-      }
+      const next = upsertNestedState(widget, scopeId, stateId, () => undefined);
       if (!hasChildren(next)) {
         return next;
       }
       return {
         ...next,
-        children: next.children.map((child) => deleteOverrideDeep(child, name)),
+        children: next.children.map((child) => deleteOverrideDeep(child, stateId)),
       };
     });
   }
-  if (!owner.states?.some((item) => item.name === name)) {
+  if (!owner.states?.some((item) => item.id === stateId)) {
     return widgets;
   }
   return updateWidgetById(widgets, ownerId, (widget) => {
-    const states = (widget.states ?? []).filter((item) => item.name !== name);
+    const states = (widget.states ?? []).filter((item) => item.id !== stateId);
     const next: PageWidget = { ...widget };
     if (states.length > 0) {
       next.states = states;
     } else {
       delete next.states;
     }
-    if (next.appliedState === name || !next.states?.length) {
+    if (next.appliedState === stateId || !next.states?.length) {
       delete next.appliedState;
     }
     if (!hasChildren(next)) {
@@ -670,7 +668,7 @@ export function deleteWidgetState(
     }
     return {
       ...next,
-      children: next.children.map((child) => deleteOverrideDeep(child, name)),
+      children: next.children.map((child) => deleteOverrideDeep(child, stateId)),
     };
   });
 }
@@ -678,27 +676,24 @@ export function deleteWidgetState(
 export function setAppliedState(
   widgets: PageWidget[],
   ownerId: string,
-  name: string | null,
-  scopeName?: string | null,
+  stateId: string | null,
+  scopeId?: string | null,
 ): PageWidget[] {
   return updateWidgetById(widgets, ownerId, (widget) => {
-    if (scopeName) {
+    if (scopeId) {
       const overrides = [...(widget.stateOverrides ?? [])];
-      const index = overrides.findIndex((item) => item.name === scopeName);
+      const index = overrides.findIndex((item) => item.id === scopeId);
       if (index < 0) {
-        if (!name) {
-          return widget;
-        }
         return widget;
       }
       const parent: WidgetStateDelta = { ...overrides[index] };
-      if (name && parent.states?.some((item) => item.name === name)) {
-        parent.appliedState = name;
+      if (stateId && parent.states?.some((item) => item.id === stateId)) {
+        parent.appliedState = stateId;
       } else {
         delete parent.appliedState;
       }
       const empty =
-        !parent.style && !parent.flex && !parent.item && !parent.swiper && !parent.states?.length && !parent.appliedState;
+        !parent.props && !parent.style && !parent.flex && !parent.item && !parent.swiper && !parent.states?.length && !parent.appliedState;
       if (empty) {
         return writeOverrideList(
           widget,
@@ -709,8 +704,8 @@ export function setAppliedState(
       return writeOverrideList(widget, overrides);
     }
     const next = { ...widget };
-    if (name && widget.states?.some((item) => item.name === name)) {
-      next.appliedState = name;
+    if (stateId && widget.states?.some((item) => item.id === stateId)) {
+      next.appliedState = stateId;
     } else {
       delete next.appliedState;
     }
@@ -720,24 +715,29 @@ export function setAppliedState(
 
 function writeDelta(
   widget: PageWidget,
-  name: string,
+  stateId: string,
   role: WidgetStateRole,
   delta: WidgetStateFields,
   nestedIn?: string | null,
 ): PageWidget {
   if (role === 'owner' && nestedIn) {
-    return upsertNestedState(widget, nestedIn, name, (current) => ({
-      name,
-      ...delta,
-      ...(current?.transition != null ? { transition: current.transition } : {}),
-      ...(current?.states?.length ? { states: current.states } : {}),
-    }));
+    return upsertNestedState(widget, nestedIn, stateId, (current) =>
+      current
+        ? {
+            id: current.id,
+            name: current.name,
+            ...delta,
+            ...(current.transition != null ? { transition: current.transition } : {}),
+            ...(current.states?.length ? { states: current.states } : {}),
+          }
+        : current,
+    );
   }
   const key = role === 'owner' ? 'states' : 'stateOverrides';
   const list = [...(widget[key] ?? [])];
-  const index = list.findIndex((item) => item.name === name);
+  const index = list.findIndex((item) => item.id === stateId);
   const prev = index >= 0 ? list[index] : undefined;
-  const empty = !delta.style && !delta.flex && !delta.item && !delta.swiper;
+  const empty = !delta.props && !delta.style && !delta.flex && !delta.item && !delta.swiper;
   if (role === 'descendant' && empty && !prev?.states?.length && !prev?.appliedState) {
     if (index < 0) {
       return widget;
@@ -752,7 +752,8 @@ function writeDelta(
     return next;
   }
   const entry: WidgetStateDelta = {
-    name,
+    id: stateId,
+    ...(role === 'owner' && prev?.name != null ? { name: prev.name } : {}),
     ...delta,
     ...(role === 'owner' && prev?.transition != null ? { transition: prev.transition } : {}),
     ...(prev?.states?.length ? { states: prev.states } : {}),
@@ -777,22 +778,50 @@ export function nestedScopeForWidget(
   if (!widget || !viewingState || viewingOwnerId !== widget.id) {
     return null;
   }
-  if (widget.states?.some((item) => item.name === viewingState)) {
+  if (widget.states?.some((item) => item.id === viewingState)) {
     return null;
   }
   for (const ancestor of ancestorChain(widgets, widgetId).reverse()) {
     if (ancestor.id === widget.id) {
       continue;
     }
-    const name = ownerActiveName(ancestor, viewing);
+    const scopeId = ownerActiveId(ancestor, viewing);
     if (
-      name &&
-      widget.stateOverrides?.some((item) => item.name === name && item.states?.some((nested) => nested.name === viewingState))
+      scopeId &&
+      widget.stateOverrides?.some((item) => item.id === scopeId && item.states?.some((nested) => nested.id === viewingState))
     ) {
-      return name;
+      return scopeId;
     }
   }
   return null;
+}
+
+function desiredPropsAfterPatch(
+  base: WidgetContentProps | undefined,
+  patch: WidgetPatch,
+): WidgetContentProps | undefined {
+  const next = { ...base };
+  if (patch.value != null) {
+    next.value = patch.value;
+  }
+  if (patch.text != null) {
+    next.text = patch.text;
+  }
+  if (patch.src != null) {
+    if (patch.src) {
+      next.src = patch.src;
+    } else {
+      delete next.src;
+    }
+  }
+  if (patch.size != null) {
+    if (patch.size > 0) {
+      next.size = patch.size;
+    } else {
+      delete next.size;
+    }
+  }
+  return compactWidgetProps(next);
 }
 
 export function patchResolvedWidget(
@@ -800,55 +829,67 @@ export function patchResolvedWidget(
   patch: WidgetPatch,
   layers: WidgetStateLayer[],
 ): PageWidget {
-  const content: WidgetPatch = {};
-  if (patch.value != null) {
-    content.value = patch.value;
-  }
-  if (patch.text != null) {
-    content.text = patch.text;
-  }
-  if (patch.src != null) {
-    content.src = patch.src;
-  }
-  if (patch.size != null) {
-    content.size = patch.size;
-  }
+  const baseContent: WidgetPatch = {};
   if ('loop' in patch) {
-    content.loop = patch.loop;
+    baseContent.loop = patch.loop;
   }
   if ('stateFn' in patch) {
-    content.stateFn = patch.stateFn;
+    baseContent.stateFn = patch.stateFn;
   }
-  let next = Object.keys(content).length > 0 ? patchWidget(widget, content) : widget;
+  const hasPropPatch =
+    patch.value != null || patch.text != null || patch.src != null || patch.size != null;
   const hasVisual = 'style' in patch || 'flex' in patch || 'item' in patch || 'swiper' in patch;
-  if (!hasVisual) {
+
+  if (layers.length === 0) {
+    if (patch.value != null) {
+      baseContent.value = patch.value;
+    }
+    if (patch.text != null) {
+      baseContent.text = patch.text;
+    }
+    if (patch.src != null) {
+      baseContent.src = patch.src;
+    }
+    if (patch.size != null) {
+      baseContent.size = patch.size;
+    }
+    let next = Object.keys(baseContent).length > 0 ? patchWidget(widget, baseContent) : widget;
+    if (!hasVisual) {
+      return next;
+    }
+    const visual: WidgetPatch = {
+      ...('style' in patch ? { style: patch.style } : {}),
+      ...('flex' in patch ? { flex: patch.flex } : {}),
+      ...('item' in patch ? { item: patch.item } : {}),
+      ...('swiper' in patch ? { swiper: patch.swiper } : {}),
+    };
+    const layered = patchWidget(next, visual);
+    if (!('style' in patch)) {
+      return layered;
+    }
+    return forcePositionFields(layered, patch.style);
+  }
+
+  let next = Object.keys(baseContent).length > 0 ? patchWidget(widget, baseContent) : widget;
+  if (!hasPropPatch && !hasVisual) {
     return next;
   }
   const resolved = resolveWidgetStateStack(next, layers);
+  const lastLayer = layers[layers.length - 1];
   const desired: WidgetStateFields = {
+    props: hasPropPatch ? desiredPropsAfterPatch(resolved.props, patch) : resolved.props,
     style: 'style' in patch ? patch.style : resolved.style,
     flex: 'flex' in patch ? patch.flex : resolved.flex,
     item: 'item' in patch ? patch.item : resolved.item,
     swiper: 'swiper' in patch ? patch.swiper : resolved.swiper,
   };
-  const visual: WidgetPatch = {
-    ...('style' in patch ? { style: desired.style } : {}),
-    ...('flex' in patch ? { flex: desired.flex } : {}),
-    ...('item' in patch ? { item: desired.item } : {}),
-    ...('swiper' in patch ? { swiper: desired.swiper } : {}),
-  };
-  const layered =
-    layers.length === 0
-      ? patchWidget(next, visual)
-      : writeDelta(
-          next,
-          layers[layers.length - 1].name,
-          layers[layers.length - 1].role,
-          diffWidgetState(next, desired, resolveWidgetStateStack(next, layers.slice(0, -1))),
-          layers[layers.length - 1].role === 'owner'
-            ? nestedOwnerScope(next, layers[layers.length - 1].name)
-            : null,
-        );
+  const layered = writeDelta(
+    next,
+    lastLayer.id,
+    lastLayer.role,
+    diffWidgetState(next, desired, resolveWidgetStateStack(next, layers.slice(0, -1))),
+    lastLayer.role === 'owner' ? nestedOwnerScope(next, lastLayer.id) : null,
+  );
   if (!('style' in patch)) {
     return layered;
   }
@@ -912,62 +953,62 @@ function forcePositionFields(widget: PageWidget, style: WidgetStyle | undefined)
 export function patchWidgetInState(
   widget: PageWidget,
   patch: WidgetPatch,
-  stateName: string | null,
+  stateId: string | null,
   role: WidgetStateRole,
   nestedIn?: string | null,
 ): PageWidget {
-  const content: WidgetPatch = {};
-  if (patch.value != null) {
-    content.value = patch.value;
-  }
-  if (patch.text != null) {
-    content.text = patch.text;
-  }
-  if (patch.src != null) {
-    content.src = patch.src;
-  }
-  if (patch.size != null) {
-    content.size = patch.size;
-  }
-  if ('loop' in patch) {
-    content.loop = patch.loop;
-  }
-  if ('stateFn' in patch) {
-    content.stateFn = patch.stateFn;
-  }
-  let next = Object.keys(content).length > 0 ? patchWidget(widget, content) : widget;
+  const hasPropPatch =
+    patch.value != null || patch.text != null || patch.src != null || patch.size != null;
   const hasVisual = 'style' in patch || 'flex' in patch || 'item' in patch || 'swiper' in patch;
-  if (!hasVisual) {
-    return next;
-  }
-  if (!stateName) {
-    return patchWidget(next, {
+
+  if (!stateId) {
+    const allPatch: WidgetPatch = {
+      ...(patch.value != null ? { value: patch.value } : {}),
+      ...(patch.text != null ? { text: patch.text } : {}),
+      ...(patch.src != null ? { src: patch.src } : {}),
+      ...(patch.size != null ? { size: patch.size } : {}),
+      ...('loop' in patch ? { loop: patch.loop } : {}),
+      ...('stateFn' in patch ? { stateFn: patch.stateFn } : {}),
       ...('style' in patch ? { style: patch.style } : {}),
       ...('flex' in patch ? { flex: patch.flex } : {}),
       ...('item' in patch ? { item: patch.item } : {}),
       ...('swiper' in patch ? { swiper: patch.swiper } : {}),
-    });
-  }
-  if (nestedIn) {
-    const resolved = resolveWidgetStateStack(next, [
-      { name: nestedIn, role: 'descendant' },
-      { name: stateName, role: 'owner' },
-    ]);
-    const merged: WidgetStateFields = {
-      style: 'style' in patch ? patch.style : resolved.style,
-      flex: 'flex' in patch ? patch.flex : resolved.flex,
-      item: 'item' in patch ? patch.item : resolved.item,
-      swiper: 'swiper' in patch ? patch.swiper : resolved.swiper,
     };
-    const parent = resolveWidgetState(next, nestedIn, 'descendant');
-    return writeDelta(next, stateName, 'owner', diffWidgetState(next, merged, parent), nestedIn);
+    return Object.keys(allPatch).length > 0 ? patchWidget(widget, allPatch) : widget;
   }
-  const resolved = resolveWidgetState(next, stateName, role);
-  const merged: WidgetStateFields = {
+
+  const baseContent: WidgetPatch = {};
+  if ('loop' in patch) {
+    baseContent.loop = patch.loop;
+  }
+  if ('stateFn' in patch) {
+    baseContent.stateFn = patch.stateFn;
+  }
+  let next = Object.keys(baseContent).length > 0 ? patchWidget(widget, baseContent) : widget;
+  if (!hasPropPatch && !hasVisual) {
+    return next;
+  }
+  const layers: WidgetStateLayer[] = nestedIn
+    ? [
+        { id: nestedIn, role: 'descendant' },
+        { id: stateId, role: 'owner' },
+      ]
+    : [{ id: stateId, role }];
+  const resolved = resolveWidgetStateStack(next, layers);
+  const desired: WidgetStateFields = {
+    props: hasPropPatch ? desiredPropsAfterPatch(resolved.props, patch) : resolved.props,
     style: 'style' in patch ? patch.style : resolved.style,
     flex: 'flex' in patch ? patch.flex : resolved.flex,
     item: 'item' in patch ? patch.item : resolved.item,
     swiper: 'swiper' in patch ? patch.swiper : resolved.swiper,
   };
-  return writeDelta(next, stateName, role, diffWidgetState(next, merged));
+  const baseStack = layers.slice(0, -1);
+  const base = baseStack.length > 0 ? resolveWidgetStateStack(next, baseStack) : undefined;
+  return writeDelta(
+    next,
+    stateId,
+    nestedIn ? 'owner' : role,
+    diffWidgetState(next, desired, base),
+    nestedIn ?? null,
+  );
 }

@@ -149,10 +149,19 @@ export type SwiperStyle = {
   easingFunction?: SwiperEasing;
 };
 
+export type WidgetContentProps = {
+  value?: string;
+  text?: string;
+  src?: string;
+  size?: number;
+};
+
 export type WidgetStateDelta = {
-  name: string;
+  id: string;
+  name?: string;
   transition?: number;
   appliedState?: string;
+  props?: WidgetContentProps;
   style?: WidgetStyle;
   flex?: FlexContainerStyle;
   item?: FlexItemStyle;
@@ -188,7 +197,7 @@ export type WidgetLoop = {
   index?: string;
 };
 
-type WidgetCommon = WidgetStates & { loop?: WidgetLoop; hidden?: boolean };
+type WidgetCommon = WidgetStates & { loop?: WidgetLoop; hidden?: boolean; alias?: string };
 
 export type PageWidget =
   | ({ type: 'image'; id: string; src: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
@@ -338,12 +347,12 @@ export function isStateFnConfigured(source: string | undefined | null): boolean 
   return compactStateFn(source) != null;
 }
 
-function parseHostStateFn(raw: string, ownedNames: string[]): string | undefined {
+function parseHostStateFn(raw: string, ownedIds: string[]): string | undefined {
   const value = raw.trim();
   if (!value) {
     return undefined;
   }
-  if (ownedNames.includes(value) && STATE_NAME_IDENT.test(value)) {
+  if (ownedIds.includes(value) && STATE_NAME_IDENT.test(value)) {
     return `return ${JSON.stringify(value)}`;
   }
   return value;
@@ -574,6 +583,11 @@ function parseWidgetLoop(node: OrderedNode): { loop?: WidgetLoop } {
 
 function parseWidgetHidden(node: OrderedNode): { hidden?: true } {
   return isTrue(attr(node, 'hidden')) ? { hidden: true } : {};
+}
+
+function parseWidgetAlias(node: OrderedNode): { alias?: string } {
+  const raw = attr(node, 'alias')?.trim();
+  return raw ? { alias: raw } : {};
 }
 
 function loopAttrs(loop: WidgetLoop | undefined): Record<string, string> {
@@ -1302,6 +1316,26 @@ export function compactSwiper(style: SwiperStyle | undefined): SwiperStyle | und
   return Object.keys(next).length > 0 ? next : undefined;
 }
 
+export function compactWidgetProps(props: WidgetContentProps | undefined): WidgetContentProps | undefined {
+  if (!props) {
+    return undefined;
+  }
+  const next: WidgetContentProps = {};
+  if (typeof props.value === 'string') {
+    next.value = props.value;
+  }
+  if (typeof props.text === 'string') {
+    next.text = props.text;
+  }
+  if (typeof props.src === 'string' && props.src) {
+    next.src = props.src;
+  }
+  if (typeof props.size === 'number' && Number.isFinite(props.size) && props.size > 0) {
+    next.size = props.size;
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
 function parseStyle(node: OrderedNode): WidgetStyle | undefined {
   const radius = parseNumber(attr(node, 'border-radius'));
   const margin = parseLengthEdges(attr(node, 'margin'), { allowAuto: true });
@@ -1788,6 +1822,7 @@ function diffRecord<T extends object>(
 }
 
 export type WidgetStateFields = {
+  props?: WidgetContentProps;
   style?: WidgetStyle;
   flex?: FlexContainerStyle;
   item?: FlexItemStyle;
@@ -1798,20 +1833,28 @@ export function nestedOwnedStates(widget: PageWidget): WidgetStateDelta[] {
   return (widget.stateOverrides ?? []).flatMap((item) => item.states ?? []);
 }
 
-export function ownedStateNames(widget: PageWidget): string[] {
-  const names: string[] = [];
+export function ownedStateIds(widget: PageWidget): string[] {
+  const ids: string[] = [];
   const seen = new Set<string>();
   for (const state of [...(widget.states ?? []), ...nestedOwnedStates(widget)]) {
-    if (seen.has(state.name)) {
+    if (seen.has(state.id)) {
       continue;
     }
-    seen.add(state.name);
-    names.push(state.name);
+    seen.add(state.id);
+    ids.push(state.id);
   }
-  return names;
+  return ids;
 }
 
-export function findOwnedDelta(widget: PageWidget, name: string): WidgetStateDelta | undefined {
+export function findOwnedDelta(widget: PageWidget, id: string): WidgetStateDelta | undefined {
+  const owned = widget.states?.find((item) => item.id === id);
+  if (owned) {
+    return owned;
+  }
+  return nestedOwnedStates(widget).find((item) => item.id === id);
+}
+
+export function findOwnedStateByName(widget: PageWidget, name: string): WidgetStateDelta | undefined {
   const owned = widget.states?.find((item) => item.name === name);
   if (owned) {
     return owned;
@@ -1823,15 +1866,15 @@ export function hasOwnedStates(widget: PageWidget): boolean {
   return Boolean(widget.states?.length || nestedOwnedStates(widget).length);
 }
 
-export function appliedStateName(widget: PageWidget): string | null {
-  if (!widget.appliedState || !widget.states?.some((state) => state.name === widget.appliedState)) {
+export function appliedStateId(widget: PageWidget): string | null {
+  if (!widget.appliedState || !widget.states?.some((state) => state.id === widget.appliedState)) {
     return null;
   }
   return widget.appliedState;
 }
 
-export function nestedAppliedStateName(override: WidgetStateDelta | undefined): string | null {
-  if (!override?.appliedState || !override.states?.some((state) => state.name === override.appliedState)) {
+export function nestedAppliedStateId(override: WidgetStateDelta | undefined): string | null {
+  if (!override?.appliedState || !override.states?.some((state) => state.id === override.appliedState)) {
     return null;
   }
   return override.appliedState;
@@ -1865,21 +1908,38 @@ function mergeSwiper(base?: SwiperStyle, overlay?: SwiperStyle): SwiperStyle | u
   return compactSwiper({ ...base, ...overlay });
 }
 
+function mergeProps(base?: WidgetContentProps, overlay?: WidgetContentProps): WidgetContentProps | undefined {
+  if (!overlay) {
+    return compactWidgetProps(base);
+  }
+  return compactWidgetProps({ ...base, ...overlay });
+}
+
+function widgetBaseProps(widget: PageWidget): WidgetContentProps | undefined {
+  return compactWidgetProps({
+    ...('value' in widget ? { value: widget.value } : {}),
+    ...('text' in widget ? { text: widget.text } : {}),
+    ...('src' in widget ? { src: widget.src } : {}),
+    ...('size' in widget && widget.size != null ? { size: widget.size } : {}),
+  });
+}
+
 export type WidgetStateLayer = {
-  name: string;
+  id: string;
   role: WidgetStateRole;
 };
 
 export function resolveWidgetState(
   widget: PageWidget,
-  stateName: string | null | undefined,
+  stateId: string | null | undefined,
   role: WidgetStateRole,
 ): WidgetStateFields {
-  return resolveWidgetStateStack(widget, stateName ? [{ name: stateName, role }] : []);
+  return resolveWidgetStateStack(widget, stateId ? [{ id: stateId, role }] : []);
 }
 
 function widgetFieldBase(widget: PageWidget): WidgetStateFields {
   return {
+    props: widgetBaseProps(widget),
     style: compactWidgetStyle(widget.style),
     flex: widget.type === 'flex' ? compactFlexContainer(widget.flex) : undefined,
     item: widget.type === 'swiper-item' ? undefined : compactFlexItem(widget.item),
@@ -1888,6 +1948,7 @@ function widgetFieldBase(widget: PageWidget): WidgetStateFields {
 }
 
 export function resolveWidgetStateStack(widget: PageWidget, layers: WidgetStateLayer[]): WidgetStateFields {
+  let props = widgetBaseProps(widget);
   let style = compactWidgetStyle(widget.style);
   let flex = widget.type === 'flex' ? compactFlexContainer(widget.flex) : undefined;
   let item = widget.type === 'swiper-item' ? undefined : compactFlexItem(widget.item);
@@ -1896,30 +1957,33 @@ export function resolveWidgetStateStack(widget: PageWidget, layers: WidgetStateL
   for (const layer of layers) {
     let delta: WidgetStateDelta | undefined;
     if (layer.role === 'owner') {
-      delta = widget.states?.find((item) => item.name === layer.name) ?? activeOverride?.states?.find((item) => item.name === layer.name);
+      delta = widget.states?.find((item) => item.id === layer.id) ?? activeOverride?.states?.find((item) => item.id === layer.id);
     } else {
-      delta = widget.stateOverrides?.find((item) => item.name === layer.name);
+      delta = widget.stateOverrides?.find((item) => item.id === layer.id);
       activeOverride = delta;
     }
+    props = mergeProps(props, delta?.props);
     style = mergeStyle(style, delta?.style);
     flex = widget.type === 'flex' ? mergeFlex(flex, delta?.flex) : undefined;
     item = widget.type === 'swiper-item' ? undefined : mergeItem(item, delta?.item);
     swiper = widget.type === 'swiper' ? mergeSwiper(swiper, delta?.swiper) : undefined;
   }
-  return { style, flex, item, swiper };
+  return { props, style, flex, item, swiper };
 }
 
 export function diffWidgetState(
   widget: PageWidget,
   next: WidgetStateFields,
   base?: WidgetStateFields,
-): WidgetStateDelta | Pick<WidgetStateDelta, 'style' | 'flex' | 'item' | 'swiper'> {
+): WidgetStateDelta | Pick<WidgetStateDelta, 'props' | 'style' | 'flex' | 'item' | 'swiper'> {
   const origin = base ?? widgetFieldBase(widget);
+  const props = diffRecord(origin.props, next.props, compactWidgetProps);
   const style = diffRecord(origin.style, next.style, compactWidgetStyle);
   const flex = widget.type === 'flex' ? diffRecord(origin.flex, next.flex, compactFlexContainer) : undefined;
   const item = widget.type === 'swiper-item' ? undefined : diffRecord(origin.item, next.item, compactFlexItem);
   const swiper = widget.type === 'swiper' ? diffRecord(origin.swiper, next.swiper, compactSwiper) : undefined;
   return {
+    ...(props ? { props } : {}),
     ...(style ? { style } : {}),
     ...(flex ? { flex } : {}),
     ...(item ? { item } : {}),
@@ -1934,11 +1998,37 @@ function compactTransition(value: number | undefined): number | undefined {
   return Math.round(value);
 }
 
-function stateTransition(widget: PageWidget, name: string | null | undefined): number | undefined {
-  if (!name) {
+function stateTransition(widget: PageWidget, id: string | null | undefined): number | undefined {
+  if (!id) {
     return compactTransition(widget.transition);
   }
-  return compactTransition(findOwnedDelta(widget, name)?.transition);
+  return compactTransition(findOwnedDelta(widget, id)?.transition);
+}
+
+function applyResolvedProps(widget: PageWidget, props: WidgetContentProps | undefined): PageWidget {
+  if (!props) {
+    return widget;
+  }
+  if (widget.type === 'text') {
+    return props.value != null ? { ...widget, value: props.value } : widget;
+  }
+  if (widget.type === 'button') {
+    return props.text != null ? { ...widget, text: props.text } : widget;
+  }
+  if (widget.type === 'image') {
+    return props.src != null ? { ...widget, src: props.src } : widget;
+  }
+  if (widget.type === 'icon') {
+    let next = widget;
+    if (props.src != null) {
+      next = { ...next, src: props.src };
+    }
+    if (props.size != null) {
+      next = { ...next, size: props.size };
+    }
+    return next;
+  }
+  return widget;
 }
 
 function withResolvedFields(
@@ -1946,7 +2036,8 @@ function withResolvedFields(
   fields: WidgetStateFields,
   transition?: number,
 ): PageWidget {
-  const next = { ...widget } as PageWidget;
+  let next = applyResolvedProps(widget, fields.props) as PageWidget;
+  next = { ...next };
   copyWidgetRuntimeMeta(widget, next);
   if (fields.style) {
     next.style = fields.style;
@@ -1991,27 +2082,27 @@ function normalizeViewing(
 }
 
 export type ResolveWidgetTreeOptions = {
-  appliedNameFor?: (widget: PageWidget) => string | null;
+  appliedStateFor?: (widget: PageWidget) => string | null;
   stateLayersSink?: WeakMap<object, WidgetStateLayer[]>;
 };
 
-function ownerActiveName(
+function ownerActiveState(
   widget: PageWidget,
   viewing: WidgetStateViewing[],
-  appliedNameFor?: (widget: PageWidget) => string | null,
+  appliedStateFor?: (widget: PageWidget) => string | null,
 ): string | null {
   const hit = viewing.find((item) => item.ownerId === widget.id);
   if (hit) {
     return hit.state;
   }
-  if (appliedNameFor) {
-    return appliedNameFor(widget);
+  if (appliedStateFor) {
+    return appliedStateFor(widget);
   }
-  return appliedStateName(widget);
+  return appliedStateId(widget);
 }
 
-function layerRole(widget: PageWidget, name: string): WidgetStateRole {
-  return findOwnedDelta(widget, name) ? 'owner' : 'descendant';
+function layerRole(widget: PageWidget, id: string): WidgetStateRole {
+  return findOwnedDelta(widget, id) ? 'owner' : 'descendant';
 }
 
 function stackTransition(
@@ -2021,7 +2112,7 @@ function stackTransition(
 ): number | undefined {
   for (let i = layers.length - 1; i >= 0; i -= 1) {
     if (layers[i].role === 'owner') {
-      const duration = stateTransition(widget, layers[i].name);
+      const duration = stateTransition(widget, layers[i].id);
       if (duration) {
         return duration;
       }
@@ -2032,32 +2123,32 @@ function stackTransition(
 
 function resolveWidgetNode(
   widget: PageWidget,
-  inheritedNames: string[],
+  inheritedIds: string[],
   viewing: WidgetStateViewing[],
   inheritedTransition: number | undefined,
-  appliedNameFor?: (widget: PageWidget) => string | null,
+  appliedStateFor?: (widget: PageWidget) => string | null,
   stateLayersSink?: WeakMap<object, WidgetStateLayer[]>,
 ): PageWidget {
-  const ownName = ownerActiveName(widget, viewing, appliedNameFor);
+  const ownState = ownerActiveState(widget, viewing, appliedStateFor);
   const layers: WidgetStateLayer[] = [];
-  for (const name of inheritedNames) {
-    const role = layerRole(widget, name);
-    layers.push({ name, role });
+  for (const id of inheritedIds) {
+    const role = layerRole(widget, id);
+    layers.push({ id, role });
   }
-  if (ownName) {
-    layers.push({ name: ownName, role: layerRole(widget, ownName) });
+  if (ownState) {
+    layers.push({ id: ownState, role: layerRole(widget, ownState) });
   }
   const transition =
-    (ownName ? stateTransition(widget, ownName) : undefined) ??
+    (ownState ? stateTransition(widget, ownState) : undefined) ??
     compactTransition(widget.transition) ??
     stackTransition(widget, layers, inheritedTransition);
   const next = withResolvedFields(widget, resolveWidgetStateStack(widget, layers), transition);
   stateLayersSink?.set(next, layers);
   if ('children' in next) {
-    const childNames = ownName && !inheritedNames.includes(ownName) ? [...inheritedNames, ownName] : inheritedNames;
+    const childIds = ownState && !inheritedIds.includes(ownState) ? [...inheritedIds, ownState] : inheritedIds;
     const childTransition = transition;
     next.children = next.children.map((child) =>
-      resolveWidgetNode(child, childNames, viewing, childTransition, appliedNameFor, stateLayersSink),
+      resolveWidgetNode(child, childIds, viewing, childTransition, appliedStateFor, stateLayersSink),
     );
   }
   return next;
@@ -2070,16 +2161,44 @@ export function resolveWidgetTree(
 ): PageWidget[] {
   const list = normalizeViewing(viewing);
   return widgets.map((widget) =>
-    resolveWidgetNode(widget, [], list, undefined, options?.appliedNameFor, options?.stateLayersSink),
+    resolveWidgetNode(widget, [], list, undefined, options?.appliedStateFor, options?.stateLayersSink),
   );
+}
+
+function parseStateProps(node: OrderedNode): WidgetContentProps | undefined {
+  const attrs = node[':@'] ?? {};
+  const props: WidgetContentProps = {};
+  if (Object.prototype.hasOwnProperty.call(attrs, '@_value')) {
+    props.value = String(attrs['@_value']);
+  }
+  if (Object.prototype.hasOwnProperty.call(attrs, '@_text')) {
+    props.text = String(attrs['@_text']);
+  }
+  if (Object.prototype.hasOwnProperty.call(attrs, '@_src')) {
+    const src = String(attrs['@_src']);
+    if (src) {
+      props.src = src;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(attrs, '@_size')) {
+    const num = parseNumber(String(attrs['@_size']));
+    if (num != null && num > 0) {
+      props.size = num;
+    }
+  }
+  return compactWidgetProps(props);
 }
 
 function parseStateDelta(node: OrderedNode): WidgetStateDelta | undefined {
   const tag = Object.prototype.hasOwnProperty.call(node, '__') ? '__' : '_';
-  const name = attr(node, 'name').trim();
-  if (!name) {
+  const rawId = attr(node, 'id').trim();
+  const rawName = attr(node, 'name').trim();
+  // Legacy drafts only carried name: backfill id from name.
+  const id = rawId || rawName;
+  if (!id) {
     return undefined;
   }
+  const props = parseStateProps(node);
   const style = parseStyle(node);
   const flex = parseFlex(node);
   const item = parseItem(node);
@@ -2093,15 +2212,18 @@ function parseStateDelta(node: OrderedNode): WidgetStateDelta | undefined {
         continue;
       }
       const inner = parseStateDelta(child);
-      if (inner && !seen.has(inner.name)) {
-        seen.add(inner.name);
+      if (inner && !seen.has(inner.id)) {
+        seen.add(inner.id);
         nested.push(inner);
       }
     }
   }
   return {
-    name,
+    id,
+    // Owner declarations carry a display name; overrides reference by id only.
+    ...(tag === '_' ? { name: rawName || id } : {}),
     ...(transition ? { transition } : {}),
+    ...(props ? { props } : {}),
     ...(style ? { style } : {}),
     ...(flex ? { flex } : {}),
     ...(item ? { item } : {}),
@@ -2123,16 +2245,16 @@ function splitStateNodes(nodes: OrderedNode[]): {
   for (const node of nodes) {
     if (Object.prototype.hasOwnProperty.call(node, '_')) {
       const delta = parseStateDelta(node);
-      if (delta && !seen.has(delta.name)) {
-        seen.add(delta.name);
+      if (delta && !seen.has(delta.id)) {
+        seen.add(delta.id);
         states.push(delta);
       }
       continue;
     }
     if (Object.prototype.hasOwnProperty.call(node, '__')) {
       const delta = parseStateDelta(node);
-      if (delta && !overrideSeen.has(delta.name)) {
-        overrideSeen.add(delta.name);
+      if (delta && !overrideSeen.has(delta.id)) {
+        overrideSeen.add(delta.id);
         overrides.push(delta);
       }
       continue;
@@ -2142,16 +2264,39 @@ function splitStateNodes(nodes: OrderedNode[]): {
   return { states, overrides, rest };
 }
 
+function propsAttrs(props: WidgetContentProps | undefined): Record<string, string> {
+  const compact = compactWidgetProps(props);
+  if (!compact) {
+    return {};
+  }
+  const attrs: Record<string, string> = {};
+  if (compact.value != null) {
+    attrs['@_value'] = compact.value;
+  }
+  if (compact.text != null) {
+    attrs['@_text'] = compact.text;
+  }
+  if (compact.src) {
+    attrs['@_src'] = compact.src;
+  }
+  if (compact.size != null) {
+    attrs['@_size'] = String(compact.size);
+  }
+  return attrs;
+}
+
 function compactDeltaForWrite(widget: PageWidget, delta: WidgetStateDelta, base?: WidgetStateFields): WidgetStateDelta {
   const origin = base ?? widgetFieldBase(widget);
   const resolved: WidgetStateFields = {
+    props: compactWidgetProps({ ...origin.props, ...delta.props }),
     style: compactWidgetStyle({ ...origin.style, ...delta.style }),
     flex: widget.type === 'flex' ? compactFlexContainer({ ...origin.flex, ...delta.flex }) : undefined,
     item: widget.type === 'swiper-item' ? undefined : compactFlexItem({ ...origin.item, ...delta.item }),
     swiper: widget.type === 'swiper' ? compactSwiper({ ...origin.swiper, ...delta.swiper }) : undefined,
   };
   return {
-    name: delta.name,
+    id: delta.id,
+    ...(delta.name != null ? { name: delta.name } : {}),
     ...(compactTransition(delta.transition) ? { transition: compactTransition(delta.transition) } : {}),
     ...diffWidgetState(widget, resolved, origin),
   };
@@ -2166,14 +2311,17 @@ function serializeDeltaNode(
 ): OrderedNode | null {
   const compact = compactDeltaForWrite(widget, delta, base);
   const attrs: Record<string, string> = {
-    '@_name': compact.name,
+    '@_id': compact.id,
+    ...(tag === '_' && compact.name != null ? { '@_name': compact.name } : {}),
     ...(tag === '_' && compact.transition != null ? { '@_transition': String(compact.transition) } : {}),
+    ...propsAttrs(compact.props),
     ...styleAttrs(compact.style),
     ...(widget.type === 'flex' ? flexAttrs(compact.flex) : {}),
     ...(asItem && widget.type !== 'swiper-item' ? itemAttrs(compact.item) : {}),
     ...(widget.type === 'swiper' ? swiperAttrs(compact.swiper) : {}),
   };
   const nestedBase: WidgetStateFields = {
+    props: compactWidgetProps({ ...((base ?? widgetFieldBase(widget)).props ?? {}), ...(compact.props ?? {}) }),
     style: compactWidgetStyle({ ...((base ?? widgetFieldBase(widget)).style ?? {}), ...(compact.style ?? {}) }),
     flex: widget.type === 'flex' ? compactFlexContainer({ ...((base ?? widgetFieldBase(widget)).flex ?? {}), ...(compact.flex ?? {}) }) : undefined,
     item:
@@ -2199,12 +2347,12 @@ function serializeDeltaNode(
 
 function uniqueOverrideStates(widget: PageWidget): WidgetStateDelta[] {
   return (widget.stateOverrides ?? []).map((item) => {
-    const used = new Set((widget.states ?? []).map((state) => state.name));
+    const used = new Set((widget.states ?? []).map((state) => state.id));
     const nested = (item.states ?? []).filter((state) => {
-      if (used.has(state.name)) {
+      if (used.has(state.id)) {
         return false;
       }
-      used.add(state.name);
+      used.add(state.id);
       return true;
     });
     const next: WidgetStateDelta = { ...item };
@@ -2234,29 +2382,29 @@ function serializeStateChildren(widget: PageWidget, ids: { n: number }, parent: 
   return [...owned, ...overrides, ...children];
 }
 
-function extraDeclaredNames(extra: { states?: WidgetStateDelta[]; stateOverrides?: WidgetStateDelta[] }): string[] {
+function extraDeclaredIds(extra: { states?: WidgetStateDelta[]; stateOverrides?: WidgetStateDelta[] }): string[] {
   return [
-    ...(extra.states?.map((state) => state.name) ?? []),
-    ...(extra.stateOverrides?.flatMap((item) => item.states?.map((state) => state.name) ?? []) ?? []),
+    ...(extra.states?.map((state) => state.id) ?? []),
+    ...(extra.stateOverrides?.flatMap((item) => item.states?.map((state) => state.id) ?? []) ?? []),
   ];
 }
 
 function widgetStateSpread(
   widgetNode: OrderedNode,
   inner: OrderedNode[],
-  ancestorNames: string[],
+  ancestorIds: string[],
 ): Pick<WidgetStates, 'states' | 'stateOverrides' | 'stateFn' | 'transition'> & { rest: OrderedNode[] } {
   const { states, overrides, rest } = splitStateNodes(inner);
-  const known = new Set(ancestorNames);
+  const known = new Set(ancestorIds);
   const stateOverrides = overrides
-    .filter((item) => known.has(item.name))
+    .filter((item) => known.has(item.id))
     .map((item) => {
-      const used = new Set(states.map((state) => state.name));
+      const used = new Set(states.map((state) => state.id));
       const nested = (item.states ?? []).filter((state) => {
-        if (used.has(state.name)) {
+        if (used.has(state.id)) {
           return false;
         }
-        used.add(state.name);
+        used.add(state.id);
         return true;
       });
       const next: WidgetStateDelta = { ...item };
@@ -2268,11 +2416,11 @@ function widgetStateSpread(
       delete next.appliedState;
       return next;
     });
-  const ownedNames = [
-    ...states.map((item) => item.name),
-    ...stateOverrides.flatMap((item) => item.states?.map((state) => state.name) ?? []),
+  const ownedIds = [
+    ...states.map((item) => item.id),
+    ...stateOverrides.flatMap((item) => item.states?.map((state) => state.id) ?? []),
   ];
-  const stateFn = parseHostStateFn(attr(widgetNode, 'state'), ownedNames);
+  const stateFn = parseHostStateFn(attr(widgetNode, 'state'), ownedIds);
   const transition = compactTransition(parseNonNegativeInteger(attr(widgetNode, 'transition')));
   return {
     rest,
@@ -2287,7 +2435,7 @@ function parseWidgets(
   nodes: OrderedNode[],
   ids: { n: number },
   parent: WidgetParent,
-  ancestorNames: string[] = [],
+  ancestorIds: string[] = [],
 ): PageWidget[] {
   const widgets: PageWidget[] = [];
   const asItem = parent === 'flex';
@@ -2299,7 +2447,7 @@ function parseWidgets(
       ids.n += 1;
       const style = parseStyle(child);
       const item = asItem ? parseItem(child) : undefined;
-      const extra = widgetStateSpread(child, nodeList(child.image), ancestorNames);
+      const extra = widgetStateSpread(child, nodeList(child.image), ancestorIds);
       widgets.push({
         type: 'image',
         id: attr(child, 'id') || `n${ids.n}`,
@@ -2308,6 +2456,7 @@ function parseWidgets(
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2319,7 +2468,7 @@ function parseWidgets(
       ids.n += 1;
       const style = parseStyle(child);
       const item = asItem ? parseItem(child) : undefined;
-      const extra = widgetStateSpread(child, nodeList(child.icon), ancestorNames);
+      const extra = widgetStateSpread(child, nodeList(child.icon), ancestorIds);
       const color = attr(child, 'color');
       const sizeStr = attr(child, 'size');
       const size = sizeStr ? Number(sizeStr) : undefined;
@@ -2333,6 +2482,7 @@ function parseWidgets(
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2344,7 +2494,7 @@ function parseWidgets(
       ids.n += 1;
       const style = parseStyle(child);
       const item = asItem ? parseItem(child) : undefined;
-      const extra = widgetStateSpread(child, nodeList(child.text), ancestorNames);
+      const extra = widgetStateSpread(child, nodeList(child.text), ancestorIds);
       widgets.push({
         type: 'text',
         id: attr(child, 'id') || `n${ids.n}`,
@@ -2353,6 +2503,7 @@ function parseWidgets(
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2364,7 +2515,7 @@ function parseWidgets(
       ids.n += 1;
       const style = parseStyle(child);
       const item = asItem ? parseItem(child) : undefined;
-      const extra = widgetStateSpread(child, nodeList(child.button), ancestorNames);
+      const extra = widgetStateSpread(child, nodeList(child.button), ancestorIds);
       widgets.push({
         type: 'button',
         id: attr(child, 'id') || `n${ids.n}`,
@@ -2373,6 +2524,7 @@ function parseWidgets(
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2385,17 +2537,18 @@ function parseWidgets(
       const style = parseStyle(child);
       const flex = parseFlex(child);
       const item = asItem ? parseItem(child) : undefined;
-      const extra = widgetStateSpread(child, nodeList(child.flex), ancestorNames);
-      const nextNames = [...ancestorNames, ...extraDeclaredNames(extra)];
+      const extra = widgetStateSpread(child, nodeList(child.flex), ancestorIds);
+      const nextIds = [...ancestorIds, ...extraDeclaredIds(extra)];
       widgets.push({
         type: 'flex',
         id: attr(child, 'id') || `n${ids.n}`,
-        children: parseWidgets(extra.rest, ids, 'flex', nextNames),
+        children: parseWidgets(extra.rest, ids, 'flex', nextIds),
         ...(style ? { style } : {}),
         ...(flex ? { flex } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2408,17 +2561,18 @@ function parseWidgets(
       const style = sanitizeWidgetStyle('swiper', parseStyle(child));
       const swiper = parseSwiper(child);
       const item = asItem ? parseItem(child) : undefined;
-      const extra = widgetStateSpread(child, nodeList(child.swiper), ancestorNames);
-      const nextNames = [...ancestorNames, ...extraDeclaredNames(extra)];
+      const extra = widgetStateSpread(child, nodeList(child.swiper), ancestorIds);
+      const nextIds = [...ancestorIds, ...extraDeclaredIds(extra)];
       widgets.push({
         type: 'swiper',
         id: attr(child, 'id') || `n${ids.n}`,
-        children: parseWidgets(extra.rest, ids, 'swiper', nextNames),
+        children: parseWidgets(extra.rest, ids, 'swiper', nextIds),
         ...(style ? { style } : {}),
         ...(swiper ? { swiper } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2429,15 +2583,16 @@ function parseWidgets(
     if (allowSwiperItem && Object.prototype.hasOwnProperty.call(child, 'swiper-item')) {
       ids.n += 1;
       const style = sanitizeWidgetStyle('swiper-item', parseStyle(child));
-      const extra = widgetStateSpread(child, nodeList(child['swiper-item']), ancestorNames);
-      const nextNames = [...ancestorNames, ...extraDeclaredNames(extra)];
+      const extra = widgetStateSpread(child, nodeList(child['swiper-item']), ancestorIds);
+      const nextIds = [...ancestorIds, ...extraDeclaredIds(extra)];
       widgets.push({
         type: 'swiper-item',
         id: attr(child, 'id') || `n${ids.n}`,
-        children: parseWidgets(extra.rest, ids, 'swiper-item', nextNames),
+        children: parseWidgets(extra.rest, ids, 'swiper-item', nextIds),
         ...(style ? { style } : {}),
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2463,6 +2618,7 @@ function widgetHostAttrs(
     ...extra,
     ...loopAttrs(widget.loop),
     ...(widget.hidden ? { '@_hidden': 'true' } : {}),
+    ...(widget.alias?.trim() ? { '@_alias': widget.alias.trim() } : {}),
     ...(applied ? { '@_state': applied } : {}),
     ...(transition ? { '@_transition': String(transition) } : {}),
   };

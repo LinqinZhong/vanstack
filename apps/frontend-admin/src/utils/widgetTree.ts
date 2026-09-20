@@ -8,6 +8,7 @@ import {
   type PageWidget,
   type SwiperStyle,
   type WidgetLoop,
+  type WidgetStateDelta,
   type WidgetStyle,
 } from '@vanstack/xml';
 
@@ -17,6 +18,7 @@ export type WidgetPatch = {
   src?: string;
   size?: number;
   hidden?: boolean;
+  alias?: string;
   loop?: WidgetLoop | undefined;
   stateFn?: string | undefined;
   style?: WidgetStyle | undefined;
@@ -29,28 +31,127 @@ function cloneOptional<T extends object>(value: T | undefined): T | undefined {
   return value ? { ...value } : undefined;
 }
 
-function cloneStateList(list: PageWidget['states']): PageWidget['states'] {
-  if (!list || list.length === 0) {
-    return undefined;
+const STATE_ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
+const STATE_ID_BODY_LENGTH = 10;
+const STATE_ID_RETRY_LIMIT = 100;
+
+function randomStateIdBody(): string {
+  let body = '';
+  const cryptoObj = globalThis.crypto;
+  if (cryptoObj?.getRandomValues) {
+    const bytes = new Uint8Array(STATE_ID_BODY_LENGTH);
+    cryptoObj.getRandomValues(bytes);
+    for (const byte of bytes) {
+      body += STATE_ID_ALPHABET[byte % STATE_ID_ALPHABET.length];
+    }
+  } else {
+    for (let i = 0; i < STATE_ID_BODY_LENGTH; i += 1) {
+      body += STATE_ID_ALPHABET[Math.floor(Math.random() * STATE_ID_ALPHABET.length)];
+    }
   }
-  return list.map((item) => ({
-    name: item.name,
-    ...(item.transition != null ? { transition: item.transition } : {}),
-    ...(item.appliedState ? { appliedState: item.appliedState } : {}),
-    style: cloneOptional(item.style),
-    flex: cloneOptional(item.flex),
-    item: cloneOptional(item.item),
-    swiper: cloneOptional(item.swiper),
-    ...(item.states?.length ? { states: cloneStateList(item.states) } : {}),
-  }));
+  return body;
 }
 
-function cloneStateFields(widget: PageWidget) {
+export function nextStateId(used?: ReadonlySet<string>): string {
+  let id = `s${randomStateIdBody()}`;
+  let attempts = 0;
+  while (used?.has(id) && attempts < STATE_ID_RETRY_LIMIT) {
+    id = `s${randomStateIdBody()}`;
+    attempts += 1;
+  }
+  return id;
+}
+
+export function collectTreeStateIds(widgets: PageWidget[]): Set<string> {
+  const ids = new Set<string>();
+  const visitDelta = (delta: WidgetStateDelta) => {
+    ids.add(delta.id);
+    for (const nested of delta.states ?? []) {
+      visitDelta(nested);
+    }
+  };
+  const visitWidget = (widget: PageWidget) => {
+    for (const delta of widget.states ?? []) {
+      visitDelta(delta);
+    }
+    for (const override of widget.stateOverrides ?? []) {
+      visitDelta(override);
+    }
+    if ('children' in widget) {
+      for (const child of widget.children) {
+        visitWidget(child);
+      }
+    }
+  };
+  for (const widget of widgets) {
+    visitWidget(widget);
+  }
+  return ids;
+}
+
+function collectOwnedStateIds(
+  list: PageWidget['states'] | undefined,
+  map: Map<string, string>,
+  genId: () => string,
+) {
+  for (const item of list ?? []) {
+    if (!map.has(item.id)) {
+      map.set(item.id, genId());
+    }
+    collectOwnedStateIds(item.states, map, genId);
+  }
+}
+
+function collectSubtreeStateIds(
+  widget: PageWidget,
+  map: Map<string, string>,
+  genId: () => string,
+) {
+  collectOwnedStateIds(widget.states, map, genId);
+  for (const override of widget.stateOverrides ?? []) {
+    collectOwnedStateIds(override.states, map, genId);
+  }
+  if ('children' in widget) {
+    for (const child of widget.children) {
+      collectSubtreeStateIds(child, map, genId);
+    }
+  }
+}
+
+function remapStateDelta(delta: WidgetStateDelta, map: Map<string, string>): WidgetStateDelta {
   return {
-    ...(widget.states?.length ? { states: cloneStateList(widget.states) } : {}),
-    ...(widget.stateOverrides?.length ? { stateOverrides: cloneStateList(widget.stateOverrides) } : {}),
-    ...(widget.stateFn ? { stateFn: widget.stateFn } : {}),
-    ...(widget.appliedState ? { appliedState: widget.appliedState } : {}),
+    id: map.get(delta.id) ?? delta.id,
+    ...(delta.name != null ? { name: delta.name } : {}),
+    ...(delta.transition != null ? { transition: delta.transition } : {}),
+    ...(delta.appliedState ? { appliedState: map.get(delta.appliedState) ?? delta.appliedState } : {}),
+    props: cloneOptional(delta.props),
+    style: cloneOptional(delta.style),
+    flex: cloneOptional(delta.flex),
+    item: cloneOptional(delta.item),
+    swiper: cloneOptional(delta.swiper),
+    ...(delta.states?.length ? { states: delta.states.map((item) => remapStateDelta(item, map)) } : {}),
+  };
+}
+
+function remapStateFn(stateFn: string | undefined, map: Map<string, string>): string | undefined {
+  if (!stateFn) {
+    return stateFn;
+  }
+  let body = stateFn;
+  for (const [oldId, newId] of map) {
+    body = body.split(JSON.stringify(oldId)).join(JSON.stringify(newId));
+  }
+  return body;
+}
+
+function cloneStateFields(widget: PageWidget, stateIdMap: Map<string, string>) {
+  return {
+    ...(widget.states?.length ? { states: widget.states.map((item) => remapStateDelta(item, stateIdMap)) } : {}),
+    ...(widget.stateOverrides?.length
+      ? { stateOverrides: widget.stateOverrides.map((item) => remapStateDelta(item, stateIdMap)) }
+      : {}),
+    ...(widget.stateFn ? { stateFn: remapStateFn(widget.stateFn, stateIdMap) } : {}),
+    ...(widget.appliedState ? { appliedState: stateIdMap.get(widget.appliedState) ?? widget.appliedState } : {}),
     ...(widget.transition != null ? { transition: widget.transition } : {}),
   };
 }
@@ -62,6 +163,11 @@ function cloneLoop(widget: PageWidget): { loop?: WidgetLoop } {
 
 function cloneHidden(widget: PageWidget): { hidden?: true } {
   return widget.hidden ? { hidden: true } : {};
+}
+
+function cloneAlias(widget: PageWidget): { alias?: string } {
+  const alias = widget.alias?.trim();
+  return alias ? { alias } : {};
 }
 
 type ContainerWidget = Extract<PageWidget, { children: PageWidget[] }>;
@@ -200,6 +306,14 @@ function applyCommon<T extends PageWidget>(widget: T, patch: WidgetPatch): T {
       next.hidden = true;
     } else {
       delete next.hidden;
+    }
+  }
+  if ('alias' in patch) {
+    const alias = patch.alias?.trim();
+    if (alias) {
+      next.alias = alias;
+    } else {
+      delete next.alias;
     }
   }
   if ('loop' in patch) {
@@ -440,8 +554,27 @@ export function nextWidgetId(): string {
   return `n${Date.now().toString(36)}-${widgetIdSeq}`;
 }
 
-export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidgetId): PageWidget {
-  const states = cloneStateFields(widget);
+export function cloneWidget(
+  widget: PageWidget,
+  nextId: () => string = nextWidgetId,
+  reservedStateIds: ReadonlySet<string> = new Set(),
+): PageWidget {
+  const used = new Set(reservedStateIds);
+  const stateIdMap = new Map<string, string>();
+  collectSubtreeStateIds(widget, stateIdMap, () => {
+    const id = nextStateId(used);
+    used.add(id);
+    return id;
+  });
+  return cloneWidgetNode(widget, nextId, stateIdMap);
+}
+
+function cloneWidgetNode(
+  widget: PageWidget,
+  nextId: () => string,
+  stateIdMap: Map<string, string>,
+): PageWidget {
+  const states = cloneStateFields(widget, stateIdMap);
   if (widget.type === 'image') {
     return {
       type: 'image',
@@ -452,6 +585,7 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
       ...states,
       ...cloneLoop(widget),
       ...cloneHidden(widget),
+      ...cloneAlias(widget),
     };
   }
   if (widget.type === 'icon') {
@@ -465,6 +599,7 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
       ...states,
       ...cloneLoop(widget),
       ...cloneHidden(widget),
+      ...cloneAlias(widget),
     };
   }
   if (widget.type === 'text') {
@@ -477,6 +612,7 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
       ...states,
       ...cloneLoop(widget),
       ...cloneHidden(widget),
+      ...cloneAlias(widget),
     };
   }
   if (widget.type === 'button') {
@@ -489,42 +625,46 @@ export function cloneWidget(widget: PageWidget, nextId: () => string = nextWidge
       ...states,
       ...cloneLoop(widget),
       ...cloneHidden(widget),
+      ...cloneAlias(widget),
     };
   }
   if (widget.type === 'flex') {
     return {
       type: 'flex',
       id: nextId(),
-      children: widget.children.map((child) => cloneWidget(child, nextId)),
+      children: widget.children.map((child) => cloneWidgetNode(child, nextId, stateIdMap)),
       style: cloneOptional(widget.style),
       flex: cloneOptional(widget.flex),
       item: cloneOptional(widget.item),
       ...states,
       ...cloneLoop(widget),
       ...cloneHidden(widget),
+      ...cloneAlias(widget),
     };
   }
   if (widget.type === 'swiper') {
     return {
       type: 'swiper',
       id: nextId(),
-      children: widget.children.map((child) => cloneWidget(child, nextId)),
+      children: widget.children.map((child) => cloneWidgetNode(child, nextId, stateIdMap)),
       style: cloneOptional(widget.style),
       swiper: cloneOptional(widget.swiper),
       item: cloneOptional(widget.item),
       ...states,
       ...cloneLoop(widget),
       ...cloneHidden(widget),
+      ...cloneAlias(widget),
     };
   }
   return {
     type: 'swiper-item',
     id: nextId(),
-    children: widget.children.map((child) => cloneWidget(child, nextId)),
+    children: widget.children.map((child) => cloneWidgetNode(child, nextId, stateIdMap)),
     style: cloneOptional(widget.style),
     ...states,
     ...cloneLoop(widget),
     ...cloneHidden(widget),
+    ...cloneAlias(widget),
   };
 }
 

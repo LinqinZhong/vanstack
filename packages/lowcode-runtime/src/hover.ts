@@ -1,45 +1,44 @@
-import { resolveStateFnName, type PageWidget } from '@vanstack/xml';
+import { findOwnedStateByName, resolveStateFnId, type PageWidget } from '@vanstack/xml';
 import { widgetInstanceKey, widgetInstanceMeta } from './loop';
 
 export const HOVER_STATE_NAME = 'hover';
 
+export function hoverStateId(widget: PageWidget): string | null {
+  return findOwnedStateByName(widget, HOVER_STATE_NAME)?.id ?? null;
+}
+
 export function widgetHasHoverState(widget: PageWidget): boolean {
-  if (widget.states?.some((item) => item.name === HOVER_STATE_NAME)) {
-    return true;
-  }
-  return Boolean(
-    widget.stateOverrides?.some((item) => item.states?.some((nested) => nested.name === HOVER_STATE_NAME)),
-  );
+  return hoverStateId(widget) != null;
 }
 
 export function resolveRuntimeOwnState(
   widget: PageWidget,
   hoverInstanceKeys: readonly string[],
 ): string | null {
-  const fromFn = resolveStateFnName(widget, widgetInstanceMeta(widget)?.scope);
-  if (fromFn && fromFn !== HOVER_STATE_NAME) {
+  const fromFn = resolveStateFnId(widget, widgetInstanceMeta(widget)?.scope);
+  if (fromFn) {
     return fromFn;
   }
-  if (hoverInstanceKeys.includes(widgetInstanceKey(widget)) && widgetHasHoverState(widget)) {
-    return HOVER_STATE_NAME;
+  if (hoverInstanceKeys.includes(widgetInstanceKey(widget))) {
+    return hoverStateId(widget);
   }
-  return fromFn;
+  return null;
 }
 
 export function mergeHoverViewing(
   viewing: Array<{ ownerId: string; state: string | null }> | { ownerId: string; state: string | null } | null,
-  hoverOwnerIds: readonly string[],
+  hoverEntries: ReadonlyArray<{ ownerId: string; stateId: string }>,
 ): Array<{ ownerId: string; state: string | null }> {
   const byOwner = new Map<string, string | null>();
   const list = !viewing ? [] : Array.isArray(viewing) ? viewing : [viewing];
   for (const item of list) {
     byOwner.set(item.ownerId, item.state);
   }
-  for (const ownerId of hoverOwnerIds) {
+  for (const { ownerId, stateId } of hoverEntries) {
     if (byOwner.get(ownerId)) {
       continue;
     }
-    byOwner.set(ownerId, HOVER_STATE_NAME);
+    byOwner.set(ownerId, stateId);
   }
   return [...byOwner.entries()].map(([ownerId, state]) => ({ ownerId, state }));
 }

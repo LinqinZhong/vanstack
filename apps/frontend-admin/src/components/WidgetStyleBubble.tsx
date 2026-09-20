@@ -72,6 +72,9 @@ export function isBoxGroupAllowed(type: PageWidget['type'], group: BoxGroup) {
   ) {
     return false;
   }
+  if (type === 'icon' && group === 'size') {
+    return false;
+  }
   if (type === 'swiper' && group === 'padding') {
     return false;
   }

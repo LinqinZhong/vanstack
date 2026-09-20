@@ -25,6 +25,7 @@ import {
   Button,
   Card,
   ConfigProvider,
+  Dropdown,
   Empty,
   Form,
   Input,
@@ -66,7 +67,6 @@ import {
   compactSize,
   compactWidgetStyle,
   isLoopConfigured,
-  ownedStateNames,
   parsePageXml,
   serializePageXml,
   type BoxLength,
@@ -148,6 +148,7 @@ import {
   canMoveWidget,
   cloneWidget,
   collectExpandableKeys,
+  collectTreeStateIds,
   createSwiperWidget,
   emptySwiperItem,
   findParentWidget,
@@ -564,6 +565,8 @@ export function ProjectEditorPage() {
   const [pageForm] = Form.useForm<{ name: string; key: string; description?: string }>();
   const [versionModalOpen, setVersionModalOpen] = useState(false);
   const [widgetModalOpen, setWidgetModalOpen] = useState(false);
+  const [aliasModalId, setAliasModalId] = useState<string | null>(null);
+  const [aliasInput, setAliasInput] = useState('');
   const [versionForm] = Form.useForm<{ source: 'blank' | 'copy'; copyFromId?: string }>();
   const createVersionSource = Form.useWatch('source', versionForm);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -1171,10 +1174,10 @@ export function ProjectEditorPage() {
     }
     const next = viewingAfterSelect(widgetsRef.current, selectedWidgetId, viewingByOwnerRef.current, {
       ownerId: viewingOwnerIdRef.current,
-      name: viewingStateRef.current,
+      id: viewingStateRef.current,
     });
     setViewingOwnerId(next.ownerId);
-    setViewingState(next.name);
+    setViewingState(next.id);
     setViewingByOwner(next.viewing);
   }, [selectedWidgetId]);
 
@@ -3139,7 +3142,11 @@ export function ProjectEditorPage() {
     if (readOnlyRef.current || !clipboardRef.current) {
       return;
     }
-    const copy = cloneWidget(clipboardRef.current);
+    const copy = cloneWidget(
+      clipboardRef.current,
+      nextWidgetId,
+      collectTreeStateIds(widgetsRef.current),
+    );
     const nextWidgets = insertWidget(widgetsRef.current, selectedWidgetIdRef.current, copy);
     const added = findWidget(nextWidgets, copy.id);
     commitWidgets(nextWidgets, added ? copy.id : selectedWidgetIdRef.current);
@@ -3168,6 +3175,33 @@ export function ProjectEditorPage() {
       updateWidgetById(widgetsRef.current, widgetId, (item) => patchWidget(item, { hidden: !item.hidden })),
       selectedWidgetIdRef.current,
     );
+  }
+
+  function openAliasModal(widgetId: string) {
+    if (readOnlyRef.current) {
+      return;
+    }
+    selectWidget(widgetId);
+    const widget = findWidget(widgetsRef.current, widgetId);
+    setAliasInput(widget?.alias ?? '');
+    setAliasModalId(widgetId);
+  }
+
+  function submitAlias() {
+    if (!aliasModalId || readOnlyRef.current) {
+      return;
+    }
+    const widget = findWidget(widgetsRef.current, aliasModalId);
+    if (!widget) {
+      setAliasModalId(null);
+      return;
+    }
+    commitWidgets(
+      updateWidgetById(widgetsRef.current, aliasModalId, (item) => patchWidget(item, { alias: aliasInput })),
+      selectedWidgetIdRef.current,
+      'edit:alias',
+    );
+    setAliasModalId(null);
   }
 
   function treeDropPlacement(dropToGap: boolean, nodePos: string, dropPosition: number): WidgetDropPlacement {
@@ -3702,6 +3736,7 @@ export function ProjectEditorPage() {
                     <Tree
                       className="widget-tree"
                       blockNode
+                      virtual={false}
                       autoExpandParent={false}
                       draggable={!readOnly && !canDragWidgetToData ? { icon: false } : false}
                       allowDrop={({ dragNode, dropNode, dropPosition }) => {
@@ -3717,47 +3752,84 @@ export function ProjectEditorPage() {
                         const widget = findWidget(widgets, widgetId);
                         const looped = isLoopConfigured(widget?.loop);
                         const hidden = Boolean(widget?.hidden);
+                        const alias = widget?.alias?.trim();
+                        const titleClasses = [
+                          'widget-tree-title',
+                          hidden ? 'is-hidden' : '',
+                          selectedWidgetId === widgetId ? 'is-row-selected' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ');
                         return (
-                          <span className={hidden ? 'widget-tree-title is-hidden' : 'widget-tree-title'}>
+                          <Dropdown
+                            trigger={['contextMenu']}
+                            menu={{
+                              items: [
+                                {
+                                  key: 'alias',
+                                  label: t('lowcode.setAlias'),
+                                  disabled: readOnly,
+                                },
+                              ],
+                              onClick: ({ key }) => {
+                                if (key === 'alias') {
+                                  openAliasModal(widgetId);
+                                }
+                              },
+                            }}
+                          >
                             <span
-                              className={canDragWidgetToData ? 'widget-tree-drag-title' : 'widget-tree-title-label'}
-                              draggable={canDragWidgetToData}
-                              onDragStart={(event) => {
-                                event.stopPropagation();
-                                event.dataTransfer.effectAllowed = 'copy';
-                                writeWidgetDrag(event.dataTransfer, widgetId);
-                              }}
+                              className={titleClasses}
+                              onContextMenu={() => selectWidget(widgetId)}
                             >
-                              {typeof node.title === 'string' ? node.title : widgetId}
-                            </span>
-                            {looped ? (
-                              <button
-                                type="button"
-                                className="widget-tree-loop"
-                                title={t('lowcode.styleLoop')}
-                                onMouseDown={(event) => event.stopPropagation()}
-                                onClick={(event) => {
+                              <span
+                                className={
+                                  canDragWidgetToData
+                                    ? 'widget-tree-drag-title'
+                                    : alias
+                                      ? 'widget-tree-title-label is-alias'
+                                      : 'widget-tree-title-label'
+                                }
+                                draggable={canDragWidgetToData}
+                                onDragStart={(event) => {
                                   event.stopPropagation();
-                                  openWidgetLoopPanel(widgetId);
+                                  event.dataTransfer.effectAllowed = 'copy';
+                                  writeWidgetDrag(event.dataTransfer, widgetId);
                                 }}
                               >
-                                <UnorderedListOutlined />
-                              </button>
-                            ) : null}
-                            <button
-                              type="button"
-                              className="widget-tree-visibility"
-                              title={hidden ? t('lowcode.showWidget') : t('lowcode.hideWidget')}
-                              disabled={readOnly}
-                              onMouseDown={(event) => event.stopPropagation()}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                toggleWidgetHidden(widgetId);
-                              }}
-                            >
-                              {hidden ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-                            </button>
-                          </span>
+                                {alias ?? (typeof node.title === 'string' ? node.title : widgetId)}
+                              </span>
+                              {looped ? (
+                                <button
+                                  type="button"
+                                  className="widget-tree-loop"
+                                  title={t('lowcode.styleLoop')}
+                                  onMouseDown={(event) => event.stopPropagation()}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openWidgetLoopPanel(widgetId);
+                                  }}
+                                >
+                                  <UnorderedListOutlined />
+                                </button>
+                              ) : null}
+                              <span className="widget-tree-actions-inline">
+                                <button
+                                  type="button"
+                                  className="widget-tree-visibility"
+                                  title={hidden ? t('lowcode.showWidget') : t('lowcode.hideWidget')}
+                                  disabled={readOnly}
+                                  onMouseDown={(event) => event.stopPropagation()}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    toggleWidgetHidden(widgetId);
+                                  }}
+                                >
+                                  {hidden ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+                                </button>
+                              </span>
+                            </span>
+                          </Dropdown>
                         );
                       }}
                       onExpand={(keys) => setExpandedKeys(keys.map(String))}
@@ -3963,36 +4035,36 @@ export function ProjectEditorPage() {
                       items={visibleStates}
                       viewingOwnerId={viewingOwnerId}
                       viewingState={viewingState}
-                      ownedNames={ownedStateNames(selectedWidget)}
+                      usedIds={collectTreeStateIds(widgets)}
                       onSelect={(row) => {
-                        if (!row.owned && row.name) {
-                          const inheritedName = row.name;
+                        if (!row.owned && row.id && !row.scopeId) {
+                          const inheritedId = row.id;
                           setViewingOwnerId(row.ownerId);
-                          setViewingState(inheritedName);
+                          setViewingState(inheritedId);
                           setViewingByOwner((prev) => ({
                             ...prev,
-                            [row.ownerId]: inheritedName,
+                            [row.ownerId]: inheritedId,
                             [selectedWidget.id]: null,
                           }));
                           return;
                         }
                         const scopeOwnerId = row.scopeOwnerId;
-                        const scopeName = row.scopeName;
-                        if (scopeName && scopeOwnerId) {
-                          setViewingOwnerId(row.name ? row.ownerId : scopeOwnerId);
-                          setViewingState(row.name ?? scopeName);
+                        const scopeId = row.scopeId;
+                        if (scopeId && scopeOwnerId) {
+                          setViewingOwnerId(row.id ? row.ownerId : scopeOwnerId);
+                          setViewingState(row.id ?? scopeId);
                           setViewingByOwner((prev) => ({
                             ...prev,
-                            [scopeOwnerId]: scopeName,
-                            [row.ownerId]: row.name ?? null,
+                            [scopeOwnerId]: scopeId,
+                            [row.ownerId]: row.id ?? null,
                           }));
                           return;
                         }
                         setViewingOwnerId(row.ownerId);
-                        setViewingState(row.name);
+                        setViewingState(row.id);
                         setViewingByOwner((prev) => {
-                          const next: ViewingByOwner = { ...prev, [row.ownerId]: row.name };
-                          if (row.name == null) {
+                          const next: ViewingByOwner = { ...prev, [row.ownerId]: row.id };
+                          if (row.id == null) {
                             for (const key of Object.keys(next)) {
                               if (key !== row.ownerId) {
                                 next[key] = null;
@@ -4002,31 +4074,32 @@ export function ProjectEditorPage() {
                           return next;
                         });
                       }}
-                      onCreate={(name, from, transition) => {
-                        const scopeName = from.scopeName ?? (!from.owned ? from.name : null);
+                      onCreate={(id, name, from, transition) => {
+                        const scopeId = from.scopeId ?? (!from.owned ? from.id : null);
                         const scopeOwnerId = from.scopeOwnerId ?? (!from.owned ? from.ownerId : undefined);
                         const created = createWidgetState(
                           widgets,
                           selectedWidget.id,
+                          id,
                           name,
-                          from.name,
-                          from.owned && !from.scopeName,
+                          from.id,
+                          from.owned && !from.scopeId,
                           transition,
-                          scopeName,
+                          scopeId,
                         );
                         commitWidgets(created, selectedWidgetId);
                         setViewingOwnerId(selectedWidget.id);
-                        setViewingState(name);
+                        setViewingState(id);
                         setViewingByOwner((prev) => {
-                          const next: ViewingByOwner = { ...prev, [selectedWidget.id]: name };
-                          if (scopeName && scopeOwnerId) {
-                            next[scopeOwnerId] = scopeName;
+                          const next: ViewingByOwner = { ...prev, [selectedWidget.id]: id };
+                          if (scopeId && scopeOwnerId) {
+                            next[scopeOwnerId] = scopeId;
                           }
                           return next;
                         });
                       }}
                       onEdit={(from, name, transition) => {
-                        if (from.name == null) {
+                        if (from.id == null) {
                           commitWidgets(updateHostTransition(widgets, selectedWidget.id, transition), selectedWidgetId);
                           return;
                         }
@@ -4034,30 +4107,21 @@ export function ProjectEditorPage() {
                           return;
                         }
                         commitWidgets(
-                          updateWidgetState(widgets, selectedWidget.id, from.name, name, transition, from.scopeName),
+                          updateWidgetState(widgets, selectedWidget.id, from.id, name, transition, from.scopeId),
                           selectedWidgetId,
                         );
-                        if (viewingOwnerId === selectedWidget.id && viewingState === from.name) {
-                          setViewingState(name);
-                        }
-                        setViewingByOwner((prev) => {
-                          if (prev[selectedWidget.id] !== from.name) {
-                            return prev;
-                          }
-                          return { ...prev, [selectedWidget.id]: name };
-                        });
                       }}
                       onDelete={(row) => {
-                        if (!row.name) {
+                        if (!row.id) {
                           return;
                         }
-                        commitWidgets(deleteWidgetState(widgets, selectedWidget.id, row.name, row.scopeName), selectedWidgetId);
-                        if (viewingOwnerId === selectedWidget.id && viewingState === row.name) {
+                        commitWidgets(deleteWidgetState(widgets, selectedWidget.id, row.id, row.scopeId), selectedWidgetId);
+                        if (viewingOwnerId === selectedWidget.id && viewingState === row.id) {
                           setViewingOwnerId(row.scopeOwnerId ?? selectedWidget.id);
-                          setViewingState(row.scopeName ?? null);
+                          setViewingState(row.scopeId ?? null);
                         }
                         setViewingByOwner((prev) => {
-                          if (prev[selectedWidget.id] !== row.name) {
+                          if (prev[selectedWidget.id] !== row.id) {
                             return prev;
                           }
                           return { ...prev, [selectedWidget.id]: null };
@@ -4309,6 +4373,23 @@ export function ProjectEditorPage() {
             </Button>
           ))}
         </div>
+      </Modal>
+
+      <Modal
+        open={aliasModalId !== null}
+        title={t('lowcode.setAlias')}
+        onOk={submitAlias}
+        onCancel={() => setAliasModalId(null)}
+        destroyOnHidden
+      >
+        <Input
+          value={aliasInput}
+          onChange={(event) => setAliasInput(event.target.value)}
+          onPressEnter={submitAlias}
+          placeholder={t('lowcode.aliasPlaceholder')}
+          maxLength={30}
+          autoFocus
+        />
       </Modal>
 
       <Modal

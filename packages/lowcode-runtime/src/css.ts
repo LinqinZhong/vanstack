@@ -361,6 +361,21 @@ function styleRuleText(style: WidgetStyle | undefined, includeDefaults: boolean)
   return cssDeclarationText(css);
 }
 
+function iconLayoutStyle(widget: PageWidget): WidgetStyle | undefined {
+  if (widget.type !== 'icon') {
+    return widget.style;
+  }
+  const size = widget.size != null && widget.size > 0 ? widget.size : 24;
+  if (widget.style?.width && widget.style.height) {
+    return widget.style;
+  }
+  return {
+    ...widget.style,
+    width: widget.style?.width ?? { mode: 'px', value: size },
+    height: widget.style?.height ?? { mode: 'px', value: size },
+  };
+}
+
 export function pageCssText(widgets: PageWidget[]): string {
   const blocks: string[] = [];
 
@@ -385,7 +400,7 @@ export function pageCssText(widgets: PageWidget[]): string {
           );
         }
       }
-      push(`.${cls}`, widget.style, true);
+      push(`.${cls}`, iconLayoutStyle(widget), true);
       for (const state of widget.states ?? []) {
         push(`.${cls}[data-state~="${escapeStateId(state.id)}"]`, state.style, false);
       }

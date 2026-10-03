@@ -140,13 +140,13 @@ import {
   type WidgetShortcut,
 } from '../../utils/widgetShortcuts';
 import {
+  ADDABLE_WIDGET_TYPES,
   addWidgetToTree,
   canMoveWidget,
   cloneWidget,
   collectExpandableKeys,
   collectTreeStateIds,
-  createSwiperWidget,
-  emptySwiperItem,
+  createWidget,
   findParentWidget,
   findWidget,
   firstChildWidgetId,
@@ -1816,21 +1816,7 @@ export function ProjectEditorPage() {
     if (readOnlyRef.current) {
       return;
     }
-    const nextId = nextWidgetId();
-    const widget: PageWidget =
-      type === 'image'
-        ? { type: 'image', id: nextId, src: 'https://picsum.photos/200/200?random='+Math.random(), style:{width:{mode:'%',value:100},height:{mode:'%',value:100}} }
-        : type === 'icon'
-          ? { type: 'icon', id: nextId, src: '', size: 24 }
-          : type === 'text'
-            ? { type: 'text', id: nextId, value: t('lowcode.defaultText') }
-            : type === 'button'
-              ? { type: 'button', id: nextId, text: t('lowcode.defaultButton'), style: { background: '#ffffff' } }
-              : type === 'flex'
-                ? { type: 'flex', id: nextId, children: [] }
-                : type === 'swiper-item'
-                  ? emptySwiperItem(nextId)
-                  : createSwiperWidget(nextId, nextWidgetId);
+    const widget = createWidget(type, { id: nextWidgetId(), t, nextId: nextWidgetId });
     const nextWidgets = addWidgetToTree(widgetsRef.current, selectedWidgetIdRef.current, widget);
     const added = findWidget(nextWidgets, widget.id);
     commitWidgets(nextWidgets, added ? widget.id : selectedWidgetIdRef.current);
@@ -3995,7 +3981,7 @@ export function ProjectEditorPage() {
         destroyOnHidden
       >
         <div className="widget-type-picker">
-          {(['text', 'button', 'flex', 'swiper', 'swiper-item', 'image', 'icon'] as const).map((type) => (
+          {ADDABLE_WIDGET_TYPES.map((type) => (
             <Button
               key={type}
               block
@@ -4004,17 +3990,7 @@ export function ProjectEditorPage() {
                 setWidgetModalOpen(false);
               }}
             >
-              {
-                {
-                  'image': t('lowcode.defaultImage'),
-                  'icon': t('lowcode.defaultIcon'),
-                  'text': t('lowcode.defaultText'),
-                  'button': t('lowcode.defaultButton'),
-                  'flex': t('lowcode.defaultFlex'),
-                  'swiper': t('lowcode.defaultSwiper'),
-                  'swiper-item': t('lowcode.defaultSwiperItem'),
-                }[type]
-              }
+              {widgetTypeName(type, t)}
             </Button>
           ))}
         </div>

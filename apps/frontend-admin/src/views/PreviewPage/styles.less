@@ -82,7 +82,12 @@ body:has(.preview-host.is-editing) #root {
 .preview-host.is-editing .lowcode-swiper-track,
 .preview-host.is-editing .lowcode-swiper-item,
 .preview-host.is-editing .lowcode-swiper-item-body {
-  overflow: hidden;
+  overflow: visible;
+}
+
+.preview-host.is-editing .lowcode-swiper-item {
+  outline: 1px solid #e11d2e;
+  outline-offset: -1px;
 }
 
 .preview-mount .lowcode-swiper-item-body {
@@ -138,10 +143,13 @@ body:has(.preview-host.is-editing) #root {
   cursor: pointer;
 }
 
-.preview-host.is-editing [data-widget-type="image"],
+.preview-host.is-editing [data-widget-type="image"] {
+  overflow: hidden;
+}
+
 .preview-host.is-editing [data-widget-type="swiper"],
 .preview-host.is-editing [data-widget-type="swiper-item"] {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .preview-host.is-editing [data-widget-type="swiper-item"] {

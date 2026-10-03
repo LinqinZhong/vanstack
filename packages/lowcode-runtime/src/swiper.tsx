@@ -170,7 +170,7 @@ export function SwiperView({
     : `translate3d(calc(${-percent}% + ${drag}px), 0, 0)`;
 
   const viewportStyle: CSSProperties = {
-    overflow: 'hidden',
+    overflow: editing ? 'visible' : 'hidden',
     flex: 1,
     minHeight: 0,
     width: '100%',
@@ -198,10 +198,11 @@ export function SwiperView({
   const slotStyle: CSSProperties = {
     flex: `0 0 ${editing ? 100 : 100 / perView}%`,
     boxSizing: 'border-box',
-    minWidth: 0,
-    minHeight: 0,
+    minWidth: editing ? undefined : 0,
+    minHeight: editing ? undefined : 0,
     width: vertical ? '100%' : undefined,
     height: '100%',
+    overflow: editing ? 'visible' : 'hidden',
   };
 
   const showDots = !editing && Boolean(swiper?.indicatorDots) && count > 0;
@@ -224,10 +225,10 @@ export function SwiperView({
         display: 'flex',
         flexDirection: 'column',
         boxSizing: 'border-box',
-        overflow: 'hidden',
         width: '100%',
         ...(hasExplicitHeight ? {} : { height: 150 }),
         ...style,
+        overflow: editing ? 'visible' : 'hidden',
       },
     },
     createElement(
@@ -266,7 +267,7 @@ export function SwiperView({
                   ...itemCss(item.style),
                   width: '100%',
                   height: '100%',
-                  overflow: 'hidden',
+                  overflow: editing ? 'visible' : 'hidden',
                   ...(editing && item.hidden ? { visibility: 'hidden' as const } : {}),
                 },
               },

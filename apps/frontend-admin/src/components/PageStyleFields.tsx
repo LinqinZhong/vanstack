@@ -1,9 +1,13 @@
-import { ColorPicker, Form, InputNumber } from 'antd';
+import { ColorPicker, Form, InputNumber, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { compactPageStyle, type PageStyle } from '@vanstack/xml';
+import { compactPageStyle, OVERFLOW_MODES, type OverflowMode, type PageStyle } from '@vanstack/xml';
 
-function unifiedEdges(top?: number, right?: number, bottom?: number, left?: number) {
-  if (top == null || top !== right || right !== bottom || bottom !== left) {
+function pageNumber(value?: number | string) {
+  return typeof value === 'number' ? value : null;
+}
+
+function unifiedEdges(top?: number | string, right?: number | string, bottom?: number | string, left?: number | string) {
+  if (typeof top !== 'number' || top !== right || right !== bottom || bottom !== left) {
     return undefined;
   }
   return top;
@@ -16,17 +20,35 @@ export function PageStyleFields({
 }: {
   style?: PageStyle;
   disabled?: boolean;
-  onChange: (style: PageStyle | undefined, field: 'background' | 'padding') => void;
+  onChange: (style: PageStyle | undefined, field: 'background' | 'padding' | 'overflow') => void;
 }) {
   const { t } = useTranslation();
   const current = style ?? {};
 
-  function patch(next: Partial<PageStyle>, field: 'background' | 'padding') {
+  function patch(next: Partial<PageStyle>, field: 'background' | 'padding' | 'overflow') {
     onChange(compactPageStyle({ ...current, ...next }), field);
   }
 
   return (
     <>
+      <Form.Item label={t('lowcode.styleOverflow')}>
+        <Select
+          size="small"
+          disabled={disabled}
+          value={
+            current.overflow && (OVERFLOW_MODES as readonly string[]).includes(current.overflow)
+              ? (current.overflow as OverflowMode)
+              : 'auto'
+          }
+          onChange={(overflow: OverflowMode) =>
+            patch({ overflow: overflow === 'auto' ? undefined : overflow }, 'overflow')
+          }
+          options={OVERFLOW_MODES.map((value) => ({
+            value,
+            label: t(`lowcode.styleOverflow${value.charAt(0).toUpperCase()}${value.slice(1)}`),
+          }))}
+        />
+      </Form.Item>
       <Form.Item label={t('lowcode.styleBackground')}>
         <ColorPicker
           size="small"
@@ -66,7 +88,7 @@ export function PageStyleFields({
               size="small"
               min={0}
               disabled={disabled}
-              value={current.paddingTop}
+              value={pageNumber(current.paddingTop)}
               onChange={(paddingTop) => patch({ paddingTop: paddingTop ?? undefined }, 'padding')}
               addonAfter="px"
               placeholder={t('lowcode.styleEdgeTop')}
@@ -75,7 +97,7 @@ export function PageStyleFields({
               size="small"
               min={0}
               disabled={disabled}
-              value={current.paddingRight}
+              value={pageNumber(current.paddingRight)}
               onChange={(paddingRight) => patch({ paddingRight: paddingRight ?? undefined }, 'padding')}
               addonAfter="px"
               placeholder={t('lowcode.styleEdgeRight')}
@@ -84,7 +106,7 @@ export function PageStyleFields({
               size="small"
               min={0}
               disabled={disabled}
-              value={current.paddingBottom}
+              value={pageNumber(current.paddingBottom)}
               onChange={(paddingBottom) => patch({ paddingBottom: paddingBottom ?? undefined }, 'padding')}
               addonAfter="px"
               placeholder={t('lowcode.styleEdgeBottom')}
@@ -93,7 +115,7 @@ export function PageStyleFields({
               size="small"
               min={0}
               disabled={disabled}
-              value={current.paddingLeft}
+              value={pageNumber(current.paddingLeft)}
               onChange={(paddingLeft) => patch({ paddingLeft: paddingLeft ?? undefined }, 'padding')}
               addonAfter="px"
               placeholder={t('lowcode.styleEdgeLeft')}

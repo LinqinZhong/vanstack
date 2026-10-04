@@ -6,6 +6,7 @@ import {
   resolveI18nCopy,
   type BindingScope,
   type PageI18n,
+  type PageVariable,
   type PageWidget,
   type WidgetStateLayer,
 } from '@vanstack/xml';
@@ -30,6 +31,10 @@ export type WidgetRenderContext = {
   summarizeCopy?: boolean;
   dynamicTextLabel?: string;
   stateLayers?: WeakMap<object, WidgetStateLayer[]>;
+  pageData?: PageVariable[];
+  modelOverrides?: Readonly<Record<string, string>>;
+  commitModelValue?: (name: string, value: string, done?: boolean) => void;
+  loadWidgetEvent?: (id: string) => Promise<string | null>;
 };
 
 export function widgetCssOptions(ctx: WidgetRenderContext): WidgetCssOptions {

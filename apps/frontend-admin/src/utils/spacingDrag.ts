@@ -98,8 +98,12 @@ function addEdge(start: number | undefined, delta: number, min?: number) {
   return next;
 }
 
+function edgeNumber(value?: number | string): number | undefined {
+  return typeof value === 'number' ? value : undefined;
+}
+
 function edgeValue(quad: BoxQuad, edge: SpacingEdge) {
-  return quad[edge] ?? 0;
+  return edgeNumber(quad[edge]) ?? 0;
 }
 
 function nearestInRange(raw: number, targets: number[], range: number) {
@@ -231,7 +235,7 @@ export function applySpacingNudge(
 ): BoxQuad {
   const next = { ...start };
   for (const edge of edges) {
-    const value = (next[edge] ?? 0) + delta;
+    const value = (edgeNumber(next[edge]) ?? 0) + delta;
     next[edge] = min != null && value < min ? min : value;
   }
   return next;
@@ -272,7 +276,7 @@ export function snapSpacingValue(
     const adjacent = nearestInRange(
       raw,
       ADJACENT[edge].flatMap((item) => {
-        const value = quad[item];
+        const value = edgeNumber(quad[item]);
         return value == null ? [] : [value];
       }),
       SNAP_EDGE_RANGE,
@@ -315,7 +319,7 @@ function axisDelta(edge: SpacingEdge, x: number, y: number) {
 
 function writeEdge(start: BoxQuad, edge: SpacingEdge, delta: number, min?: number, snap?: boolean, mirror?: boolean) {
   const from = edgeValue(start, edge);
-  const raw = addEdge(start[edge], delta, min);
+  const raw = addEdge(edgeNumber(start[edge]), delta, min);
   if (raw == null) {
     return start[edge];
   }
@@ -369,7 +373,7 @@ export function applySizeDrag({
     return start;
   }
   const horizontal = locked === 'left' || locked === 'right';
-  const from = horizontal ? (start.right ?? start.left ?? 0) : (start.top ?? start.bottom ?? 0);
+  const from = horizontal ? (edgeNumber(start.right) ?? edgeNumber(start.left) ?? 0) : (edgeNumber(start.top) ?? edgeNumber(start.bottom) ?? 0);
   const raw = Math.max(0, from + axisDelta(locked, Math.trunc(dx), Math.trunc(dy)));
   const nextValue = snap
     ? snapSpacingValue(Math.trunc(raw), locked, start, 0, { skipOpposite: true, skipEdges: mirror })
@@ -400,7 +404,7 @@ export function applyRadiusDrag({
   if (!locked) {
     return start;
   }
-  const raw = Math.max(0, (start[locked] ?? 0) + cornerDelta(locked, Math.trunc(dx), Math.trunc(dy)));
+  const raw = Math.max(0, (edgeNumber(start[locked]) ?? 0) + cornerDelta(locked, Math.trunc(dx), Math.trunc(dy)));
   const nextValue = snap
     ? snapSpacingValue(Math.trunc(raw), locked, start, 0, { skipOpposite: true, skipEdges: mirror })
     : Math.trunc(raw);

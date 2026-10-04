@@ -23,6 +23,8 @@ export type LowcodePreviewMessage = {
   overflowY: number;
   locale: string | null;
   catalog?: PageI18n;
+  projectId?: string | null;
+  pageId?: string | null;
   viewingOwnerId: string | null;
   viewingState: string | null;
   viewingStates?: Array<{ ownerId: string; state: string | null }> | null;
@@ -212,6 +214,14 @@ export type LowcodeCanvasSettledMessage = {
   settle: number;
 };
 
+export type LowcodeModelValueMessage = {
+  source: typeof LOWCODE_MESSAGE_SOURCE;
+  type: 'model-value';
+  name: string;
+  value: string;
+  done?: boolean;
+};
+
 export type LowcodeMessage =
   | LowcodeReadyMessage
   | LowcodePreviewMessage
@@ -234,7 +244,8 @@ export type LowcodeMessage =
   | LowcodeSelectChromeMessage
   | LowcodeWidgetHoverMessage
   | LowcodeWidgetBoxMessage
-  | LowcodeCanvasSettledMessage;
+  | LowcodeCanvasSettledMessage
+  | LowcodeModelValueMessage;
 
 const MESSAGE_TYPES = new Set([
   'ready',
@@ -260,6 +271,7 @@ const MESSAGE_TYPES = new Set([
   'widget-hover',
   'widget-box',
   'canvas-settled',
+  'model-value',
 ]);
 
 export function isLowcodeMessage(value: unknown): value is LowcodeMessage {

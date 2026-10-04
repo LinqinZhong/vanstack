@@ -24,11 +24,13 @@ import type {
   ProjectLangCatalogDto,
   ProjectPageDto,
   ProjectPageVersionDto,
+  WidgetEventScriptDto,
 } from '@vanstack/shared';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { CreateAssetGroupDto, UpdateAssetGroupDto, UploadAssetFileDto } from './dto/asset.dto';
 import { CreateIconGroupDto, UpdateIconGroupDto, UploadIconFileDto } from './dto/icon.dto';
 import { PutProjectLangsDto } from './dto/lang.dto';
+import { PutWidgetEventDto } from './dto/event.dto';
 import { CreateProjectPageDto, UpdateProjectPageDto } from './dto/page.dto';
 import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
 import { ActivatePageVersionDto, CreatePageVersionDto, UpdatePageVersionDto } from './dto/version.dto';
@@ -318,5 +320,31 @@ export class LowcodeController {
     @Param('name') name: string,
   ): Promise<void> {
     return this.lowcode.deleteIconFile(id, group, name);
+  }
+
+  @Get(':id/events/:eventId')
+  getWidgetEvent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+  ): Promise<WidgetEventScriptDto> {
+    return this.lowcode.getWidgetEvent(id, eventId);
+  }
+
+  @Put(':id/events/:eventId')
+  putWidgetEvent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Body() dto: PutWidgetEventDto,
+  ): Promise<WidgetEventScriptDto> {
+    return this.lowcode.putWidgetEvent(id, eventId, dto.source);
+  }
+
+  @Delete(':id/events/:eventId')
+  @HttpCode(204)
+  deleteWidgetEvent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+  ): Promise<void> {
+    return this.lowcode.deleteWidgetEvent(id, eventId);
   }
 }

@@ -1,8 +1,12 @@
-import type { ReactElement } from 'react';
+import { cloneElement, type ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
+import { widgetRuntimeBindings, withDomEvents } from '../events';
 import { renderButton } from './button';
+import { renderCheckbox } from './checkbox';
+import { renderSwitch } from './switch';
 import { renderFlex } from './flex';
 import { renderIcon } from './icon';
+import { renderInput } from './input';
 import { renderImage } from './image';
 import { renderSwiper } from './swiper';
 import { renderSwiperItem } from './swiper-item';
@@ -11,6 +15,24 @@ import { renderText } from './text';
 import type { WidgetRenderContext } from '../widget-render';
 
 export function widgetElement(widget: PageWidget, ctx: WidgetRenderContext): ReactElement {
+  const node = renderWidget(widget, ctx);
+  if (ctx.editing) {
+    return node;
+  }
+  const bindings = widgetRuntimeBindings(widget, ctx.loadWidgetEvent);
+  if (!bindings) {
+    return node;
+  }
+  if (typeof node.type === 'string') {
+    return withDomEvents(node, bindings, widget.type === 'image');
+  }
+  return cloneElement(node as ReactElement<{ eventHandlers?: typeof bindings.dom; onIndexChange?: (index: number, oldIndex: number) => void }>, {
+    eventHandlers: bindings.dom,
+    onIndexChange: bindings.onIndexChange,
+  });
+}
+
+function renderWidget(widget: PageWidget, ctx: WidgetRenderContext): ReactElement {
   switch (widget.type) {
     case 'image':
       return renderImage(widget, ctx);
@@ -18,6 +40,12 @@ export function widgetElement(widget: PageWidget, ctx: WidgetRenderContext): Rea
       return renderIcon(widget, ctx);
     case 'text':
       return renderText(widget, ctx);
+    case 'input':
+      return renderInput(widget, ctx);
+    case 'checkbox':
+      return renderCheckbox(widget, ctx);
+    case 'switch':
+      return renderSwitch(widget, ctx);
     case 'button':
       return renderButton(widget, ctx);
     case 'flex':

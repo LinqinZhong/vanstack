@@ -22,6 +22,8 @@ import type {
   UpdateProjectInput,
   UpdateProjectPageInput,
   UpdateProjectPageVersionInput,
+  PutWidgetEventInput,
+  WidgetEventScriptDto,
 } from '@vanstack/shared';
 import i18n from '../i18n';
 import { apiBase } from './serverConfig';
@@ -198,6 +200,12 @@ export const api = {
       `/projects/${projectId}/icons/groups/${encodeURIComponent(group)}/files/${encodeURIComponent(name)}`,
       { method: 'DELETE' },
     ),
+  getWidgetEvent: (projectId: string, eventId: string) =>
+    request<WidgetEventScriptDto>(`/projects/${projectId}/events/${eventId}`),
+  putWidgetEvent: (projectId: string, eventId: string, body: PutWidgetEventInput) =>
+    request<WidgetEventScriptDto>(`/projects/${projectId}/events/${eventId}`, json('PUT', body)),
+  deleteWidgetEvent: (projectId: string, eventId: string) =>
+    request<void>(`/projects/${projectId}/events/${eventId}`, { method: 'DELETE' }),
 };
 
 export const localeLabel: Record<Locale, string> = {

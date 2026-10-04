@@ -7,6 +7,7 @@ import {
   type PageStyle,
   type PageVariable,
   type PageWidget,
+  type WidgetEvents,
   type WidgetStyle,
 } from '@vanstack/xml';
 import { isBoxDragKind, type BoxDragKind, type SpacingEdge } from '../../utils/spacingDrag';
@@ -28,6 +29,7 @@ export type HistoryEntry = {
   widgets: PageWidget[];
   pageStyle?: PageStyle;
   pageData: PageVariable[];
+  pageEvents?: WidgetEvents;
   selectedWidgetId: string | null;
 };
 export type CenterTab = 'layout' | 'data' | 'events';
@@ -157,17 +159,20 @@ function sizeAxisValue(
   if (!lock) {
     return undefined;
   }
-  if (size?.mode === 'px') {
+  if (typeof size === 'object' && size.mode === 'px') {
     return size.value;
   }
   return measured ?? 0;
 }
 
-export function dragLengthPx(length?: BoxLength): number | undefined {
-  return length?.mode === 'px' ? length.value : undefined;
+export function dragLengthPx(length?: BoxLength | string): number | undefined {
+  return typeof length === 'object' && length.mode === 'px' ? length.value : undefined;
 }
 
-function pxBoxLength(value?: number): BoxLength | undefined {
+function pxBoxLength(value?: number | string): BoxLength | string | undefined {
+  if (typeof value === 'string') {
+    return value;
+  }
   return value == null ? undefined : { mode: 'px', value };
 }
 
@@ -214,9 +219,12 @@ export function styleBoxQuad(
   };
 }
 
-function keepOrPx(current: BoxLength | undefined, px: number | undefined): BoxLength | undefined {
-  if (px != null) {
+function keepOrPx(current: BoxLength | string | undefined, px: number | string | undefined): BoxLength | string | undefined {
+  if (typeof px === 'number') {
     return { mode: 'px', value: px };
+  }
+  if (typeof current === 'string') {
+    return current;
   }
   if (current?.mode === 'auto' || current?.mode === '%') {
     return current;
@@ -224,8 +232,8 @@ function keepOrPx(current: BoxLength | undefined, px: number | undefined): BoxLe
   return undefined;
 }
 
-export function isAutoLength(length?: BoxLength) {
-  return length?.mode === 'auto';
+export function isAutoLength(length?: BoxLength | string) {
+  return typeof length === 'object' && length.mode === 'auto';
 }
 
 export function edgeBoxLength(style: WidgetStyle | undefined, kind: BoxDragKind, edge: SpacingEdge) {
@@ -268,8 +276,8 @@ export function styleFromBoxQuad(
     });
   }
   if (kind === 'size') {
-    const width = quad.right ?? quad.left;
-    const height = quad.top ?? quad.bottom;
+    const width = typeof quad.right === 'number' ? quad.right : typeof quad.left === 'number' ? quad.left : undefined;
+    const height = typeof quad.top === 'number' ? quad.top : typeof quad.bottom === 'number' ? quad.bottom : undefined;
     return compactWidgetStyle({
       ...style,
       width: width != null ? compactSize({ mode: 'px', value: Math.max(0, width) }) : style?.width,
@@ -327,8 +335,8 @@ export function closeStyleToolbarPopups() {
 }
 
 export function liveWidgetCss(style: WidgetStyle | undefined) {
-  const px = (value: number | undefined) => (value != null ? `${value}px` : '');
-  const length = (value?: BoxLength) => (value ? boxLengthCss(value) : '');
+  const px = (value: number | string | undefined) => (typeof value === 'number' ? `${value}px` : value ?? '');
+  const length = (value?: BoxLength | string) => (typeof value === 'string' ? value : value ? boxLengthCss(value) : '');
   const positioned = Boolean(style?.position);
   return {
     paddingTop: length(style?.paddingTop),
@@ -357,8 +365,8 @@ export function liveWidgetCss(style: WidgetStyle | undefined) {
     borderTopRightRadius: px(style?.radiusTopRight),
     borderBottomRightRadius: px(style?.radiusBottomRight),
     borderBottomLeftRadius: px(style?.radiusBottomLeft),
-    width: style?.width?.mode === 'px' ? `${style.width.value}px` : style?.width?.mode === '%' ? `${style.width.value}%` : '',
-    height: style?.height?.mode === 'px' ? `${style.height.value}px` : style?.height?.mode === '%' ? `${style.height.value}%` : '',
+    width: typeof style?.width === 'string' ? style.width : style?.width?.mode === 'px' ? `${style.width.value}px` : style?.width?.mode === '%' ? `${style.width.value}%` : '',
+    height: typeof style?.height === 'string' ? style.height : style?.height?.mode === 'px' ? `${style.height.value}px` : style?.height?.mode === '%' ? `${style.height.value}%` : '',
     position: style?.position ?? '',
     top: positioned ? length(style?.top) : '',
     right: positioned ? length(style?.right) : '',
@@ -366,9 +374,9 @@ export function liveWidgetCss(style: WidgetStyle | undefined) {
     left: positioned ? length(style?.left) : '',
     zIndex: positioned && style?.zIndex != null ? String(style.zIndex) : '',
     transform: [
-      style?.rotateX ? `rotateX(${angleCss(style.rotateX)})` : '',
-      style?.rotateY ? `rotateY(${angleCss(style.rotateY)})` : '',
-      style?.rotateZ ? `rotateZ(${angleCss(style.rotateZ)})` : '',
+      style?.rotateX ? `rotateX(${typeof style.rotateX === 'string' ? style.rotateX : angleCss(style.rotateX)})` : '',
+      style?.rotateY ? `rotateY(${typeof style.rotateY === 'string' ? style.rotateY : angleCss(style.rotateY)})` : '',
+      style?.rotateZ ? `rotateZ(${typeof style.rotateZ === 'string' ? style.rotateZ : angleCss(style.rotateZ)})` : '',
     ]
       .filter(Boolean)
       .join(' '),

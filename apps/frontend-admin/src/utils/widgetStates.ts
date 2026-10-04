@@ -21,7 +21,7 @@ export type VisibleWidgetState = {
   name: string | null;
   owned: boolean;
   ownerId: string;
-  transition?: number;
+  transition?: number | string;
   scopeId?: string | null;
   scopeOwnerId?: string | null;
   children?: VisibleWidgetState[];
@@ -31,8 +31,8 @@ function flattenStateTree(nodes: VisibleWidgetState[]): VisibleWidgetState[] {
   return nodes.flatMap((node) => [node, ...flattenStateTree(node.children ?? [])]);
 }
 
-function ancestorOwnedStates(widget: PageWidget): Array<{ id: string; name: string; transition?: number }> {
-  const rows: Array<{ id: string; name: string; transition?: number }> = [];
+function ancestorOwnedStates(widget: PageWidget): Array<{ id: string; name: string; transition?: number | string }> {
+  const rows: Array<{ id: string; name: string; transition?: number | string }> = [];
   const seen = new Set<string>();
   for (const state of widget.states ?? []) {
     if (seen.has(state.id)) {
@@ -263,6 +263,12 @@ function applyPropsToWidget(widget: PageWidget, props: WidgetContentProps | unde
   }
   if (widget.type === 'button') {
     return props.text != null ? { ...widget, text: props.text } : widget;
+  }
+  if (widget.type === 'checkbox') {
+    return props.text != null ? { ...widget, text: props.text } : widget;
+  }
+  if (widget.type === 'input') {
+    return props.value != null ? { ...widget, value: props.value } : widget;
   }
   if (widget.type === 'image') {
     return props.src != null ? { ...widget, src: props.src } : widget;
@@ -818,7 +824,7 @@ function desiredPropsAfterPatch(
     }
   }
   if (patch.size != null) {
-    if (patch.size > 0) {
+    if (typeof patch.size === 'number' && patch.size > 0) {
       next.size = patch.size;
     } else {
       delete next.size;
@@ -836,14 +842,19 @@ export function patchResolvedWidget(
   if ('loop' in patch) {
     baseContent.loop = patch.loop;
   }
+  if ('events' in patch) {
+    baseContent.events = patch.events;
+  }
   if ('stateFn' in patch) {
     baseContent.stateFn = patch.stateFn;
   }
   if ('hoverStateId' in patch) {
     baseContent.hoverStateId = patch.hoverStateId;
   }
+  const contentPatch: WidgetPatch =
+    widget.type === 'checkbox' || widget.type === 'switch' ? { ...patch, value: undefined } : patch;
   const hasPropPatch =
-    patch.value != null || patch.text != null || patch.src != null || patch.size != null;
+    contentPatch.value != null || contentPatch.text != null || contentPatch.src != null || contentPatch.size != null;
   const hasVisual = 'style' in patch || 'flex' in patch || 'item' in patch || 'swiper' in patch;
   if ('freezeHeader' in patch) {
     baseContent.freezeHeader = patch.freezeHeader;
@@ -868,6 +879,24 @@ export function patchResolvedWidget(
   }
   if ('valign' in patch) {
     baseContent.valign = patch.valign;
+  }
+  if ('inputType' in patch) {
+    baseContent.inputType = patch.inputType;
+  }
+  if ('modelValue' in patch) {
+    baseContent.modelValue = patch.modelValue;
+  }
+  if ('selected' in patch) {
+    baseContent.selected = patch.selected;
+  }
+  if ((widget.type === 'checkbox' || widget.type === 'switch') && patch.value != null) {
+    baseContent.value = patch.value;
+  }
+  if ('placeholder' in patch) {
+    baseContent.placeholder = patch.placeholder;
+  }
+  if ('checked' in patch) {
+    baseContent.checked = patch.checked;
   }
 
   if (layers.length === 0) {
@@ -907,7 +936,7 @@ export function patchResolvedWidget(
   const resolved = resolveWidgetStateStack(next, layers);
   const lastLayer = layers[layers.length - 1];
   const desired: WidgetStateFields = {
-    props: hasPropPatch ? desiredPropsAfterPatch(resolved.props, patch) : resolved.props,
+    props: hasPropPatch ? desiredPropsAfterPatch(resolved.props, contentPatch) : resolved.props,
     style: 'style' in patch ? patch.style : resolved.style,
     flex: 'flex' in patch ? patch.flex : resolved.flex,
     item: 'item' in patch ? patch.item : resolved.item,
@@ -998,6 +1027,7 @@ export function patchWidgetInState(
       ...(patch.src != null ? { src: patch.src } : {}),
       ...(patch.size != null ? { size: patch.size } : {}),
       ...('loop' in patch ? { loop: patch.loop } : {}),
+      ...('events' in patch ? { events: patch.events } : {}),
       ...('stateFn' in patch ? { stateFn: patch.stateFn } : {}),
       ...('style' in patch ? { style: patch.style } : {}),
       ...('flex' in patch ? { flex: patch.flex } : {}),
@@ -1010,6 +1040,9 @@ export function patchWidgetInState(
   const baseContent: WidgetPatch = {};
   if ('loop' in patch) {
     baseContent.loop = patch.loop;
+  }
+  if ('events' in patch) {
+    baseContent.events = patch.events;
   }
   if ('stateFn' in patch) {
     baseContent.stateFn = patch.stateFn;

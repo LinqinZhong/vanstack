@@ -17,7 +17,7 @@ export function renderImage(
       'data-state': widgetStateAttr(widget, ctx),
       style: mergeCss(
         dynamicStyleCss(widget.style, widgetCssOptions(ctx)),
-        flexItemCss(widget.item),
+        flexItemCss(widget.item, widgetCssOptions(ctx)),
         { overflow: 'hidden' },
         hiddenCss(widget.hidden, ctx.editing),
       ),

@@ -2,8 +2,10 @@ import { ExpandOutlined, GlobalOutlined, SettingOutlined, ZoomInOutlined, ZoomOu
 import { Button, Card, ConfigProvider, Empty, Segmented, Select, Spin, Tooltip, Typography, theme } from 'antd';
 import { type Dispatch, type MouseEvent, type PointerEvent, type RefObject, type SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { PageI18n, PageVariable, PageWidget } from '@vanstack/xml';
+import type { PageI18n, PageVariable, PageWidget, WidgetEvents } from '@vanstack/xml';
+import { PAGE_EVENT_SPECS } from '@vanstack/xml';
 import { PageDataPanel } from '../../../components/PageDataPanel';
+import { WidgetEventPanel } from '../../../components/WidgetEventPanel';
 import {
   WidgetStyleBubble,
   type BoxGroup,
@@ -64,6 +66,9 @@ type CanvasWorkspaceProps = {
   rangeWidget: PageWidget | null;
   selectedOwnKeys: Set<string> | null | undefined;
   pageData: PageVariable[];
+  pageEvents: WidgetEvents | undefined;
+  commitPageEvents: (next: WidgetEvents | undefined) => void;
+  pageScopeId: string;
   readOnly: boolean;
   openBoxGroup: BoxGroup | null;
   handleOpenBoxGroupChange: (group: BoxGroup | null) => void;
@@ -130,6 +135,9 @@ export function CanvasWorkspace({
   rangeWidget,
   selectedOwnKeys,
   pageData,
+  pageEvents,
+  commitPageEvents,
+  pageScopeId,
   readOnly,
   openBoxGroup,
   handleOpenBoxGroupChange,
@@ -183,19 +191,40 @@ export function CanvasWorkspace({
         }
       }}
       tabBarExtraContent={
-        <Select
-          size="small"
-          className="canvas-locale-select"
-          placeholder={t('lowcode.i18nLibrary')}
-          suffixIcon={<GlobalOutlined />}
-          value={previewLocale ?? undefined}
-          options={(pageI18n?.langs ?? []).map((lang) => ({
-            value: lang.key,
-            label: lang.name || lang.key,
-          }))}
-          onChange={(value: string) => setPreviewLocale(value)}
-          disabled={(pageI18n?.langs ?? []).length === 0}
-        />
+        <div className="canvas-head-extra">
+          <Segmented
+            size="small"
+            value={mode}
+            onChange={(value) => {
+              const next = value as CanvasMode;
+              if (next === modeRef.current) {
+                return;
+              }
+              // 先盖上 settling，等页面把相机和预览同步完再揭开，避免切换瞬间闪一帧旧布局。
+              settleGenRef.current += 1;
+              canvasSettlingRef.current = true;
+              setCanvasSettling(true);
+              setMode(next);
+            }}
+            options={[
+              { label: t('lowcode.modeEdit'), value: 'edit' },
+              { label: t('lowcode.modePreview'), value: 'preview' },
+            ]}
+          />
+          <Select
+            size="small"
+            className="canvas-locale-select"
+            placeholder={t('lowcode.i18nLibrary')}
+            suffixIcon={<GlobalOutlined />}
+            value={previewLocale ?? undefined}
+            options={(pageI18n?.langs ?? []).map((lang) => ({
+              value: lang.key,
+              label: lang.name || lang.key,
+            }))}
+            onChange={(value: string) => setPreviewLocale(value)}
+            disabled={(pageI18n?.langs ?? []).length === 0}
+          />
+        </div>
       }
     >
       <div className="canvas-card-body">
@@ -313,16 +342,21 @@ export function CanvasWorkspace({
                     onTextChange={
                       bubbleWidget.type === 'text' ||
                       bubbleWidget.type === 'button' ||
+                      bubbleWidget.type === 'checkbox' ||
+                      (bubbleWidget.type === 'input' && !bubbleWidget.modelValue?.trim()) ||
                       ((bubbleWidget.type === 'th' || bubbleWidget.type === 'td') && !rangeWidget)
                         ? (text) =>
                             updateWidget(
                               bubbleWidget.id,
-                              bubbleWidget.type === 'button' ? { text } : { value: text },
-                              `edit:${bubbleWidget.id}:${bubbleWidget.type === 'button' ? 'text' : 'value'}`,
+                              bubbleWidget.type === 'button' || bubbleWidget.type === 'checkbox' ? { text } : { value: text },
+                              `edit:${bubbleWidget.id}:${bubbleWidget.type === 'button' || bubbleWidget.type === 'checkbox' ? 'text' : 'value'}`,
                             )
                         : undefined
                     }
                     onLoopChange={(loop) => updateWidget(bubbleWidget.id, { loop }, `loop:${bubbleWidget.id}`)}
+                    onEventsChange={(events) =>
+                      updateWidget(bubbleWidget.id, { events }, `events:${bubbleWidget.id}`)
+                    }
                     onStateFnChange={(stateFn, hoverStateId) =>
                       updateWidget(bubbleWidget.id, { stateFn, hoverStateId }, `stateFn:${bubbleWidget.id}`)
                     }
@@ -469,25 +503,6 @@ export function CanvasWorkspace({
             >
               {t('lowcode.canvasReset')}
             </Button>
-            <Segmented
-              size="small"
-              value={mode}
-              onChange={(value) => {
-                const next = value as CanvasMode;
-                if (next === modeRef.current) {
-                  return;
-                }
-                // 先盖上 settling，等页面把相机和预览同步完再揭开，避免切换瞬间闪一帧旧布局。
-                settleGenRef.current += 1;
-                canvasSettlingRef.current = true;
-                setCanvasSettling(true);
-                setMode(next);
-              }}
-              options={[
-                { label: t('lowcode.modeEdit'), value: 'edit' },
-                { label: t('lowcode.modePreview'), value: 'preview' },
-              ]}
-            />
           </div>
         </div>
         {centerTab === 'data' ? (
@@ -501,7 +516,19 @@ export function CanvasWorkspace({
         ) : null}
         {centerTab === 'events' ? (
           <div className="page-events-panel">
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('lowcode.eventsEmpty')} />
+            <WidgetEventPanel
+              specs={PAGE_EVENT_SPECS}
+              events={pageEvents}
+              scopeKey={pageScopeId}
+              projectId={projectId}
+              disabled={readOnly}
+              onChange={commitPageEvents}
+            />
+            {pageEvents ? null : (
+              <div className="page-events-empty">
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('lowcode.eventsEmpty')} />
+              </div>
+            )}
           </div>
         ) : null}
       </div>

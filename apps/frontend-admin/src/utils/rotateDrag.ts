@@ -8,10 +8,14 @@ import {
 export type RotateAxis = 'x' | 'y' | 'z';
 export const ROTATE_AXES: RotateAxis[] = ['x', 'y', 'z'];
 export type RotateTriple = {
-  x?: AngleValue;
-  y?: AngleValue;
-  z?: AngleValue;
+  x?: AngleValue | string;
+  y?: AngleValue | string;
+  z?: AngleValue | string;
 };
+
+function angleOf(value?: AngleValue | string): AngleValue | undefined {
+  return value && typeof value === 'object' ? value : undefined;
+}
 
 const DIGIT_AXES: Record<string, RotateAxis> = {
   '1': 'z',
@@ -126,7 +130,7 @@ function degDeltaInUnit(deltaDeg: number, unit: AngleUnit): number {
   return convertAngle({ value: deltaDeg, unit: 'deg' }, unit).value;
 }
 
-export function styleRotateTriple(style?: { rotateX?: AngleValue; rotateY?: AngleValue; rotateZ?: AngleValue }): RotateTriple {
+export function styleRotateTriple(style?: { rotateX?: AngleValue | string; rotateY?: AngleValue | string; rotateZ?: AngleValue | string }): RotateTriple {
   return {
     x: style?.rotateX,
     y: style?.rotateY,
@@ -134,7 +138,7 @@ export function styleRotateTriple(style?: { rotateX?: AngleValue; rotateY?: Angl
   };
 }
 
-export function writeRotateStyle<T extends { rotateX?: AngleValue; rotateY?: AngleValue; rotateZ?: AngleValue }>(
+export function writeRotateStyle<T extends { rotateX?: AngleValue | string; rotateY?: AngleValue | string; rotateZ?: AngleValue | string }>(
   style: T | undefined,
   triple: RotateTriple,
 ): T {
@@ -146,8 +150,8 @@ export function writeRotateStyle<T extends { rotateX?: AngleValue; rotateY?: Ang
   };
 }
 
-function applyAxisValue(start: AngleValue | undefined, nextValue: number, snap: boolean): AngleValue | undefined {
-  const unit = start?.unit ?? 'deg';
+function applyAxisValue(start: AngleValue | string | undefined, nextValue: number, snap: boolean): AngleValue | string | undefined {
+  const unit = angleOf(start)?.unit ?? 'deg';
   let next: AngleValue = { value: nextValue, unit };
   if (snap) {
     next = snapTo15Deg(next);
@@ -160,7 +164,7 @@ function applyAxisValue(start: AngleValue | undefined, nextValue: number, snap: 
 export function applyRotateNudge(start: RotateTriple, axes: RotateAxis[], direction: 1 | -1, repeat = false): RotateTriple {
   const next = { ...start };
   for (const axis of axes) {
-    const current = start[axis];
+    const current = angleOf(start[axis]);
     const unit = current?.unit ?? 'deg';
     const step = rotateStep(unit, repeat) * direction;
     next[axis] = applyAxisValue(current, (current?.value ?? 0) + step, false);
@@ -171,7 +175,7 @@ export function applyRotateNudge(start: RotateTriple, axes: RotateAxis[], direct
 export function applyRotateValue(start: RotateTriple, axes: RotateAxis[], value: number): RotateTriple {
   const next = { ...start };
   for (const axis of axes) {
-    const unit = start[axis]?.unit ?? 'deg';
+    const unit = angleOf(start[axis])?.unit ?? 'deg';
     next[axis] = compactAngle({ value: rotateQuantize(value, unit), unit });
   }
   return next;
@@ -185,8 +189,9 @@ export function applyRotateDrag(input: {
   angleDeltaDeg?: number;
   snap?: boolean;
 }): RotateTriple {
-  const unit = input.start[input.axis]?.unit ?? 'deg';
-  const from = input.start[input.axis]?.value ?? 0;
+  const current = angleOf(input.start[input.axis]);
+  const unit = current?.unit ?? 'deg';
+  const from = current?.value ?? 0;
   let delta: number;
   if (input.axis === 'z') {
     delta = degDeltaInUnit(input.angleDeltaDeg ?? 0, unit);

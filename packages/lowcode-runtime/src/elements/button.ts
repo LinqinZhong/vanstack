@@ -18,7 +18,7 @@ export function renderButton(
       'data-state': widgetStateAttr(widget, ctx),
       style: mergeCss(
         dynamicStyleCss(widget.style, widgetCssOptions(ctx)),
-        flexItemCss(widget.item),
+        flexItemCss(widget.item, widgetCssOptions(ctx)),
         hiddenCss(widget.hidden, ctx.editing),
       ),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,

@@ -1,5 +1,5 @@
-import { EditOutlined } from '@ant-design/icons';
-import { Button, Input, Modal, Tabs, Tooltip, type InputRef } from 'antd';
+import { DisconnectOutlined, EditOutlined, LinkOutlined } from '@ant-design/icons';
+import { Button, Empty, Input, Modal, Popover, Select, Tabs, Tooltip, type InputRef } from 'antd';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -10,7 +10,9 @@ import {
   FLEX_DISPLAYS,
   FLEX_JUSTIFY_CONTENTS,
   FLEX_WRAPS,
+  INPUT_TYPES,
   OVERFLOW_MODES,
+  inputModelDataType,
   SWIPER_EASINGS,
   compactFlexContainer,
   compactFlexItem,
@@ -39,6 +41,7 @@ import {
   type FlexJustifyContent,
   type FlexWrap,
   type PageStyle,
+  type PageVariable,
   type PageWidget,
   type PageI18n,
   type SizeValue,
@@ -52,35 +55,114 @@ import { IconPicker } from './IconLibraryPanel';
 import { CopyI18nPicker } from './CopyI18nPicker';
 
 type BoxQuad = {
-  top?: number;
-  right?: number;
-  bottom?: number;
-  left?: number;
+  top?: number | string;
+  right?: number | string;
+  bottom?: number | string;
+  left?: number | string;
 };
 
 type InspectorProp = {
   key: string;
   value: string;
   onChange: (raw: string) => boolean;
-  picker?: 'image' | 'icon';
+  picker?: 'image' | 'icon' | 'model';
+  options?: { value: string; label: string }[];
+  bind?: {
+    name: string;
+    options: { value: string; label: string }[];
+    onChange: (name: string) => void;
+  };
+  skipTextTools?: boolean;
+  disabled?: boolean;
   category?: 'basic' | 'style';
   inherited?: boolean;
   placeholder?: string;
   suffix?: string;
 };
 
+function ModelBindButton({
+  disabled,
+  name,
+  options,
+  onChange,
+}: {
+  disabled?: boolean;
+  name: string;
+  options: { value: string; label: string }[];
+  onChange: (name: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  if (name) {
+    return (
+      <Tooltip title={t('lowcode.modelValueUnbind')}>
+        <Button
+          size="small"
+          type="text"
+          className="inspector-prop-edit"
+          disabled={disabled}
+          icon={<DisconnectOutlined />}
+          onClick={() => onChange('')}
+        />
+      </Tooltip>
+    );
+  }
+  const content = options.length ? (
+    <div className="copy-i18n-picker">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          className="copy-i18n-picker-item"
+          onClick={() => {
+            onChange(option.value);
+            setOpen(false);
+          }}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  ) : (
+    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('lowcode.dataEmpty')} />
+  );
+  return (
+    <Popover trigger="click" open={open && !disabled} onOpenChange={setOpen} content={content} destroyOnHidden>
+      <Tooltip title={t('lowcode.modelValuePick')}>
+        <Button
+          size="small"
+          type="text"
+          className="inspector-prop-edit"
+          disabled={disabled}
+          icon={<LinkOutlined />}
+        />
+      </Tooltip>
+    </Popover>
+  );
+}
+
 type LengthQuad = {
-  top?: BoxLength;
-  right?: BoxLength;
-  bottom?: BoxLength;
-  left?: BoxLength;
+  top?: BoxLength | string;
+  right?: BoxLength | string;
+  bottom?: BoxLength | string;
+  left?: BoxLength | string;
 };
 
-function formatLength(value?: BoxLength) {
+function formatLength(value?: BoxLength | string) {
+  if (typeof value === 'string') {
+    return value;
+  }
   return value ? formatBoxLength(value) : '';
 }
 
-function parseRotateInput(raw: string): AngleValue | undefined | false {
+function sameLength(a?: BoxLength | string, b?: BoxLength | string) {
+  if (typeof a === 'string' || typeof b === 'string') {
+    return a === b;
+  }
+  return boxLengthsEqual(a, b);
+}
+
+function parseRotateInput(raw: string): AngleValue | string | undefined | false {
   const trimmed = raw.trim();
   if (!trimmed) {
     return undefined;
@@ -95,10 +177,13 @@ function parseRotateInput(raw: string): AngleValue | undefined | false {
   return false;
 }
 
-function parseLength(raw: string, kind: 'margin' | 'padding' | 'inset'): BoxLength | undefined | false {
+function parseLength(raw: string, kind: 'margin' | 'padding' | 'inset'): BoxLength | string | undefined | false {
   const trimmed = raw.trim();
   if (!trimmed) {
     return undefined;
+  }
+  if (isCopyBinding(trimmed)) {
+    return trimmed;
   }
   const parsed = parseBoxLength(trimmed, {
     allowAuto: kind === 'margin',
@@ -118,13 +203,13 @@ function formatLengthBox(values: LengthQuad) {
   if (top == null || right == null || bottom == null || left == null) {
     return '';
   }
-  if (boxLengthsEqual(top, right) && boxLengthsEqual(right, bottom) && boxLengthsEqual(bottom, left)) {
+  if (sameLength(top, right) && sameLength(right, bottom) && sameLength(bottom, left)) {
     return formatLength(top);
   }
-  if (boxLengthsEqual(top, bottom) && boxLengthsEqual(left, right)) {
+  if (sameLength(top, bottom) && sameLength(left, right)) {
     return `${formatLength(top)} ${formatLength(right)}`;
   }
-  if (boxLengthsEqual(left, right)) {
+  if (sameLength(left, right)) {
     return `${formatLength(top)} ${formatLength(right)} ${formatLength(bottom)}`;
   }
   return `${formatLength(top)} ${formatLength(right)} ${formatLength(bottom)} ${formatLength(left)}`;
@@ -134,6 +219,9 @@ function parseLengthBox(raw: string, kind: 'margin' | 'padding' | 'inset'): Leng
   const trimmed = raw.trim();
   if (!trimmed) {
     return { top: undefined, right: undefined, bottom: undefined, left: undefined };
+  }
+  if (isCopyBinding(trimmed)) {
+    return { top: trimmed, right: trimmed, bottom: trimmed, left: trimmed };
   }
   const parts = trimmed.split(/\s+/).map((part) => parseLength(part, kind));
   if (parts.length === 0 || parts.length > 4 || parts.some((part) => part === false)) {
@@ -152,7 +240,10 @@ function parseLengthBox(raw: string, kind: 'margin' | 'padding' | 'inset'): Leng
   return { top: lens[0], right: lens[1], bottom: lens[2], left: lens[3] };
 }
 
-function formatPx(value?: number) {
+function formatPx(value?: number | string) {
+  if (typeof value === 'string') {
+    return value;
+  }
   return value == null ? '' : `${value}px`;
 }
 
@@ -198,9 +289,9 @@ function parseFontFamily(raw: string): string | undefined | false {
   return trimmed;
 }
 
-function parseFontSize(raw: string): number | undefined | false {
+function parseFontSize(raw: string): number | string | undefined | false {
   const parsed = parsePx(raw);
-  if (parsed === false || parsed === undefined) {
+  if (typeof parsed === 'string' || parsed === false || parsed === undefined) {
     return parsed;
   }
   return parsed > 0 ? parsed : false;
@@ -220,10 +311,13 @@ function parseCssShadow(raw: string, property: 'text-shadow' | 'box-shadow'): st
   return trimmed;
 }
 
-function parsePx(raw: string): number | undefined | false {
+function parsePx(raw: string): number | string | undefined | false {
   const trimmed = raw.trim();
   if (!trimmed) {
     return undefined;
+  }
+  if (isCopyBinding(trimmed)) {
+    return trimmed;
   }
   const match = trimmed.match(/^(-?\d+(?:\.\d+)?)(?:px)?$/i);
   if (!match) {
@@ -257,6 +351,9 @@ function parseBox(raw: string): BoxQuad | false {
   if (!trimmed) {
     return { top: undefined, right: undefined, bottom: undefined, left: undefined };
   }
+  if (isCopyBinding(trimmed)) {
+    return { top: trimmed, right: trimmed, bottom: trimmed, left: trimmed };
+  }
   const parts = trimmed.split(/\s+/).map((part) => parsePx(part));
   if (parts.length === 0 || parts.length > 4 || parts.some((part) => part === false)) {
     return false;
@@ -274,14 +371,20 @@ function parseBox(raw: string): BoxQuad | false {
   return { top: nums[0], right: nums[1], bottom: nums[2], left: nums[3] };
 }
 
-function formatSize(size?: SizeValue) {
+function formatSize(size?: SizeValue | string) {
+  if (typeof size === 'string') {
+    return size;
+  }
   return size ? `${size.value}${size.mode}` : '';
 }
 
-function parseSize(raw: string): SizeValue | undefined | false {
+function parseSize(raw: string): SizeValue | string | undefined | false {
   const trimmed = raw.trim();
   if (!trimmed || trimmed === 'fit-content') {
     return undefined;
+  }
+  if (isCopyBinding(trimmed)) {
+    return trimmed;
   }
   const match = trimmed.match(/^(\d+(?:\.\d+)?)(px|%)?$/i);
   if (!match) {
@@ -291,28 +394,38 @@ function parseSize(raw: string): SizeValue | undefined | false {
   return compactSize({ mode, value: Number(match[1]) }) ?? undefined;
 }
 
-function formatBool(value?: boolean) {
+function formatBool(value?: boolean | string) {
+  if (typeof value === 'string') {
+    return value;
+  }
   return value ? 'true' : '';
 }
 
-function parseBool(raw: string): boolean | undefined | false {
-  const trimmed = raw.trim().toLowerCase();
+function parseBool(raw: string): boolean | string | undefined | false {
+  const trimmed = raw.trim();
   if (!trimmed) {
     return undefined;
   }
-  if (trimmed === 'true' || trimmed === '1' || trimmed === 'yes') {
+  if (isCopyBinding(trimmed)) {
+    return trimmed;
+  }
+  const token = trimmed.toLowerCase();
+  if (token === 'true' || token === '1' || token === 'yes') {
     return true;
   }
-  if (trimmed === 'false' || trimmed === '0' || trimmed === 'no') {
+  if (token === 'false' || token === '0' || token === 'no') {
     return false;
   }
   return false;
 }
 
-function parseEnum<T extends string>(raw: string, values: readonly T[]): T | undefined | false {
+function parseEnum<T extends string>(raw: string, values: readonly T[]): T | string | undefined | false {
   const trimmed = raw.trim();
   if (!trimmed) {
     return undefined;
+  }
+  if (isCopyBinding(trimmed)) {
+    return trimmed;
   }
   return (values as readonly string[]).includes(trimmed) ? (trimmed as T) : false;
 }
@@ -328,10 +441,13 @@ function parseBorderStyle(raw: string): string | undefined | false {
   return parseEnum(raw, ['solid', 'dashed', 'dotted'] as const);
 }
 
-function parseNumber(raw: string, min?: number): number | undefined | false {
+function parseNumber(raw: string, min?: number): number | string | undefined | false {
   const trimmed = raw.trim();
   if (!trimmed) {
     return undefined;
+  }
+  if (isCopyBinding(trimmed)) {
+    return trimmed;
   }
   if (!/^-?\d+(?:\.\d+)?$/.test(trimmed)) {
     return false;
@@ -344,16 +460,28 @@ function parseNumber(raw: string, min?: number): number | undefined | false {
 }
 
 function formatTextDecoration(style?: WidgetStyle) {
+  if (typeof style?.underline === 'string' || typeof style?.lineThrough === 'string') {
+    if (style.underline === style.lineThrough && typeof style.underline === 'string') {
+      return style.underline;
+    }
+    return [typeof style.underline === 'string' ? style.underline : '', typeof style.lineThrough === 'string' ? style.lineThrough : '']
+      .filter(Boolean)
+      .join(' ');
+  }
   const parts = [style?.underline ? 'underline' : '', style?.lineThrough ? 'line-through' : ''].filter(Boolean);
   return parts.join(' ');
 }
 
-function parseTextDecoration(raw: string): { underline?: boolean; lineThrough?: boolean } | false {
-  const trimmed = raw.trim().toLowerCase();
-  if (!trimmed || trimmed === 'none') {
+function parseTextDecoration(raw: string): { underline?: boolean | string; lineThrough?: boolean | string } | false {
+  const trimmed = raw.trim();
+  if (isCopyBinding(trimmed)) {
+    return { underline: trimmed, lineThrough: trimmed };
+  }
+  const token = trimmed.toLowerCase();
+  if (!token || token === 'none') {
     return { underline: undefined, lineThrough: undefined };
   }
-  const parts = trimmed.split(/\s+/);
+  const parts = token.split(/\s+/);
   let underline: boolean | undefined;
   let lineThrough: boolean | undefined;
   for (const part of parts) {
@@ -370,16 +498,23 @@ function parseTextDecoration(raw: string): { underline?: boolean; lineThrough?: 
   return { underline, lineThrough };
 }
 
-function formatFontStyle(italic?: boolean) {
+function formatFontStyle(italic?: boolean | string) {
+  if (typeof italic === 'string') {
+    return italic;
+  }
   return italic ? 'italic' : '';
 }
 
-function parseFontStyle(raw: string): boolean | undefined | false {
-  const trimmed = raw.trim().toLowerCase();
-  if (!trimmed || trimmed === 'normal') {
+function parseFontStyle(raw: string): boolean | string | undefined | false {
+  const trimmed = raw.trim();
+  if (isCopyBinding(trimmed)) {
+    return trimmed;
+  }
+  const token = trimmed.toLowerCase();
+  if (!token || token === 'normal') {
     return undefined;
   }
-  if (trimmed === 'italic') {
+  if (token === 'italic') {
     return true;
   }
   return false;
@@ -396,6 +531,9 @@ function parseFlexBasis(raw: string): FlexItemStyle['flexBasis'] | false {
   const trimmed = raw.trim();
   if (!trimmed) {
     return undefined;
+  }
+  if (isCopyBinding(trimmed)) {
+    return trimmed;
   }
   if (trimmed === 'auto') {
     return 'auto';
@@ -555,20 +693,40 @@ function PropertyGrid({
     >
       <span className="inspector-prop-label">{item.key}</span>
       <div className="inspector-prop-value">
-        <PropertyInput
-          propKey={item.key}
-          disabled={disabled}
-          value={item.value}
-          onChange={item.onChange}
-          onInvalidChange={reportInvalid}
-          placeholder={item.placeholder}
-          suffix={item.suffix}
-        />
-        {item.key === 'value' || item.key === 'text' ? (
+        {item.picker === 'model' ? (
+          <Select
+            size="small"
+            allowClear
+            disabled={disabled || item.disabled}
+            value={item.value || undefined}
+            placeholder={item.placeholder}
+            options={item.options}
+            onChange={(value) => item.onChange(value ?? '')}
+          />
+        ) : (
+          <PropertyInput
+            propKey={item.key}
+            disabled={disabled || item.disabled}
+            value={item.value}
+            onChange={item.onChange}
+            onInvalidChange={reportInvalid}
+            placeholder={item.placeholder}
+            suffix={item.suffix}
+          />
+        )}
+        {item.bind ? (
+          <ModelBindButton
+            disabled={disabled}
+            name={item.bind.name}
+            options={item.bind.options}
+            onChange={item.bind.onChange}
+          />
+        ) : null}
+        {(item.key === 'value' || item.key === 'text' || item.key === 'placeholder') && !item.skipTextTools ? (
           <>
             <CopyI18nPicker
               catalog={i18nCatalog}
-              disabled={disabled}
+              disabled={disabled || item.disabled}
               onPick={(expression) => item.onChange(expression)}
             />
             <Tooltip title={t('lowcode.propEdit')}>
@@ -576,7 +734,7 @@ function PropertyGrid({
                 size="small"
                 type="text"
                 className="inspector-prop-edit"
-                disabled={disabled}
+                disabled={disabled || item.disabled}
                 icon={<EditOutlined />}
                 onClick={() => {
                   setEditing(item);
@@ -591,14 +749,14 @@ function PropertyGrid({
             {projectId && item.picker === 'image' ? (
               <AssetImagePicker
                 projectId={projectId}
-                disabled={disabled}
+                disabled={disabled || item.disabled}
                 onPick={(url) => item.onChange(url)}
               />
             ) : null}
             {projectId && item.picker === 'icon' ? (
               <IconPicker
                 projectId={projectId}
-                disabled={disabled}
+                disabled={disabled || item.disabled}
                 onPick={(url) => item.onChange(url)}
               />
             ) : null}
@@ -607,7 +765,7 @@ function PropertyGrid({
                 size="small"
                 type="text"
                 className="inspector-prop-edit"
-                disabled={disabled}
+                disabled={disabled || item.disabled}
                 icon={<EditOutlined />}
                 onClick={() => {
                   setEditing(item);
@@ -683,11 +841,11 @@ function PropertyGrid({
           disabled={disabled}
           onChange={(event) => setEditorDraft(event.target.value)}
         />
-        {editing?.key === 'value' || editing?.key === 'text' ? (
+        {editing?.key === 'value' || editing?.key === 'text' || editing?.key === 'placeholder' ? (
           <div className="inspector-text-modal-i18n">
             <CopyI18nPicker
               catalog={i18nCatalog}
-              disabled={disabled}
+              disabled={disabled || editing?.disabled}
               onPick={(expression) => setEditorDraft(expression)}
             />
           </div>
@@ -696,7 +854,7 @@ function PropertyGrid({
           <div className="inspector-text-modal-i18n">
             <AssetImagePicker
               projectId={projectId}
-              disabled={disabled}
+              disabled={disabled || editing?.disabled}
               onPick={(url) => {
                 setEditorDraft(url);
                 editing.onChange(url);
@@ -709,7 +867,7 @@ function PropertyGrid({
           <div className="inspector-text-modal-i18n">
             <IconPicker
               projectId={projectId}
-              disabled={disabled}
+              disabled={disabled || editing?.disabled}
               onPick={(url) => {
                 setEditorDraft(url);
                 editing.onChange(url);
@@ -732,6 +890,7 @@ export function WidgetPropertyInspector({
   i18nCatalog,
   projectId,
   ownKeys,
+  variables,
 }: {
   widget: PageWidget;
   parentType?: PageWidget['type'];
@@ -741,7 +900,9 @@ export function WidgetPropertyInspector({
   i18nCatalog?: PageI18n;
   projectId?: string;
   ownKeys?: Set<string>;
+  variables?: PageVariable[];
 }) {
+  const { t } = useTranslation();
   const style = widget.style ?? {};
   const flex = widget.type === 'flex' ? (widget.flex ?? {}) : undefined;
   const swiper = widget.type === 'swiper' ? (widget.swiper ?? {}) : undefined;
@@ -772,9 +933,9 @@ export function WidgetPropertyInspector({
 
   function lengthProp(
     key: string,
-    value: BoxLength | undefined,
+    value: BoxLength | string | undefined,
     kind: 'margin' | 'padding' | 'inset',
-    write: (next?: BoxLength) => void,
+    write: (next?: BoxLength | string) => void,
   ): InspectorProp {
     return {
       key,
@@ -796,7 +957,7 @@ export function WidgetPropertyInspector({
     };
   }
 
-  function pxProp(key: string, value: number | undefined, write: (next?: number) => void): InspectorProp {
+  function pxProp(key: string, value: number | string | undefined, write: (next?: number | string) => void): InspectorProp {
     return {
       key,
       value: formatPx(value),
@@ -853,6 +1014,10 @@ export function WidgetPropertyInspector({
           onPatch({ size: 0 }, `edit:${widget.id}:size`);
           return true;
         }
+        if (isCopyBinding(trimmed)) {
+          onPatch({ size: trimmed }, `edit:${widget.id}:size`);
+          return true;
+        }
         const num = Number(trimmed);
         if (!Number.isFinite(num) || num <= 0) {
           return false;
@@ -873,6 +1038,102 @@ export function WidgetPropertyInspector({
       },
     });
   }
+  if (widget.type === 'input') {
+    const modelBound = Boolean(widget.modelValue?.trim());
+    const modelOptions = (variables ?? [])
+      .filter((variable) => variable.type === inputModelDataType(widget.inputType))
+      .map((variable) => ({
+        value: variable.name,
+        label: variable.desc?.trim() ? `${variable.name} · ${variable.desc.trim()}` : variable.name,
+      }));
+    const boundName = widget.modelValue?.trim() ?? '';
+    items.push({
+      key: 'value',
+      value: modelBound ? boundName : widget.value,
+      category: 'basic',
+      disabled: modelBound,
+      bind: {
+        name: boundName,
+        options: modelOptions,
+        onChange: (name) => {
+          onPatch({ modelValue: name.trim() }, `edit:${widget.id}:modelValue`);
+        },
+      },
+      onChange: (raw) => {
+        if (modelBound) {
+          return true;
+        }
+        onPatch({ value: raw }, `edit:${widget.id}:value`);
+        return true;
+      },
+    });
+    items.push({
+      key: 'placeholder',
+      value: widget.placeholder ?? '',
+      category: 'basic',
+      onChange: (raw) => {
+        onPatch({ placeholder: raw }, `edit:${widget.id}:placeholder`);
+        return true;
+      },
+    });
+    items.push({
+      key: 'type',
+      value: widget.inputType && widget.inputType !== 'text' ? widget.inputType : '',
+      category: 'basic',
+      placeholder: 'text',
+      onChange: (raw) => {
+        const trimmed = raw.trim();
+        const inputType = !trimmed || trimmed === 'text' ? 'text' : parseEnum(trimmed, INPUT_TYPES);
+        if (inputType === false) {
+          return false;
+        }
+        const allowed = inputModelDataType(inputType);
+        const current = (variables ?? []).find((variable) => variable.name === widget.modelValue?.trim());
+        const modelValue = current && current.type === allowed ? current.name : '';
+        onPatch({ inputType, modelValue }, `edit:${widget.id}:type`);
+        return true;
+      },
+    });
+  }
+  if (widget.type === 'switch') {
+    const boundName = widget.modelValue?.trim() ?? '';
+    const modelBound = Boolean(boundName);
+    const modelOptions = (variables ?? [])
+      .filter((variable) => variable.type === 'bool')
+      .map((variable) => ({
+        value: variable.name,
+        label: variable.desc?.trim() ? `${variable.name} · ${variable.desc.trim()}` : variable.name,
+      }));
+    items.push({
+      key: 'value',
+      value: modelBound ? boundName : typeof widget.value === 'string' ? widget.value : widget.value ? 'true' : 'false',
+      category: 'basic',
+      disabled: modelBound,
+      skipTextTools: true,
+      bind: {
+        name: boundName,
+        options: modelOptions,
+        onChange: (name) => {
+          onPatch({ modelValue: name.trim() }, `edit:${widget.id}:modelValue`);
+        },
+      },
+      onChange: (raw) => {
+        if (modelBound) {
+          return true;
+        }
+        if (isCopyBinding(raw.trim())) {
+          onPatch({ value: raw.trim() }, `edit:${widget.id}:value`);
+          return true;
+        }
+        const trimmed = raw.trim().toLowerCase();
+        if (trimmed !== 'true' && trimmed !== 'false' && trimmed !== '1' && trimmed !== '0' && trimmed !== '') {
+          return false;
+        }
+        onPatch({ value: trimmed === 'true' || trimmed === '1' ? 'true' : 'false' }, `edit:${widget.id}:value`);
+        return true;
+      },
+    });
+  }
   if (widget.type === 'button') {
     items.push({
       key: 'text',
@@ -880,6 +1141,66 @@ export function WidgetPropertyInspector({
       category: 'basic',
       onChange: (raw) => {
         onPatch({ text: raw }, `edit:${widget.id}:text`);
+        return true;
+      },
+    });
+  }
+  if (widget.type === 'checkbox') {
+    const selectedBound = Boolean(widget.selected?.trim());
+    const selectedOptions = (variables ?? [])
+      .filter((variable) => variable.type === 'arr')
+      .map((variable) => ({
+        value: variable.name,
+        label: variable.desc?.trim() ? `${variable.name} · ${variable.desc.trim()}` : variable.name,
+      }));
+    items.push({
+      key: 'label',
+      value: widget.text,
+      category: 'basic',
+      onChange: (raw) => {
+        onPatch({ text: raw }, `edit:${widget.id}:text`);
+        return true;
+      },
+    });
+    items.push({
+      key: 'value',
+      value: widget.value ?? '',
+      category: 'basic',
+      onChange: (raw) => {
+        onPatch({ value: raw }, `edit:${widget.id}:value`);
+        return true;
+      },
+    });
+    items.push({
+      key: 'checked',
+      value: typeof widget.checked === 'string' ? widget.checked : widget.checked ? 'true' : 'false',
+      category: 'basic',
+      disabled: selectedBound,
+      onChange: (raw) => {
+        if (selectedBound) {
+          return true;
+        }
+        if (isCopyBinding(raw.trim())) {
+          onPatch({ checked: raw.trim() }, `edit:${widget.id}:checked`);
+          return true;
+        }
+        const trimmed = raw.trim().toLowerCase();
+        if (trimmed !== 'true' && trimmed !== 'false' && trimmed !== '1' && trimmed !== '0' && trimmed !== '') {
+          return false;
+        }
+        onPatch({ checked: trimmed === 'true' || trimmed === '1' }, `edit:${widget.id}:checked`);
+        return true;
+      },
+    });
+    items.push({
+      key: 'selected',
+      value: widget.selected ?? '',
+      category: 'basic',
+      picker: 'model',
+      placeholder: t('lowcode.modelValuePick'),
+      options: selectedOptions,
+      onChange: (raw) => {
+        onPatch({ selected: raw.trim() }, `edit:${widget.id}:selected`);
         return true;
       },
     });
@@ -932,7 +1253,7 @@ export function WidgetPropertyInspector({
         },
       },
     );
-    if (widget.type === 'text' || widget.type === 'flex') {
+    if (widget.type === 'text' || widget.type === 'input' || widget.type === 'flex') {
       items.push({
         key: 'overflow',
         value: style.overflow ?? '',
@@ -973,11 +1294,7 @@ export function WidgetPropertyInspector({
               patchStyle({ zIndex: undefined });
               return true;
             }
-            if (!/^-?\d+$/.test(trimmed)) {
-              return false;
-            }
-            patchStyle({ zIndex: Number.parseInt(trimmed, 10) });
-            return true;
+            return accepted(parseNumber(trimmed), (zIndex) => patchStyle({ zIndex }));
           },
         },
       );
@@ -986,8 +1303,8 @@ export function WidgetPropertyInspector({
 
   function rotateProp(
     key: 'rotate-x' | 'rotate-y' | 'rotate-z',
-    value: AngleValue | undefined,
-    patch: (next: AngleValue | undefined) => void,
+    value: AngleValue | string | undefined,
+    patch: (next: AngleValue | string | undefined) => void,
   ): InspectorProp {
     return {
       key,

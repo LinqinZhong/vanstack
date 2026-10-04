@@ -76,16 +76,17 @@ export function SizeField({
   onChange,
 }: {
   label: string;
-  size?: SizeValue;
+  size?: SizeValue | string;
   disabled?: boolean;
   allowFit?: boolean;
   fallback?: SizeValue;
-  onChange: (size: SizeValue | undefined) => void;
+  onChange: (size: SizeValue | string | undefined) => void;
 }) {
   const { t } = useTranslation();
+  const concrete = typeof size === 'object' ? size : undefined;
   const fallbackMode: SizeMode = fallback?.mode === '%' ? '%' : 'px';
-  const mode: SizeMode = allowFit ? (size?.mode ?? 'fit-content') : (size?.mode ?? fallbackMode);
-  const numeric = mode === 'fit-content' ? undefined : (size?.value ?? fallback?.value);
+  const mode: SizeMode = allowFit ? (concrete?.mode ?? 'fit-content') : (concrete?.mode ?? fallbackMode);
+  const numeric = mode === 'fit-content' ? undefined : (concrete?.value ?? fallback?.value);
 
   return (
     <Form.Item className="inspector-pair" label={label}>
@@ -138,13 +139,14 @@ export function AngleField({
   onChange,
 }: {
   label: string;
-  angle?: AngleValue;
+  angle?: AngleValue | string;
   disabled?: boolean;
   popupContainer?: () => HTMLElement;
-  onChange: (angle: AngleValue | undefined) => void;
+  onChange: (angle: AngleValue | string | undefined) => void;
 }) {
-  const unit: AngleUnit = angle?.unit ?? 'deg';
-  const numeric = angle?.value;
+  const concrete = typeof angle === 'object' ? angle : undefined;
+  const unit: AngleUnit = concrete?.unit ?? 'deg';
+  const numeric = concrete?.value;
   return (
     <div className="style-box-row">
       <span className="style-box-row-label">{label}</span>
@@ -169,8 +171,8 @@ export function AngleField({
         getPopupContainer={popupContainer ?? (() => document.body)}
         onMouseDown={(event) => event.stopPropagation()}
         onChange={(next: AngleUnit) => {
-          if (angle) {
-            onChange(compactAngle(convertAngle(angle, next)));
+          if (concrete) {
+            onChange(compactAngle(convertAngle(concrete, next)));
             return;
           }
           onChange(undefined);
@@ -224,7 +226,7 @@ export function WidgetStyleFields({
 
   return (
     <>
-      {widgetType === 'text' || widgetType === 'button' ? (
+      {widgetType === 'text' || widgetType === 'button' || widgetType === 'checkbox' || widgetType === 'input' ? (
         <>
       <div className="style-section">{t('lowcode.styleFont')}</div>
       <Form.Item className="inspector-pair" label={t('lowcode.styleFontFamily')}>

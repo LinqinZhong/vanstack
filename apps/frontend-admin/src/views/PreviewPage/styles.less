@@ -96,7 +96,7 @@ body:has(.preview-host.is-editing) #root {
   box-sizing: border-box;
 }
 
-.preview-mount :where(.lowcode-flex > .lowcode-text, .lowcode-flex > .lowcode-button, .lowcode-flex > .lowcode-image, .lowcode-flex > .lowcode-flex, .lowcode-flex > .lowcode-swiper) {
+.preview-mount :where(.lowcode-flex > .lowcode-text, .lowcode-flex > .lowcode-input, .lowcode-flex > .lowcode-checkbox, .lowcode-flex > .lowcode-switch, .lowcode-flex > .lowcode-button, .lowcode-flex > .lowcode-image, .lowcode-flex > .lowcode-flex, .lowcode-flex > .lowcode-swiper) {
   margin: 0;
 }
 
@@ -125,11 +125,35 @@ body:has(.preview-host.is-editing) #root {
   user-select: none;
 }
 
+.preview-mount :where(.lowcode-input) {
+  display: inline-block;
+  vertical-align: baseline;
+  box-sizing: border-box;
+  width: 160px;
+  margin: 0 0.25em;
+  padding: 0.2em 0.45em;
+  font: inherit;
+  line-height: 1.5;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 2px;
+  appearance: none;
+}
+
+.preview-mount textarea.lowcode-input {
+  min-height: 4.5em;
+  resize: vertical;
+}
+
+.preview-host.is-editing .lowcode-input {
+  resize: none;
+}
+
 .preview-mount :where(.lowcode-button) {
   display: inline-block;
   vertical-align: baseline;
   box-sizing: border-box;
-  max-width: 100%;
   margin: 0 0.25em;
   padding: 0 0.45em;
   font: inherit;
@@ -137,6 +161,86 @@ body:has(.preview-host.is-editing) #root {
   background: #fff;
   border: 1px solid #d0d0d0;
   appearance: none;
+}
+
+.preview-mount :where(.lowcode-checkbox) {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  vertical-align: baseline;
+  box-sizing: border-box;
+  margin: 0 0.25em;
+  padding: 0.15em 0.45em;
+  font: inherit;
+  line-height: 1.5;
+  color: inherit;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.preview-mount .lowcode-checkbox-control {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.preview-mount .lowcode-checkbox-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 1em;
+  height: 1em;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+}
+
+.preview-mount .lowcode-checkbox-control:checked + .lowcode-checkbox-mark::after {
+  content: '';
+  width: 0.28em;
+  height: 0.5em;
+  margin-top: -0.12em;
+  border: solid currentColor;
+  border-width: 0 0.12em 0.12em 0;
+  transform: rotate(45deg);
+}
+
+.preview-mount :where(.lowcode-switch) {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 40px;
+  height: 22px;
+  margin: 0 0.25em;
+  padding: 2px;
+  border: none;
+  border-radius: 999px;
+  background: #d9d9d9;
+  vertical-align: middle;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.preview-mount .lowcode-switch.is-on {
+  background: #1677ff;
+}
+
+.preview-mount .lowcode-switch-thumb {
+  height: 100%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.preview-mount .lowcode-switch.is-on .lowcode-switch-thumb {
+  margin-left: auto;
 }
 
 .preview-host.is-editing [data-widget-id] {
@@ -806,6 +910,10 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
 
 .preview-host.is-editing .lowcode-table.is-editing:not(.is-table-open) {
   overflow: hidden !important;
+}
+
+.preview-host.is-table-editing .widget-chrome-frame.is-hover {
+  display: none;
 }
 
 .preview-host.is-table-editing [data-widget-id] {

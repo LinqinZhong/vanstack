@@ -2,6 +2,8 @@ import './styles.less';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { renderPageXml } from '@vanstack/lowcode-runtime';
+import { api } from '../../apis/api';
+import { eventScriptJavaScript } from '../../utils/eventScript';
 import type { PageI18n } from '@vanstack/xml';
 import { isLowcodeMessage, type TableChromeState } from '../../utils/lowcode-protocol';
 import { isBoxGroupShortcut, isTextStyleShortcut, matchWidgetShortcut } from '../../utils/widgetShortcuts';
@@ -24,6 +26,8 @@ export function PreviewPage() {
   const viewingOwnerIdRef = useRef<string | null>(null);
   const viewingStateRef = useRef<string | null>(null);
   const viewingStatesRef = useRef('');
+  const projectIdRef = useRef<string | null>(null);
+  const pageIdRef = useRef<string | null>(null);
   const tableLayoutRef = useRef(false);
   const spacingDragRef = useRef<BoxDragKind | 'border' | null>(null);
   const rasterScaleRef = useRef(1);
@@ -230,6 +234,7 @@ export function PreviewPage() {
             viewScaleRef.current,
             editingRef.current,
             spacingDragRef.current,
+            !tableEditingRef.current,
           );
           refreshTableChrome();
           postSelectedLayoutSize();
@@ -253,6 +258,8 @@ export function PreviewPage() {
         overflowY,
         locale,
         catalog,
+        projectId,
+        pageId,
         viewingOwnerId,
         viewingState,
         viewingStates,
@@ -270,6 +277,8 @@ export function PreviewPage() {
       const nextViewingOwner = viewingOwnerId ?? null;
       const nextViewingState = viewingState ?? null;
       const nextViewingStates = JSON.stringify(viewingStates ?? null);
+      const nextProjectId = projectId || null;
+      const nextPageId = pageId || null;
       const nextTableLayout = Boolean(tableLayout) && nextEditing;
       const shouldRender =
         xml !== xmlRef.current ||
@@ -279,7 +288,9 @@ export function PreviewPage() {
         nextCatalogKey !== catalogRef.current ||
         nextViewingOwner !== viewingOwnerIdRef.current ||
         nextViewingState !== viewingStateRef.current ||
-        nextViewingStates !== viewingStatesRef.current;
+        nextViewingStates !== viewingStatesRef.current ||
+        nextProjectId !== projectIdRef.current ||
+        nextPageId !== pageIdRef.current;
       editingRef.current = nextEditing;
       const nextTableEditing = nextEditing && Boolean(tableEditing);
       tableEditingRef.current = nextTableEditing;
@@ -291,6 +302,8 @@ export function PreviewPage() {
       viewingOwnerIdRef.current = nextViewingOwner;
       viewingStateRef.current = nextViewingState;
       viewingStatesRef.current = nextViewingStates;
+      projectIdRef.current = nextProjectId;
+      pageIdRef.current = nextPageId;
       spacingDragRef.current = nextEditing ? nextSpacing : null;
       if (!spacingDragRef.current) {
         activeSpacingEdgeRef.current = null;
@@ -336,7 +349,18 @@ export function PreviewPage() {
           viewingOwnerId: nextViewingOwner,
           viewingState: nextViewingState,
           viewingStates: viewingStates ?? null,
-          dynamicTextLabel: t('lowcode.dynamicText'),
+          onModelValue: (name, value, done) => postToParent({ type: 'model-value', name, value, done }),
+          loadWidgetEvent: nextProjectId
+            ? async (id) => {
+                try {
+                  const script = await api.getWidgetEvent(nextProjectId, id);
+                  return eventScriptJavaScript(script.source);
+                } catch {
+                  return null;
+                }
+              }
+            : undefined,
+          pageId: nextPageId,
         });
         setError(result.ok ? null : result.error);
       }
@@ -352,6 +376,7 @@ export function PreviewPage() {
         viewScaleRef.current,
         nextEditing,
         spacingDragRef.current,
+        !nextTableEditing,
       );
       refreshTableChrome();
       syncSpacingGuides(
@@ -523,6 +548,7 @@ export function PreviewPage() {
           viewScaleRef.current,
           editingRef.current,
           spacingDragRef.current,
+          !tableEditingRef.current,
         );
         refreshTableChrome();
       });
@@ -546,6 +572,7 @@ export function PreviewPage() {
         viewScaleRef.current,
         editingRef.current,
         spacingDragRef.current,
+        !tableEditingRef.current,
       );
       refreshTableChrome();
     }
@@ -615,6 +642,7 @@ export function PreviewPage() {
             viewScaleRef.current,
             editingRef.current,
             spacingDragRef.current,
+            !tableEditingRef.current,
           );
           refreshTableChrome();
           return;
@@ -678,6 +706,14 @@ export function PreviewPage() {
     /** onClick：单击选中；同锚点再点上钻父级（Ctrl 时延时，避免挡双击）。 */
     function onClick(event: MouseEvent) {
       if (!editingRef.current || event.button !== 0) {
+        return;
+      }
+      const field = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement ? event.target : null;
+      if (field && !field.readOnly && field.dataset.modelName) {
+        const hit = canvasHit(event.target);
+        if (hit?.dataset.widgetId) {
+          postSelect(hit.dataset.widgetId);
+        }
         return;
       }
       const modeNode = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-table-mode]') : null;
@@ -1144,6 +1180,10 @@ export function PreviewPage() {
 
     /** onKeyDown：Shift/Alt 吸附镜像、间距微调与编辑快捷键。 */
     function onKeyDown(event: KeyboardEvent) {
+      const field = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement ? event.target : null;
+      if (field && !field.readOnly && field.dataset.modelName) {
+        return;
+      }
       if (event.key === 'Shift' && !event.repeat) {
         applySnap(true);
       }

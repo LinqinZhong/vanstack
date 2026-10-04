@@ -22,6 +22,9 @@ export type RenderPageXmlOptions = {
   viewingState?: string | null;
   viewingStates?: Array<{ ownerId: string; state: string | null }> | null;
   dynamicTextLabel?: string;
+  onModelValue?: (name: string, value: string, done?: boolean) => void;
+  loadWidgetEvent?: (id: string) => Promise<string | null>;
+  pageId?: string | null;
 };
 
 function resolveRenderCatalog(catalog: RenderPageXmlOptions['catalog']): PageI18n | undefined {
@@ -70,6 +73,9 @@ export function renderPageXml(
       catalog: resolveRenderCatalog(options?.catalog),
       viewing: resolveViewing(options),
       dynamicTextLabel: options?.dynamicTextLabel,
+      onModelValue: options?.onModelValue,
+      loadWidgetEvent: options?.loadWidgetEvent,
+      pageId: options?.pageId,
     });
     flushSync(() => {
       root.render(tree);

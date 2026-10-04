@@ -1,32 +1,12 @@
-import { ConfigProvider, Modal, message, theme } from 'antd';
+import { ConfigProvider, Modal, message } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { PageI18n, PageStyle, PageWidget } from '@vanstack/xml';
+import type { PageI18n, PageStyle, PageVariable, PageWidget } from '@vanstack/xml';
 import { EditorHelpModal } from '../../../components/EditorHelpModal';
 import { PagePropertyInspector, WidgetPropertyInspector } from '../../../components/InspectorPropertyGrid';
+import { inspectorTheme } from '../../../components/inspectorTheme';
 import type { WidgetPatch } from '../../../utils/widgetTree';
 import { widgetTypeName } from '../../../utils/widgetTree';
 import { CoalesceField } from './CoalesceField';
-
-/**
- * 属性检查器和帮助弹窗共用的深色主题。
- * 只包住这两个弹窗，画布上的样式气泡和工具条仍用页面默认的浅色主题。
- */
-const inspectorTheme = {
-  algorithm: theme.darkAlgorithm,
-  token: {
-    colorPrimary: '#3dba9a',
-    colorBgContainer: '#33404c',
-    colorBgContainerDisabled: '#2a333c',
-    colorBgElevated: '#171e25',
-    colorError: '#ff4d4f',
-    colorBorder: 'rgba(255, 255, 255, 0.26)',
-    colorText: 'rgba(255, 255, 255, 0.92)',
-    colorTextHeading: 'rgba(255, 255, 255, 0.95)',
-    colorTextLabel: 'rgba(255, 255, 255, 0.84)',
-    colorTextPlaceholder: 'rgba(255, 255, 255, 0.48)',
-    colorFillTertiary: 'rgba(255, 255, 255, 0.12)',
-  },
-};
 
 /**
  * 帮助弹窗和属性检查弹窗。
@@ -43,6 +23,7 @@ type EditorInspectorProps = {
   parentType?: PageWidget['type'];
   readOnly: boolean;
   pageI18n: PageI18n | undefined;
+  variables: PageVariable[];
   projectId: string;
   ownKeys: Set<string> | null | undefined;
   pageStyle: PageStyle | undefined;
@@ -62,6 +43,7 @@ export function EditorInspector({
   parentType,
   readOnly,
   pageI18n,
+  variables,
   projectId,
   ownKeys,
   pageStyle,
@@ -110,6 +92,7 @@ export function EditorInspector({
               disabled={readOnly}
               i18nCatalog={pageI18n}
               projectId={projectId}
+              variables={variables}
               ownKeys={ownKeys ?? undefined}
               onPatch={(patch, coalesceKey) => onPatch(widget.id, patch, coalesceKey)}
               onInvalidChange={onInvalidChange}

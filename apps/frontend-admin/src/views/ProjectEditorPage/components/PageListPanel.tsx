@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons';
-import { Button, Card, Empty, List, Popconfirm } from 'antd';
+import { Button, Card, Empty, Listy, Popconfirm, Typography } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ProjectPageDto } from '@vanstack/shared';
 
@@ -32,25 +32,32 @@ export function PageListPanel({ pages, selectedPageId, onCreate, onEdit, onDelet
       {pages.length === 0 ? (
         <Empty description={t('lowcode.emptyPages')} />
       ) : (
-        <List
-          dataSource={pages}
-          renderItem={(page) => (
-            <List.Item
-              className={page.id === selectedPageId ? 'is-selected' : undefined}
-              actions={[
-                <Button key="edit" type="link" onClick={() => onEdit(page)}>
+        <Listy
+          className="page-list"
+          items={pages}
+          rowKey="id"
+          itemRender={(page) => (
+            <div
+              className={page.id === selectedPageId ? 'page-list-row is-selected' : 'page-list-row'}
+              onClick={() => onSelect(page.id)}
+            >
+              <div className="page-list-meta">
+                <Typography.Text ellipsis>{page.name}</Typography.Text>
+                <Typography.Text type="secondary" ellipsis>
+                  {page.key}
+                </Typography.Text>
+              </div>
+              <div className="page-list-actions">
+                <Button type="link" onClick={() => onEdit(page)}>
                   {t('lowcode.edit')}
-                </Button>,
-                <Popconfirm key="del" title={t('lowcode.confirmDelete')} onConfirm={() => void onDelete(page)}>
+                </Button>
+                <Popconfirm title={t('lowcode.confirmDelete')} onConfirm={() => void onDelete(page)}>
                   <Button type="link" danger>
                     {t('lowcode.delete')}
                   </Button>
-                </Popconfirm>,
-              ]}
-              onClick={() => onSelect(page.id)}
-            >
-              <List.Item.Meta title={page.name} description={page.key} />
-            </List.Item>
+                </Popconfirm>
+              </div>
+            </div>
           )}
         />
       )}

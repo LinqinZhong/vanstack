@@ -1,6 +1,7 @@
 import {
   compactLoop,
   compactStateFn,
+  compactWidgetEvents,
   sanitizeWidgetStyle,
   type FlexItemStyle,
   type PageWidget,
@@ -67,6 +68,11 @@ function cloneAlias(widget: PageWidget): { alias?: string } {
   return alias ? { alias } : {};
 }
 
+function cloneEvents(widget: PageWidget): { events?: PageWidget['events'] } {
+  const events = compactWidgetEvents(widget.type, widget.events);
+  return events ? { events } : {};
+}
+
 export function cloneShared(widget: PageWidget, stateIdMap: WidgetCloneContext['stateIdMap']) {
   return {
     style: cloneOptional(widget.style),
@@ -74,6 +80,7 @@ export function cloneShared(widget: PageWidget, stateIdMap: WidgetCloneContext['
     ...cloneLoop(widget),
     ...cloneHidden(widget),
     ...cloneAlias(widget),
+    ...cloneEvents(widget),
   };
 }
 
@@ -130,6 +137,14 @@ export function applyCommon<T extends PageWidget>(widget: T, patch: WidgetPatch)
       next.loop = loop;
     } else {
       delete next.loop;
+    }
+  }
+  if ('events' in patch) {
+    const events = compactWidgetEvents(widget.type, patch.events);
+    if (events) {
+      next.events = events;
+    } else {
+      delete next.events;
     }
   }
   if ('stateFn' in patch) {

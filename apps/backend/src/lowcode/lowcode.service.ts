@@ -18,10 +18,11 @@ import type {
   ProjectLangGroupDto,
   ProjectPageDto,
   ProjectPageVersionDto,
+  WidgetEventScriptDto,
   RuntimeLangDto,
   RuntimeProjectDto,
 } from '@vanstack/shared';
-import { EMPTY_PAGE_XML, isI18nKey, parsePageXml, XmlParseError } from '@vanstack/xml';
+import { EMPTY_PAGE_XML, isI18nKey, isWidgetEventId, parseEventSource, parsePageXml, XmlParseError } from '@vanstack/xml';
 import { DataSource, In, QueryFailedError, Repository } from 'typeorm';
 import { OssService } from '../oss/oss.service';
 import { ProjectLangValue } from './entities/project-lang-value.entity';
@@ -681,6 +682,32 @@ export class LowcodeService {
     await this.oss.deleteObject(this.iconGroupPrefix(project.key, group) + name);
   }
 
+  async getWidgetEvent(projectId: string, eventId: string): Promise<WidgetEventScriptDto> {
+    const project = await this.requireProject(projectId);
+    this.assertEventId(eventId);
+    const object = await this.oss.getObject(this.eventObjectKey(project.key, eventId));
+    if (!object) {
+      throw new NotFoundException();
+    }
+    return { id: eventId, source: object.body.toString('utf8') };
+  }
+
+  async putWidgetEvent(projectId: string, eventId: string, source: string): Promise<WidgetEventScriptDto> {
+    const project = await this.requireProject(projectId);
+    this.assertEventId(eventId);
+    if (!parseEventSource(source)) {
+      throw new BadRequestException('Invalid event script');
+    }
+    await this.oss.putObject(this.eventObjectKey(project.key, eventId), Buffer.from(source, 'utf8'), 'text/typescript');
+    return { id: eventId, source };
+  }
+
+  async deleteWidgetEvent(projectId: string, eventId: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    this.assertEventId(eventId);
+    await this.oss.deleteObject(this.eventObjectKey(project.key, eventId));
+  }
+
   async activateVersion(projectId: string, pageId: string, versionId: string): Promise<ProjectPageDto> {
     const page = await this.requirePage(projectId, pageId);
     const version = await this.requireVersion(projectId, pageId, versionId);
@@ -882,6 +909,16 @@ export class LowcodeService {
       }
       throw error;
     }
+  }
+
+  private assertEventId(eventId: string) {
+    if (!isWidgetEventId(eventId)) {
+      throw new BadRequestException('Invalid event id');
+    }
+  }
+
+  private eventObjectKey(projectKey: string, eventId: string) {
+    return `lowcode/${projectKey}/events/${eventId}.ts`;
   }
 
   private xmlObjectKey(projectKey: string, pageKey: string, versionNo: number) {

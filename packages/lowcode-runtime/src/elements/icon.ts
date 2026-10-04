@@ -1,5 +1,5 @@
 import { createElement, type ReactElement } from 'react';
-import type { PageWidget } from '@vanstack/xml';
+import { isCopyBinding, resolveCopyBinding, type PageWidget } from '@vanstack/xml';
 import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
 import { resolveWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
@@ -7,7 +7,13 @@ export function renderIcon(
   widget: Extract<PageWidget, { type: 'icon' }>,
   ctx: WidgetRenderContext,
 ): ReactElement {
-  const size = widget.size ?? 24;
+  const resolvedSize =
+    typeof widget.size === 'string'
+      ? ctx.evaluateBindings && isCopyBinding(widget.size)
+        ? Number(resolveCopyBinding(widget.size, ctx.bindingScope))
+        : Number(widget.size)
+      : widget.size;
+  const size = resolvedSize != null && Number.isFinite(resolvedSize) && resolvedSize > 0 ? resolvedSize : 24;
   const src = resolveWidgetCopy(widget.src, ctx);
   return createElement('span', {
     key: ctx.instanceKey,
@@ -17,7 +23,7 @@ export function renderIcon(
     'data-state': widgetStateAttr(widget, ctx),
     style: mergeCss(
       dynamicStyleCss(widget.style, widgetCssOptions(ctx)),
-      flexItemCss(widget.item),
+      flexItemCss(widget.item, widgetCssOptions(ctx)),
       {
         display: 'inline-block',
         width: size,

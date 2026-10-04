@@ -6,6 +6,7 @@ import {
   DEFAULT_TABLE_ROW_HEIGHT,
   DEFAULT_TABLE_WIDTH,
   isCopyBinding,
+  resolveCopyBinding,
   sanitizeWidgetStyle,
   type PageWidget,
   type WidgetStyle,
@@ -35,7 +36,14 @@ function trackTemplate(widths: number[]): string {
   return widths.map((width) => `${width}px`).join(' ');
 }
 
-function pxBox(size: SizeValue | undefined, fallback: SizeValue): number | null {
+function pxBox(size: SizeValue | string | undefined, fallback: SizeValue, ctx: WidgetRenderContext): number | null {
+  if (typeof size === 'string') {
+    if (!ctx.evaluateBindings || !isCopyBinding(size)) {
+      return null;
+    }
+    const parsed = Number.parseFloat(resolveCopyBinding(size, ctx.bindingScope));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
   const value = size ?? fallback;
   return value.mode === 'px' ? value.value : null;
 }
@@ -238,7 +246,11 @@ export function renderTable(
   const contentHeight =
     (columns.length > 0 ? headerHeight : 0) +
     rows.reduce((sum, row) => sum + track(row.height, DEFAULT_TABLE_ROW_HEIGHT), 0);
-  const overflow = style?.overflow ?? 'auto';
+  const rawOverflow = style?.overflow;
+  const overflow =
+    typeof rawOverflow === 'string' && ctx.evaluateBindings && isCopyBinding(rawOverflow)
+      ? resolveCopyBinding(rawOverflow, ctx.bindingScope) || 'auto'
+      : (rawOverflow ?? 'auto');
   const scrollable = overflow !== 'hidden' && overflow !== 'visible';
   const overflowX = ctx.editing
     ? scrollable
@@ -246,7 +258,7 @@ export function renderTable(
       : overflow
     : !scrollable
       ? overflow
-      : contentWidth > (pxBox(style?.width, DEFAULT_TABLE_WIDTH) ?? contentWidth - 1)
+      : contentWidth > (pxBox(style?.width, DEFAULT_TABLE_WIDTH, ctx) ?? contentWidth - 1)
         ? 'auto'
         : 'hidden';
   const overflowY = ctx.editing
@@ -255,7 +267,7 @@ export function renderTable(
       : overflow
     : !scrollable
       ? overflow
-      : contentHeight > (pxBox(style?.height, DEFAULT_TABLE_HEIGHT) ?? contentHeight - 1)
+      : contentHeight > (pxBox(style?.height, DEFAULT_TABLE_HEIGHT, ctx) ?? contentHeight - 1)
         ? 'auto'
         : 'hidden';
   const canStick = !ctx.editing && overflowY === 'auto';
@@ -282,11 +294,11 @@ export function renderTable(
   }
   const shell = mergeCss(
     dynamicStyleCss(style, widgetCssOptions(ctx)),
-    flexItemCss(widget.item),
+    flexItemCss(widget.item, widgetCssOptions(ctx)),
     hiddenCss(widget.hidden, ctx.editing),
     {
-      width: sizeCss(style?.width ?? DEFAULT_TABLE_WIDTH),
-      height: sizeCss(style?.height ?? DEFAULT_TABLE_HEIGHT),
+      width: sizeCss(style?.width ?? DEFAULT_TABLE_WIDTH, widgetCssOptions(ctx)),
+      height: sizeCss(style?.height ?? DEFAULT_TABLE_HEIGHT, widgetCssOptions(ctx)),
       minWidth: 0,
       minHeight: 0,
       overflowX,

@@ -1,4 +1,4 @@
-import { sanitizeWidgetStyle, type PageWidget, type WidgetStyle } from '@vanstack/xml';
+import { isCopyBinding, sanitizeWidgetStyle, type PageWidget, type WidgetStyle } from '@vanstack/xml';
 import { applyCommon, cloneItemField, cloneShared } from './common';
 import type { WidgetHelperInterface } from './types';
 
@@ -33,13 +33,13 @@ export const iconHelper = {
     };
   },
   clone(widget, ctx) {
-    const size = widget.size != null && widget.size > 0 ? widget.size : DEFAULT_ICON_SIZE;
+    const size = typeof widget.size === 'number' && widget.size > 0 ? widget.size : DEFAULT_ICON_SIZE;
     const shared = cloneShared(widget, ctx.stateIdMap);
     return {
       type: 'icon',
       id: ctx.nextId(),
       src: widget.src,
-      ...(widget.size != null && widget.size > 0 ? { size: widget.size } : {}),
+      ...(widget.size != null && (typeof widget.size === 'string' || widget.size > 0) ? { size: widget.size } : {}),
       ...shared,
       style: iconSizeStyle(shared.style, size),
       ...cloneItemField(widget),
@@ -51,7 +51,9 @@ export const iconHelper = {
       next.src = patch.src;
     }
     if (patch.size != null) {
-      if (patch.size > 0) {
+      if (typeof patch.size === 'string' && isCopyBinding(patch.size)) {
+        next.size = patch.size.trim();
+      } else if (typeof patch.size === 'number' && patch.size > 0) {
         next.size = patch.size;
         next.style = iconSizeStyle(next.style, patch.size);
       } else {

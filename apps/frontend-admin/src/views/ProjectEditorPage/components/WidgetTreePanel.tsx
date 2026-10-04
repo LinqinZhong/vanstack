@@ -6,13 +6,15 @@ import {
   PlusOutlined,
   RedoOutlined,
   SnippetsOutlined,
+  ThunderboltOutlined,
   UndoOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
 import { Button, Card, Dropdown, Empty, Tooltip, Tree, type TreeDataNode } from 'antd';
-import type { RefObject } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { isLoopConfigured, type PageWidget } from '@vanstack/xml';
+import { hasWidgetEvents, isLoopConfigured, type PageWidget } from '@vanstack/xml';
 import { writeWidgetDrag } from '../../../utils/pageData';
 import { canMoveWidget, findWidget, type WidgetDropPlacement } from '../../../utils/widgetTree';
 import { TreeActionButton } from './TreeActionButton';
@@ -21,7 +23,7 @@ import { TreeActionButton } from './TreeActionButton';
  * 组件树：展开、选中、拖拽换层级，以及撤销、重做、复制、粘贴、删除、添加。
  * 拖到某个位置是否合法由 canMoveWidget 决定；不合法的落点不会触发 onMove。
  * 数据面板打开、标题可以拖进变量（canDragWidgetToData）时关掉树内排序，避免两套拖拽抢同一个指针事件。
- * 右键打开别名菜单，循环图标打开循环配置，眼睛切换 hidden。双击通知页面把画布对准该控件。
+ * 右键打开别名菜单，循环图标打开循环配置，事件图标打开事件列表，眼睛切换 hidden。双击通知页面把画布对准该控件。
  */
 type WidgetTreePanelProps = {
   widgets: PageWidget[];
@@ -46,6 +48,7 @@ type WidgetTreePanelProps = {
   onAdd: () => void;
   onOpenAlias: (widgetId: string) => void;
   onOpenLoop: (widgetId: string) => void;
+  onOpenEvents: (widgetId: string) => void;
   onToggleHidden: (widgetId: string) => void;
   onExpand: (keys: string[]) => void;
   onSelect: (widgetId: string) => void;
@@ -59,6 +62,26 @@ type WidgetTreePanelProps = {
  * 落在间隙时，dropPosition 比节点在同级中的序号小 1 为 before，否则为 after。
  * 真正改树、展开目标父级、写入撤销仍由页面的 onMove 完成。
  */
+/**
+ * 眼睛挂到行节点末尾，才能贴住整行右缘。
+ * 横向滚动时靠 sticky 留在面板右侧，标题从它左边滚过去。
+ */
+function TreeRowEye({ className, children }: { className: string; children: ReactNode }) {
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const [row, setRow] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const next = anchorRef.current?.closest<HTMLElement>('.ant-tree-treenode') ?? null;
+    setRow((current) => (current === next ? current : next));
+  });
+  const eye = <span className={className}>{children}</span>;
+  return (
+    <>
+      <span ref={anchorRef} className="widget-tree-eye-anchor" />
+      {row ? createPortal(eye, row) : eye}
+    </>
+  );
+}
+
 function treeDropPlacement(dropToGap: boolean, nodePos: string, dropPosition: number): WidgetDropPlacement {
   if (!dropToGap) {
     return 'inside';
@@ -90,6 +113,7 @@ export function WidgetTreePanel({
   onAdd,
   onOpenAlias,
   onOpenLoop,
+  onOpenEvents,
   onToggleHidden,
   onExpand,
   onSelect,
@@ -164,6 +188,7 @@ export function WidgetTreePanel({
               const widgetId = String(node.key);
               const widget = findWidget(widgets, widgetId);
               const looped = isLoopConfigured(widget?.loop);
+              const hasEvents = hasWidgetEvents(widget?.events);
               const hidden = Boolean(widget?.hidden);
               const alias = widget?.alias?.trim();
               const titleClasses = [
@@ -224,7 +249,29 @@ export function WidgetTreePanel({
                         <UnorderedListOutlined />
                       </button>
                     ) : null}
-                    <span className="widget-tree-actions-inline">
+                    {hasEvents ? (
+                      <button
+                        type="button"
+                        className="widget-tree-event"
+                        title={t('lowcode.styleEvents')}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenEvents(widgetId);
+                        }}
+                      >
+                        <ThunderboltOutlined />
+                      </button>
+                    ) : null}
+                    <TreeRowEye
+                      className={[
+                        'widget-tree-actions-inline',
+                        hidden ? 'is-hidden' : '',
+                        selectedWidgetId === widgetId ? 'is-row-selected' : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                    >
                       <button
                         type="button"
                         className="widget-tree-visibility"
@@ -238,7 +285,7 @@ export function WidgetTreePanel({
                       >
                         {hidden ? <EyeInvisibleOutlined /> : <EyeOutlined />}
                       </button>
-                    </span>
+                    </TreeRowEye>
                   </span>
                 </Dropdown>
               );

@@ -1,7 +1,10 @@
 import type { PageWidget } from '@vanstack/xml';
 import { buttonHelper } from './button';
+import { checkboxHelper } from './checkbox';
+import { switchHelper } from './switch';
 import { flexHelper } from './flex';
 import { iconHelper } from './icon';
+import { inputHelper } from './input';
 import { imageHelper } from './image';
 import { swiperHelper } from './swiper';
 import { swiperItemHelper } from './swiper-item';
@@ -18,6 +21,9 @@ export const widgetHelpers = {
   image: imageHelper,
   icon: iconHelper,
   text: textHelper,
+  input: inputHelper,
+  checkbox: checkboxHelper,
+  switch: switchHelper,
   button: buttonHelper,
   flex: flexHelper,
   swiper: swiperHelper,
@@ -28,7 +34,7 @@ export const widgetHelpers = {
   td: tableCellHelper,
 } satisfies { [K in PageWidget['type']]: WidgetHelperInterface<Extract<PageWidget, { type: K }>> };
 
-export const ADDABLE_WIDGET_TYPES = ['text', 'button', 'flex', 'swiper', 'table', 'swiper-item', 'image', 'icon'] as const satisfies readonly PageWidget['type'][];
+export const ADDABLE_WIDGET_TYPES = ['text', 'input', 'checkbox', 'switch', 'button', 'flex', 'swiper', 'table', 'swiper-item', 'image', 'icon'] as const satisfies readonly PageWidget['type'][];
 
 export function acceptsChild(accepts: WidgetAccepts, childType: PageWidget['type']): boolean {
   if (accepts === 'none') {
@@ -69,5 +75,5 @@ export function widgetTypeName(type: PageWidget['type'], t: WidgetTranslate): st
 export function widgetTreeLabel(widget: PageWidget, t: WidgetTranslate): string {
   const typeName = widgetTypeName(widget.type, t);
   const suffix = helperFor(widget.type).treeSuffix?.(widget);
-  return suffix != null ? `${typeName} · ${suffix}` : typeName;
+  return suffix ? `${typeName} · ${suffix}` : typeName;
 }

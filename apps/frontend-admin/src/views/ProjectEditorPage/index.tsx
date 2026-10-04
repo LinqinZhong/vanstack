@@ -18,12 +18,15 @@ import {
   EMPTY_PAGE_XML,
   compactPageI18n,
   compactWidgetStyle,
+  normalizeInputModelValue,
+  validateDataLiteral,
   parsePageXml,
   serializePageXml,
   type PageI18n,
   type PageStyle,
   type PageVariable,
   type PageWidget,
+  type WidgetEvents,
   type WidgetStyle,
 } from '@vanstack/xml';
 import { api } from '../../apis/api';
@@ -171,6 +174,7 @@ export function ProjectEditorPage() {
   const [widgets, setWidgets] = useState<PageWidget[]>([]);
   const [pageStyle, setPageStyle] = useState<PageStyle | undefined>(undefined);
   const [pageData, setPageData] = useState<PageVariable[]>([]);
+  const [pageEvents, setPageEvents] = useState<WidgetEvents | undefined>(undefined);
   const [pageI18n, setPageI18n] = useState<PageI18n | undefined>(undefined);
   const [previewLocale, setPreviewLocale] = useState<string | null>(null);
   const [leftNav, setLeftNav] = useState<EditorNav>('develop');
@@ -243,6 +247,8 @@ export function ProjectEditorPage() {
   const widgetsRef = useRef(widgets);
   const pageStyleRef = useRef(pageStyle);
   const pageDataRef = useRef(pageData);
+  const pageEventsRef = useRef(pageEvents);
+  const commitModelRef = useRef<(name: string, value: string, done?: boolean) => void>(() => {});
   const pageI18nRef = useRef(pageI18n);
   const selectedWidgetIdRef = useRef(selectedWidgetId);
   const viewingOwnerIdRef = useRef(viewingOwnerId);
@@ -352,8 +358,9 @@ export function ProjectEditorPage() {
         widgets,
         style: pageStyle,
         data: pageData.length > 0 ? pageData : undefined,
+        events: pageEvents,
       }),
-    [widgets, pageStyle, pageData],
+    [widgets, pageStyle, pageData, pageEvents],
   );
   xmlRef.current = xml;
   modeRef.current = mode;
@@ -368,6 +375,7 @@ export function ProjectEditorPage() {
   widgetsRef.current = widgets;
   pageStyleRef.current = pageStyle;
   pageDataRef.current = pageData;
+  pageEventsRef.current = pageEvents;
   pageI18nRef.current = pageI18n;
   selectedWidgetIdRef.current = selectedWidgetId;
   tableEditIdRef.current = tableEditId;
@@ -684,6 +692,8 @@ export function ProjectEditorPage() {
         overflowY: mode === 'preview' ? 0 : EDIT_OVERFLOW_Y,
         locale: previewLocale,
         catalog: pageI18n,
+        projectId: project?.id ?? null,
+        pageId: selectedPageId,
         viewingOwnerId: mode === 'edit' && !versionLocked ? viewingOwnerId : null,
         viewingState: mode === 'edit' && !versionLocked ? viewingState : null,
         viewingStates: mode === 'edit' && !versionLocked ? viewingListFromMap(viewingByOwner) : null,
@@ -711,7 +721,7 @@ export function ProjectEditorPage() {
       },
       window.location.origin,
     );
-  }, [mode, previewLocale, pageI18n, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, versionLocked, tableRange, tableEditId]);
+  }, [mode, previewLocale, pageI18n, project?.id, selectedPageId, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, versionLocked, tableRange, tableEditId]);
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -723,6 +733,10 @@ export function ProjectEditorPage() {
           canvasSettlingRef.current = false;
           setCanvasSettling(false);
         }
+        return;
+      }
+      if (event.data.type === 'model-value') {
+        commitModelRef.current(event.data.name, event.data.value, event.data.done);
         return;
       }
       if (event.data.type === 'ready') {
@@ -1526,15 +1540,18 @@ export function ProjectEditorPage() {
     nextPageStyle?: PageStyle,
     nextPageData: PageVariable[] = [],
     nextSelectedId?: string | null,
+    nextPageEvents?: WidgetEvents,
   ) {
     const selectedId = nextSelectedId === undefined ? (nextWidgets[0]?.id ?? null) : nextSelectedId;
     widgetsRef.current = nextWidgets;
     pageStyleRef.current = nextPageStyle;
     pageDataRef.current = nextPageData;
+    pageEventsRef.current = nextPageEvents;
     selectedWidgetIdRef.current = selectedId;
     setWidgets(nextWidgets);
     setPageStyle(nextPageStyle);
     setPageData(nextPageData);
+    setPageEvents(nextPageEvents);
     setSelectedWidgetId(selectedId);
     setExpandedKeys(collectExpandableKeys(nextWidgets));
     resetHistory();
@@ -1546,13 +1563,14 @@ export function ProjectEditorPage() {
       widgets: parsed.widgets,
       style: parsed.style,
       data: parsed.data && parsed.data.length > 0 ? parsed.data : undefined,
+      events: parsed.events,
     });
   }
 
   function applyXml(nextXml: string) {
     try {
       const parsed = parsePageXml(nextXml);
-      resetWidgetSession(parsed.widgets, parsed.style, parsed.data ?? []);
+      resetWidgetSession(parsed.widgets, parsed.style, parsed.data ?? [], undefined, parsed.events);
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.invalidXml'));
     }
@@ -1573,6 +1591,7 @@ export function ProjectEditorPage() {
         widgets: widgetsRef.current,
         pageStyle: pageStyleRef.current,
         pageData: pageDataRef.current,
+        pageEvents: pageEventsRef.current,
         selectedWidgetId: selectedWidgetIdRef.current,
       },
     ].slice(-HISTORY_LIMIT);
@@ -1611,20 +1630,16 @@ export function ProjectEditorPage() {
     if (id !== selectedWidgetIdRef.current) {
       endCoalesce();
     }
-    let owning = findOwningTable(widgetsRef.current, id);
-    let selected = findWidget(widgetsRef.current, id);
+    const owning = findOwningTable(widgetsRef.current, id);
+    const selected = findWidget(widgetsRef.current, id);
     if (
       id &&
       tableEditIdRef.current &&
       selected?.type === 'table' &&
       selected.id === tableEditIdRef.current
     ) {
-      const headerId = owning?.headers[0]?.id;
-      if (headerId) {
-        id = headerId;
-        selected = findWidget(widgetsRef.current, id);
-        owning = findOwningTable(widgetsRef.current, id);
-      }
+      exitTableEdit();
+      return;
     }
     if (tableEditIdRef.current && owning?.table.id !== tableEditIdRef.current) {
       restoreTableEditView();
@@ -2053,7 +2068,9 @@ export function ProjectEditorPage() {
     nextPageData: PageVariable[],
     nextSelectedId: string | null,
     coalesceKey?: string,
+    nextPageEvents?: WidgetEvents | null,
   ) {
+    const events = nextPageEvents === undefined ? pageEventsRef.current : nextPageEvents ?? undefined;
     const coalescing = Boolean(coalesceKey && coalesceKey === coalesceKeyRef.current);
     if (!coalescing) {
       pastRef.current = [
@@ -2062,6 +2079,7 @@ export function ProjectEditorPage() {
           widgets: widgetsRef.current,
           pageStyle: pageStyleRef.current,
           pageData: pageDataRef.current,
+          pageEvents: pageEventsRef.current,
           selectedWidgetId: selectedWidgetIdRef.current,
         },
       ].slice(-HISTORY_LIMIT);
@@ -2074,10 +2092,12 @@ export function ProjectEditorPage() {
     widgetsRef.current = nextWidgets;
     pageStyleRef.current = nextPageStyle;
     pageDataRef.current = nextPageData;
+    pageEventsRef.current = events;
     selectedWidgetIdRef.current = nextSelectedId;
     setWidgets(nextWidgets);
     setPageStyle(nextPageStyle);
     setPageData(nextPageData);
+    setPageEvents(events);
     setSelectedWidgetId(nextSelectedId);
     setExpandedKeys((prev) =>
       nextExpandedKeys(
@@ -2124,6 +2144,56 @@ export function ProjectEditorPage() {
       coalesceKey,
     );
   }
+
+  function commitPageEvents(next: WidgetEvents | undefined) {
+    if (readOnlyRef.current) {
+      return;
+    }
+    commitDraft(
+      widgetsRef.current,
+      pageStyleRef.current,
+      pageDataRef.current,
+      selectedWidgetIdRef.current,
+      'page-events',
+      next ?? null,
+    );
+  }
+
+  commitModelRef.current = (name, value, done) => {
+    const list = pageDataRef.current;
+    const index = list.findIndex((variable) => variable.name === name);
+    if (index < 0) {
+      if (done) {
+        endCoalesce();
+      }
+      return;
+    }
+    const current = list[index];
+    const stored =
+      current.type === 'num'
+        ? normalizeInputModelValue('number', value)
+        : current.type === 'str'
+          ? value
+          : current.type === 'bool'
+            ? value === '1' || value === 'true'
+              ? '1'
+              : '0'
+            : current.type === 'arr' && validateDataLiteral(value, 'arr')
+              ? value
+              : null;
+    if (stored == null) {
+      return;
+    }
+    if (current.value !== stored) {
+      commitPageData(
+        list.map((variable, i) => (i === index ? { ...variable, value: stored } : variable)),
+        `data:${name}:value`,
+      );
+    }
+    if (done) {
+      endCoalesce();
+    }
+  };
 
   function schedulePutLangs() {
     if (langsTimerRef.current) {
@@ -2478,6 +2548,13 @@ export function ProjectEditorPage() {
     focusWidgetById(widgetId);
   }
 
+  function openWidgetEventsPanel(widgetId: string) {
+    keepBoxGroupForIdRef.current = widgetId;
+    selectWidget(widgetId);
+    handleOpenBoxGroupChange('events');
+    focusWidgetById(widgetId);
+  }
+
   function syncHeldSpacingEdges() {
     const kind = openBoxGroupRef.current;
     const edges = spacingEdgesFromSelectKeys(
@@ -2609,7 +2686,8 @@ export function ProjectEditorPage() {
     if (!widget) {
       return '';
     }
-    return String(Math.trunc(readNudgeQuad(widget.style, kind)[edges[0]] ?? 0));
+    const shown = readNudgeQuad(widget.style, kind)[edges[0]];
+    return String(Math.trunc(typeof shown === 'number' ? shown : 0));
   }
 
   function stopSpacingNudgeRepeat() {
@@ -3234,6 +3312,7 @@ export function ProjectEditorPage() {
       widgets: widgetsRef.current,
       pageStyle: pageStyleRef.current,
       pageData: pageDataRef.current,
+      pageEvents: pageEventsRef.current,
       selectedWidgetId: selectedWidgetIdRef.current,
     };
     const previous = pastRef.current[pastRef.current.length - 1];
@@ -3243,11 +3322,13 @@ export function ProjectEditorPage() {
     widgetsRef.current = previous.widgets;
     pageStyleRef.current = previous.pageStyle;
     pageDataRef.current = previous.pageData;
+    pageEventsRef.current = previous.pageEvents;
     selectedWidgetIdRef.current = previous.selectedWidgetId;
     clearTableRange();
     setWidgets(previous.widgets);
     setPageStyle(previous.pageStyle);
     setPageData(previous.pageData);
+    setPageEvents(previous.pageEvents);
     setSelectedWidgetId(previous.selectedWidgetId);
     setExpandedKeys((prev) => nextExpandedKeys(prev, previousWidgets, previous.widgets, previous.selectedWidgetId));
     setHistoryTick((tick) => tick + 1);
@@ -3262,6 +3343,7 @@ export function ProjectEditorPage() {
       widgets: widgetsRef.current,
       pageStyle: pageStyleRef.current,
       pageData: pageDataRef.current,
+      pageEvents: pageEventsRef.current,
       selectedWidgetId: selectedWidgetIdRef.current,
     };
     const next = futureRef.current[futureRef.current.length - 1];
@@ -3271,11 +3353,13 @@ export function ProjectEditorPage() {
     widgetsRef.current = next.widgets;
     pageStyleRef.current = next.pageStyle;
     pageDataRef.current = next.pageData;
+    pageEventsRef.current = next.pageEvents;
     selectedWidgetIdRef.current = next.selectedWidgetId;
     clearTableRange();
     setWidgets(next.widgets);
     setPageStyle(next.pageStyle);
     setPageData(next.pageData);
+    setPageEvents(next.pageEvents);
     setSelectedWidgetId(next.selectedWidgetId);
     setExpandedKeys((prev) => nextExpandedKeys(prev, previousWidgets, next.widgets, next.selectedWidgetId));
     setHistoryTick((tick) => tick + 1);
@@ -3300,12 +3384,12 @@ export function ProjectEditorPage() {
     if (isTextStyleShortcut(shortcut)) {
       const widgetId = selectedWidgetIdRef.current;
       const widget = findViewed(widgetId);
-      if (readOnlyRef.current || !widget || (widget.type !== 'text' && widget.type !== 'button')) {
+      if (readOnlyRef.current || !widget || (widget.type !== 'text' && widget.type !== 'button' && widget.type !== 'checkbox' && widget.type !== 'input')) {
         return;
       }
       const style = widget.style;
       if (shortcut === 'fontSizeUp' || shortcut === 'fontSizeDown') {
-        const from = style?.fontSize && style.fontSize > 0 ? style.fontSize : (measuredFontSize(widget.id) ?? 16);
+        const from = typeof style?.fontSize === 'number' && style.fontSize > 0 ? style.fontSize : (measuredFontSize(widget.id) ?? 16);
         const nextSize = Math.min(999, Math.max(1, from + (shortcut === 'fontSizeUp' ? 1 : -1)));
         if (nextSize === style?.fontSize) {
           return;
@@ -3684,6 +3768,7 @@ export function ProjectEditorPage() {
                 onAdd={() => setWidgetModalOpen(true)}
                 onOpenAlias={openAliasModal}
                 onOpenLoop={openWidgetLoopPanel}
+                onOpenEvents={openWidgetEventsPanel}
                 onToggleHidden={toggleWidgetHidden}
                 onExpand={setExpandedKeys}
                 onSelect={selectWidget}
@@ -3732,6 +3817,9 @@ export function ProjectEditorPage() {
               rangeWidget={rangeWidget}
               selectedOwnKeys={selectedOwnKeys}
               pageData={pageData}
+              pageEvents={pageEvents}
+              commitPageEvents={commitPageEvents}
+              pageScopeId={selectedPageId ?? project.id}
               readOnly={readOnly}
               openBoxGroup={openBoxGroup}
               handleOpenBoxGroupChange={handleOpenBoxGroupChange}
@@ -3795,6 +3883,7 @@ export function ProjectEditorPage() {
         parentType={selectedParent?.type}
         readOnly={readOnly}
         pageI18n={pageI18n}
+        variables={pageData}
         projectId={project.id}
         ownKeys={selectedOwnKeys}
         pageStyle={pageStyle}

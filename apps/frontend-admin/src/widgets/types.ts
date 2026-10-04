@@ -6,6 +6,8 @@ import type {
   TableAlign,
   TableLines,
   TableValign,
+  InputType,
+  WidgetEvents,
   WidgetLoop,
   WidgetStyle,
 } from '@vanstack/xml';
@@ -13,11 +15,17 @@ import type {
 export type WidgetPatch = {
   value?: string;
   text?: string;
+  inputType?: InputType | string;
+  modelValue?: string;
+  placeholder?: string;
+  checked?: boolean | string;
+  selected?: string;
   src?: string;
-  size?: number;
+  size?: number | string;
   hidden?: boolean;
   alias?: string;
   loop?: WidgetLoop | undefined;
+  events?: WidgetEvents | undefined;
   stateFn?: string | undefined;
   hoverStateId?: string | undefined;
   style?: WidgetStyle | undefined;
@@ -63,5 +71,5 @@ export interface WidgetHelperInterface<T extends PageWidget = PageWidget> {
   clone(widget: T, ctx: WidgetCloneContext): T;
   patch(widget: T, patch: WidgetPatch): T;
   /** Text shown after the type name in the widget tree. */
-  treeSuffix?(widget: T): string;
+  treeSuffix?(widget: T): string | undefined;
 }

@@ -105,13 +105,13 @@ export function describeCopyBinding(raw: string): CopyBindingLabel {
   return { kind: 'path', field: parts.length > 0 ? parts[parts.length - 1] : pathMatch[1], source };
 }
 
-export function resolveCopyBinding(raw: string, scope: BindingScope): string {
+export function resolveCopyValue(raw: string, scope: BindingScope): unknown {
   const exprMatch = EXPR_BINDING.exec(raw);
   if (exprMatch) {
     try {
-      return bindingToString(evaluateBindingExpression(exprMatch[1], scope));
+      return evaluateBindingExpression(exprMatch[1], scope);
     } catch {
-      return '';
+      return undefined;
     }
   }
 
@@ -125,20 +125,28 @@ export function resolveCopyBinding(raw: string, scope: BindingScope): string {
   try {
     if (head === 'data') {
       if (parts.length === 0) {
-        return bindingToString(scope.data);
+        return scope.data;
       }
       const [name, ...rest] = parts;
       if (!Object.prototype.hasOwnProperty.call(scope.data, name)) {
-        return '';
+        return undefined;
       }
-      return bindingToString(readPath(scope.data[name], rest));
+      return readPath(scope.data[name], rest);
     }
     const aliases = scope.aliases ?? {};
     if (!Object.prototype.hasOwnProperty.call(aliases, head)) {
-      return '';
+      return undefined;
     }
-    return bindingToString(readPath(aliases[head], parts));
+    return readPath(aliases[head], parts);
   } catch {
+    return undefined;
+  }
+}
+
+export function resolveCopyBinding(raw: string, scope: BindingScope): string {
+  const value = resolveCopyValue(raw, scope);
+  if (value === undefined && isCopyBinding(raw)) {
     return '';
   }
+  return bindingToString(value);
 }

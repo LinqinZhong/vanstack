@@ -181,6 +181,7 @@ export function paintWidgetChrome(
   zoom: number,
   editing: boolean,
   spacingDrag: BoxDragKind | 'border' | null,
+  showHover = true,
 ) {
   if (!editing) {
     syncWidgetChrome(host, null, null, zoom);
@@ -190,7 +191,7 @@ export function paintWidgetChrome(
     ? null
     : (root?.querySelector<HTMLElement>('.is-widget-selected') ?? null);
   let hover: HTMLElement | null = null;
-  if (!spacingDrag && hoverTarget instanceof Element) {
+  if (showHover && !spacingDrag && hoverTarget instanceof Element) {
     const node = hoverTarget.closest('[data-widget-id]');
     hover = node instanceof HTMLElement ? node : null;
   }

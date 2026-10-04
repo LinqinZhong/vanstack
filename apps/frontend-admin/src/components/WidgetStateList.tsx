@@ -57,7 +57,7 @@ export function WidgetStateList({
       .map((item) => item.name as string);
     createForm.setFieldsValue({
       name: nextCopiedStateName(ownedNames, row.name ?? null),
-      transition: row.transition ?? 0,
+      transition: typeof row.transition === 'number' ? row.transition : 0,
     });
     setCreatingFrom(row);
     setCreateOpen(true);
@@ -67,7 +67,7 @@ export function WidgetStateList({
     if (!row.owned || (row.id == null && row.scopeId)) {
       return;
     }
-    renameForm.setFieldsValue({ name: row.name ?? '', transition: row.transition ?? 0 });
+    renameForm.setFieldsValue({ name: row.name ?? '', transition: typeof row.transition === 'number' ? row.transition : 0 });
     setEditing(row);
   }
 

@@ -31,13 +31,32 @@ button {
   flex-direction: column;
 }
 
+.h5-frame:has(.h5-body.is-runtime) {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
 .h5-body {
   flex: 1;
   padding: 16px;
 }
 
 .h5-body.is-runtime {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 0;
+}
+
+.h5-runtime {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .h5-hint {
@@ -57,7 +76,7 @@ button {
   box-sizing: border-box;
 }
 
-.h5-runtime :where(.lowcode-flex > .lowcode-text, .lowcode-flex > .lowcode-button, .lowcode-flex > .lowcode-image, .lowcode-flex > .lowcode-flex, .lowcode-flex > .lowcode-swiper) {
+.h5-runtime :where(.lowcode-flex > .lowcode-text, .lowcode-flex > .lowcode-input, .lowcode-flex > .lowcode-checkbox, .lowcode-flex > .lowcode-switch, .lowcode-flex > .lowcode-button, .lowcode-flex > .lowcode-image, .lowcode-flex > .lowcode-flex, .lowcode-flex > .lowcode-swiper) {
   margin: 0;
 }
 
@@ -98,15 +117,114 @@ button {
   user-select: none;
 }
 
+.h5-runtime :where(.lowcode-input) {
+  display: inline-block;
+  vertical-align: baseline;
+  box-sizing: border-box;
+  width: 160px;
+  margin: 0 0.25em;
+  padding: 0.2em 0.45em;
+  font: inherit;
+  line-height: 1.5;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 2px;
+  appearance: none;
+}
+
+.h5-runtime textarea.lowcode-input {
+  min-height: 4.5em;
+  resize: vertical;
+}
+
 .h5-runtime :where(.lowcode-button) {
   display: inline-block;
   vertical-align: baseline;
   box-sizing: border-box;
-  max-width: 100%;
   margin: 0 0.25em;
   padding: 0 0.45em;
   color: inherit;
   background: #fff;
   border: 1px solid #d0d0d0;
   appearance: none;
+}
+
+.h5-runtime :where(.lowcode-checkbox) {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  vertical-align: baseline;
+  box-sizing: border-box;
+  margin: 0 0.25em;
+  padding: 0.15em 0.45em;
+  line-height: 1.5;
+  color: inherit;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.h5-runtime .lowcode-checkbox-control {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.h5-runtime .lowcode-checkbox-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 1em;
+  height: 1em;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+}
+
+.h5-runtime .lowcode-checkbox-control:checked + .lowcode-checkbox-mark::after {
+  content: '';
+  width: 0.28em;
+  height: 0.5em;
+  margin-top: -0.12em;
+  border: solid currentColor;
+  border-width: 0 0.12em 0.12em 0;
+  transform: rotate(45deg);
+}
+
+.h5-runtime :where(.lowcode-switch) {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 40px;
+  height: 22px;
+  margin: 0 0.25em;
+  padding: 2px;
+  border: none;
+  border-radius: 999px;
+  background: #d9d9d9;
+  vertical-align: middle;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.h5-runtime .lowcode-switch.is-on {
+  background: #1677ff;
+}
+
+.h5-runtime .lowcode-switch-thumb {
+  height: 100%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.h5-runtime .lowcode-switch.is-on .lowcode-switch-thumb {
+  margin-left: auto;
 }

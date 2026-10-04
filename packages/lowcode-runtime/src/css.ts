@@ -4,7 +4,9 @@ import {
   boxLengthCss,
   isCopyBinding,
   resolveCopyBinding,
+  type AngleValue,
   type BindingScope,
+  type BoxLength,
   type FlexContainerStyle,
   type FlexItemStyle,
   type PageStyle,
@@ -34,7 +36,82 @@ function cssText(raw: string | undefined, options?: WidgetCssOptions): string | 
   return resolved || undefined;
 }
 
-export function sizeCss(size: SizeValue | undefined): string {
+function cssMeasure(value: number | string | undefined, options?: WidgetCssOptions, unit = 'px'): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return `${value}${unit}`;
+  }
+  const text = cssText(typeof value === 'string' ? value : undefined, options);
+  if (!text) {
+    return undefined;
+  }
+  return /^-?\d+(?:\.\d+)?$/.test(text) ? `${text}${unit}` : text;
+}
+
+function cssUnitless(value: number | string | undefined, options?: WidgetCssOptions): number | string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  const text = cssText(typeof value === 'string' ? value : undefined, options);
+  if (!text) {
+    return undefined;
+  }
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : text;
+}
+
+function cssOn(value: boolean | string | undefined, options?: WidgetCssOptions): boolean {
+  if (typeof value !== 'string') {
+    return Boolean(value);
+  }
+  const text = cssText(value, options);
+  return text === 'true' || text === '1' || text === 'yes';
+}
+
+function cssBox(length: BoxLength | string | undefined, options?: WidgetCssOptions): string | undefined {
+  if (length == null) {
+    return undefined;
+  }
+  if (typeof length !== 'string') {
+    return boxLengthCss(length);
+  }
+  const text = cssText(length, options);
+  if (!text) {
+    return undefined;
+  }
+  if (text === 'auto' || /^-?\d+(?:\.\d+)?(?:px|%)$/.test(text)) {
+    return text;
+  }
+  return /^-?\d+(?:\.\d+)?$/.test(text) ? `${text}px` : text;
+}
+
+function cssAngleValue(angle: AngleValue | string | undefined, options?: WidgetCssOptions): string | undefined {
+  if (angle == null) {
+    return undefined;
+  }
+  if (typeof angle !== 'string') {
+    return angleCss(angle);
+  }
+  const text = cssText(angle, options);
+  if (!text) {
+    return undefined;
+  }
+  if (/^-?\d+(?:\.\d+)?(?:deg|rad|grad|turn)$/i.test(text)) {
+    return text;
+  }
+  return /^-?\d+(?:\.\d+)?$/.test(text) ? `${text}deg` : text;
+}
+
+export function sizeCss(size: SizeValue | string | undefined, options?: WidgetCssOptions): string {
+  if (typeof size === 'string') {
+    const text = cssText(size, options);
+    if (!text) {
+      return 'fit-content';
+    }
+    if (/^\d+(?:\.\d+)?$/.test(text)) {
+      return `${text}px`;
+    }
+    return text;
+  }
   if (!size) {
     return 'fit-content';
   }
@@ -55,22 +132,39 @@ export function hiddenCss(hidden: boolean | undefined, editing: boolean): CSSPro
   return hidden && editing ? { visibility: 'hidden' } : undefined;
 }
 
-export function pageCss(style: PageStyle | undefined): CSSProperties {
-  const css: CSSProperties = { boxSizing: 'border-box', position: 'relative', perspective: 800 };
-  if (style?.background) {
-    css.background = style.background;
+export function pageCss(style: PageStyle | undefined, editing = false, options?: WidgetCssOptions): CSSProperties {
+  const overflow = editing ? 'visible' : (cssText(style?.overflow, options) ?? 'auto');
+  const css: CSSProperties = {
+    boxSizing: 'border-box',
+    position: 'relative',
+    perspective: 800,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    width: '100%',
+    height: '100%',
+    minHeight: '100%',
+    overflow: overflow as CSSProperties['overflow'],
+  };
+  const background = cssText(style?.background, options);
+  if (background) {
+    css.background = background;
   }
-  if (style?.paddingTop != null) {
-    css.paddingTop = `${style.paddingTop}px`;
+  const paddingTop = cssMeasure(style?.paddingTop, options);
+  if (paddingTop) {
+    css.paddingTop = paddingTop;
   }
-  if (style?.paddingRight != null) {
-    css.paddingRight = `${style.paddingRight}px`;
+  const paddingRight = cssMeasure(style?.paddingRight, options);
+  if (paddingRight) {
+    css.paddingRight = paddingRight;
   }
-  if (style?.paddingBottom != null) {
-    css.paddingBottom = `${style.paddingBottom}px`;
+  const paddingBottom = cssMeasure(style?.paddingBottom, options);
+  if (paddingBottom) {
+    css.paddingBottom = paddingBottom;
   }
-  if (style?.paddingLeft != null) {
-    css.paddingLeft = `${style.paddingLeft}px`;
+  const paddingLeft = cssMeasure(style?.paddingLeft, options);
+  if (paddingLeft) {
+    css.paddingLeft = paddingLeft;
   }
   return css;
 }
@@ -90,7 +184,9 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
     css.textShadow = textShadow;
   }
   if (style.italic != null) {
-    css.fontStyle = style.italic ? 'italic' : 'normal';
+    css.fontStyle = cssOn(typeof style.italic === 'string' && !isCopyBinding(style.italic) ? style.italic === 'italic' : style.italic, options)
+      ? 'italic'
+      : 'normal';
   }
   if (style.fontFamily) {
     const fontFamily = cssText(style.fontFamily, options);
@@ -98,8 +194,9 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
       css.fontFamily = fontFamily;
     }
   }
-  if (style.fontSize != null) {
-    css.fontSize = `${style.fontSize}px`;
+  const fontSize = cssMeasure(style.fontSize, options);
+  if (fontSize) {
+    css.fontSize = fontSize;
   }
   if (style.fontWeight) {
     const fontWeight = cssText(style.fontWeight, options);
@@ -110,10 +207,10 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
 
   if (style.underline != null || style.lineThrough != null) {
     const decorations: string[] = [];
-    if (style.underline) {
+    if (cssOn(style.underline, options)) {
       decorations.push('underline');
     }
-    if (style.lineThrough) {
+    if (cssOn(style.lineThrough, options)) {
       decorations.push('line-through');
     }
     css.textDecoration = decorations.length > 0 ? decorations.join(' ') : 'none';
@@ -183,23 +280,27 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
         edge.apply('0px', 'solid', undefined);
         continue;
       }
-      edge.apply(`${edge.width ?? 1}px`, cssText(edge.line, options) || 'solid', color);
+      edge.apply(cssMeasure(edge.width ?? 1, options) || '1px', cssText(typeof edge.line === 'string' ? edge.line : undefined, options) || 'solid', color);
     }
   } else if (background) {
     css.border = 'none';
   }
 
-  if (style.radiusTopLeft != null) {
-    css.borderTopLeftRadius = `${style.radiusTopLeft}px`;
+  const radiusTopLeft = cssMeasure(style.radiusTopLeft, options);
+  if (radiusTopLeft) {
+    css.borderTopLeftRadius = radiusTopLeft;
   }
-  if (style.radiusTopRight != null) {
-    css.borderTopRightRadius = `${style.radiusTopRight}px`;
+  const radiusTopRight = cssMeasure(style.radiusTopRight, options);
+  if (radiusTopRight) {
+    css.borderTopRightRadius = radiusTopRight;
   }
-  if (style.radiusBottomRight != null) {
-    css.borderBottomRightRadius = `${style.radiusBottomRight}px`;
+  const radiusBottomRight = cssMeasure(style.radiusBottomRight, options);
+  if (radiusBottomRight) {
+    css.borderBottomRightRadius = radiusBottomRight;
   }
-  if (style.radiusBottomLeft != null) {
-    css.borderBottomLeftRadius = `${style.radiusBottomLeft}px`;
+  const radiusBottomLeft = cssMeasure(style.radiusBottomLeft, options);
+  if (radiusBottomLeft) {
+    css.borderBottomLeftRadius = radiusBottomLeft;
   }
 
   const boxShadow = cssText(style.boxShadow, options);
@@ -207,124 +308,157 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
     css.boxShadow = boxShadow;
   }
 
-  css.width = sizeCss(style.width);
-  css.height = sizeCss(style.height);
-  if (style.overflow) {
-    css.overflow = style.overflow;
+  css.width = sizeCss(style.width, options);
+  css.height = sizeCss(style.height, options);
+  const overflow = cssText(style.overflow, options);
+  if (overflow) {
+    css.overflow = overflow as CSSProperties['overflow'];
   }
-  if (style.position) {
-    css.position = style.position;
-    if (style.top) {
-      css.top = boxLengthCss(style.top);
+  const position = cssText(style.position, options);
+  if (position) {
+    css.position = position as CSSProperties['position'];
+    const top = cssBox(style.top, options);
+    if (top) {
+      css.top = top;
     }
-    if (style.right) {
-      css.right = boxLengthCss(style.right);
+    const right = cssBox(style.right, options);
+    if (right) {
+      css.right = right;
     }
-    if (style.bottom) {
-      css.bottom = boxLengthCss(style.bottom);
+    const bottom = cssBox(style.bottom, options);
+    if (bottom) {
+      css.bottom = bottom;
     }
-    if (style.left) {
-      css.left = boxLengthCss(style.left);
+    const left = cssBox(style.left, options);
+    if (left) {
+      css.left = left;
     }
-    if (style.zIndex != null) {
-      css.zIndex = style.zIndex;
+    const zIndex = cssUnitless(style.zIndex, options);
+    if (zIndex != null && zIndex !== '') {
+      css.zIndex = zIndex as CSSProperties['zIndex'];
     }
   }
-  if (style.marginTop) {
-    css.marginTop = boxLengthCss(style.marginTop);
+  const marginTop = cssBox(style.marginTop, options);
+  if (marginTop) {
+    css.marginTop = marginTop;
   }
-  if (style.marginRight) {
-    css.marginRight = boxLengthCss(style.marginRight);
+  const marginRight = cssBox(style.marginRight, options);
+  if (marginRight) {
+    css.marginRight = marginRight;
   }
-  if (style.marginBottom) {
-    css.marginBottom = boxLengthCss(style.marginBottom);
+  const marginBottom = cssBox(style.marginBottom, options);
+  if (marginBottom) {
+    css.marginBottom = marginBottom;
   }
-  if (style.marginLeft) {
-    css.marginLeft = boxLengthCss(style.marginLeft);
+  const marginLeft = cssBox(style.marginLeft, options);
+  if (marginLeft) {
+    css.marginLeft = marginLeft;
   }
-  if (style.paddingTop) {
-    css.paddingTop = boxLengthCss(style.paddingTop);
+  const paddingTop = cssBox(style.paddingTop, options);
+  if (paddingTop) {
+    css.paddingTop = paddingTop;
   }
-  if (style.paddingRight) {
-    css.paddingRight = boxLengthCss(style.paddingRight);
+  const paddingRight = cssBox(style.paddingRight, options);
+  if (paddingRight) {
+    css.paddingRight = paddingRight;
   }
-  if (style.paddingBottom) {
-    css.paddingBottom = boxLengthCss(style.paddingBottom);
+  const paddingBottom = cssBox(style.paddingBottom, options);
+  if (paddingBottom) {
+    css.paddingBottom = paddingBottom;
   }
-  if (style.paddingLeft) {
-    css.paddingLeft = boxLengthCss(style.paddingLeft);
+  const paddingLeft = cssBox(style.paddingLeft, options);
+  if (paddingLeft) {
+    css.paddingLeft = paddingLeft;
   }
 
   const rotate: string[] = [];
-  if (style.rotateX) {
-    rotate.push(`rotateX(${angleCss(style.rotateX)})`);
+  const rotateX = cssAngleValue(style.rotateX, options);
+  if (rotateX) {
+    rotate.push(`rotateX(${rotateX})`);
   }
-  if (style.rotateY) {
-    rotate.push(`rotateY(${angleCss(style.rotateY)})`);
+  const rotateY = cssAngleValue(style.rotateY, options);
+  if (rotateY) {
+    rotate.push(`rotateY(${rotateY})`);
   }
-  if (style.rotateZ) {
-    rotate.push(`rotateZ(${angleCss(style.rotateZ)})`);
+  const rotateZ = cssAngleValue(style.rotateZ, options);
+  if (rotateZ) {
+    rotate.push(`rotateZ(${rotateZ})`);
   }
   if (rotate.length > 0) {
     css.transform = rotate.join(' ');
   }
-  if ((options?.animate ?? true) && style.transition != null && style.transition > 0) {
-    css.transition = `all ${style.transition}ms`;
+  const motion = cssMeasure(style.transition, options, 'ms');
+  if ((options?.animate ?? true) && motion && motion !== '0ms') {
+    css.transition = `all ${motion}`;
   }
 
   return Object.keys(css).length > 0 ? css : undefined;
 }
 
-export function flexContainerCss(style: FlexContainerStyle | undefined): CSSProperties {
+export function flexContainerCss(style: FlexContainerStyle | undefined, options?: WidgetCssOptions): CSSProperties {
   const css: CSSProperties = {
-    display: style?.display ?? 'flex',
+    display: (cssText(style?.display, options) ?? 'flex') as CSSProperties['display'],
   };
-  if (style?.flexDirection) {
-    css.flexDirection = style.flexDirection;
+  const flexDirection = cssText(style?.flexDirection, options);
+  if (flexDirection) {
+    css.flexDirection = flexDirection as CSSProperties['flexDirection'];
   }
-  if (style?.flexWrap) {
-    css.flexWrap = style.flexWrap;
+  const flexWrap = cssText(style?.flexWrap, options);
+  if (flexWrap) {
+    css.flexWrap = flexWrap as CSSProperties['flexWrap'];
   }
-  if (style?.justifyContent) {
-    css.justifyContent = style.justifyContent;
+  const justifyContent = cssText(style?.justifyContent, options);
+  if (justifyContent) {
+    css.justifyContent = justifyContent as CSSProperties['justifyContent'];
   }
-  if (style?.alignItems) {
-    css.alignItems = style.alignItems;
+  const alignItems = cssText(style?.alignItems, options);
+  if (alignItems) {
+    css.alignItems = alignItems as CSSProperties['alignItems'];
   }
-  if (style?.alignContent) {
-    css.alignContent = style.alignContent;
+  const alignContent = cssText(style?.alignContent, options);
+  if (alignContent) {
+    css.alignContent = alignContent as CSSProperties['alignContent'];
   }
-  if (style?.rowGap != null) {
-    css.rowGap = `${style.rowGap}px`;
+  const rowGap = cssMeasure(style?.rowGap, options);
+  if (rowGap) {
+    css.rowGap = rowGap;
   }
-  if (style?.columnGap != null) {
-    css.columnGap = `${style.columnGap}px`;
+  const columnGap = cssMeasure(style?.columnGap, options);
+  if (columnGap) {
+    css.columnGap = columnGap;
   }
   return css;
 }
 
-export function flexItemCss(style: FlexItemStyle | undefined): CSSProperties | undefined {
+export function flexItemCss(style: FlexItemStyle | undefined, options?: WidgetCssOptions): CSSProperties | undefined {
   if (!style) {
     return undefined;
   }
 
   const css: CSSProperties = {};
-  if (style.order != null) {
-    css.order = style.order;
+  const order = cssUnitless(style.order, options);
+  if (typeof order === 'number') {
+    css.order = order;
   }
-  if (style.flexGrow != null) {
-    css.flexGrow = style.flexGrow;
+  const flexGrow = cssUnitless(style.flexGrow, options);
+  if (typeof flexGrow === 'number') {
+    css.flexGrow = flexGrow;
   }
-  if (style.flexShrink != null) {
-    css.flexShrink = style.flexShrink;
+  const flexShrink = cssUnitless(style.flexShrink, options);
+  if (typeof flexShrink === 'number') {
+    css.flexShrink = flexShrink;
   }
   if (style.flexBasis === 'auto') {
     css.flexBasis = 'auto';
-  } else if (typeof style.flexBasis === 'number') {
-    css.flexBasis = `${style.flexBasis}px`;
+  } else {
+    const flexBasis = cssMeasure(style.flexBasis, options);
+    if (flexBasis) {
+      css.flexBasis = flexBasis;
+    }
   }
-  if (style.alignSelf) {
-    css.alignSelf = style.alignSelf;
+  const alignSelf = cssText(style.alignSelf, options);
+  if (alignSelf) {
+    css.alignSelf = alignSelf as CSSProperties['alignSelf'];
   }
   return Object.keys(css).length > 0 ? css : undefined;
 }
@@ -349,8 +483,9 @@ export function widgetClassName(id: string): string {
 
 export function dynamicStyleCss(style: WidgetStyle | undefined, options?: WidgetCssOptions): CSSProperties | undefined {
   const css: CSSProperties = {};
-  if ((options?.animate ?? true) && style?.transition != null && style.transition > 0) {
-    css.transition = `all ${style.transition}ms`;
+  const transition = cssMeasure(style?.transition, options, 'ms');
+  if ((options?.animate ?? true) && transition && transition !== '0ms') {
+    css.transition = `all ${transition}`;
   }
   if (style) {
     const filtered: Record<string, string> = {};
@@ -361,8 +496,12 @@ export function dynamicStyleCss(style: WidgetStyle | undefined, options?: Widget
     }
     if (Object.keys(filtered).length > 0) {
       const bound = widgetCss(filtered as unknown as WidgetStyle, { ...options, animate: false }) ?? {};
-      delete bound.width;
-      delete bound.height;
+      if (!('width' in filtered)) {
+        delete bound.width;
+      }
+      if (!('height' in filtered)) {
+        delete bound.height;
+      }
       for (const key of Object.keys(bound)) {
         if (key.startsWith('border') && !(key in filtered)) {
           delete bound[key as keyof CSSProperties];
@@ -410,14 +549,15 @@ function iconLayoutStyle(widget: PageWidget): WidgetStyle | undefined {
   if (widget.type !== 'icon') {
     return widget.style;
   }
-  const size = widget.size != null && widget.size > 0 ? widget.size : 24;
+  const size = typeof widget.size === 'number' && widget.size > 0 ? widget.size : 24;
+  const boundSize = typeof widget.size === 'string' && isCopyBinding(widget.size) ? widget.size : undefined;
   if (widget.style?.width && widget.style.height) {
     return widget.style;
   }
   return {
     ...widget.style,
-    width: widget.style?.width ?? { mode: 'px', value: size },
-    height: widget.style?.height ?? { mode: 'px', value: size },
+    width: widget.style?.width ?? boundSize ?? { mode: 'px', value: size },
+    height: widget.style?.height ?? boundSize ?? { mode: 'px', value: size },
   };
 }
 
@@ -500,12 +640,13 @@ export function pageCssText(widgets: PageWidget[]): string {
 
   walk(widgets);
   blocks.push(
+    '.lowcode-page > [data-widget-id] { flex: 0 0 auto; max-width: none; }',
     '.lowcode-table { scrollbar-width: none; }',
     '.lowcode-table::-webkit-scrollbar { width: 0; height: 0; display: none; }',
     '.lowcode-table-slot { display: flex; align-items: center; }',
     '.lowcode-dynamic-copy { cursor: help; }',
     '.lowcode-dynamic-copy-tip { position: fixed; z-index: 80; max-width: 360px; padding: 6px 8px; border-radius: 6px; background: rgba(21, 28, 34, 0.96); color: #fff; font: 12px/1.45 "Segoe UI", sans-serif; white-space: pre-wrap; word-break: break-all; pointer-events: none; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28); }',
-    '.lowcode-table-slot > :where(.lowcode-icon, .lowcode-text, .lowcode-image, .lowcode-button) { vertical-align: middle; }',
+    '.lowcode-table-slot > :where(.lowcode-icon, .lowcode-text, .lowcode-image, .lowcode-button, .lowcode-input, .lowcode-checkbox, .lowcode-switch) { vertical-align: middle; }',
   );
   return blocks.join('\n');
 }

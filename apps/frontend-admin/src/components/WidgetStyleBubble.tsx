@@ -14,6 +14,7 @@ import {
   PictureOutlined,
   RadiusSettingOutlined,
   RotateRightOutlined,
+  ThunderboltOutlined,
   UnorderedListOutlined,
   StrikethroughOutlined,
   UnderlineOutlined,
@@ -34,8 +35,10 @@ import {
   TABLE_ALIGNS,
   TABLE_VALIGNS,
   isCopyBinding,
+  hasWidgetEvents,
   isLoopConfigured,
   isStateFnConfigured,
+  widgetEventSpecs,
   sanitizeWidgetStyle,
   type OverflowMode,
   type PageI18n,
@@ -55,6 +58,7 @@ import { IconPicker } from './IconLibraryPanel';
 import { CopyI18nPicker } from './CopyI18nPicker';
 import { StyleBoxEdges, pxFromLength } from './StyleBoxEdges';
 import { AngleField, SizeField, fontFamilyOptions } from './WidgetStyleFields';
+import { WidgetEventPanel } from './WidgetEventPanel';
 import { WidgetLoopPanel } from './WidgetLoopPanel';
 import { WidgetStateFnModal } from './WidgetStateFnModal';
 import { modifierShortcutLabel } from '../utils/widgetShortcuts';
@@ -69,7 +73,7 @@ type ShadowValue = {
 const DEFAULT_SHADOW: ShadowValue = { x: 0, y: 0, blur: 4, color: '' };
 const DEFAULT_BUTTON_BACKGROUND = '#ffffff';
 
-export type BoxGroup = 'content' | 'margin' | 'padding' | 'radius' | 'border' | 'size' | 'overflow' | 'position' | 'rotate' | 'loop';
+export type BoxGroup = 'content' | 'margin' | 'padding' | 'radius' | 'border' | 'size' | 'overflow' | 'position' | 'rotate' | 'loop' | 'events';
 
 export type TableCommand =
   | 'add-column'
@@ -92,7 +96,7 @@ export type TableBubbleModel = {
 };
 
 export function isBoxGroupAllowed(type: PageWidget['type'], group: BoxGroup) {
-  if (group === 'loop') {
+  if (group === 'loop' || group === 'events') {
     return true;
   }
   if (type === 'tr') {
@@ -102,7 +106,7 @@ export function isBoxGroupAllowed(type: PageWidget['type'], group: BoxGroup) {
     return group === 'padding' || group === 'radius';
   }
   if (group === 'overflow') {
-    return type === 'text' || type === 'flex' || type === 'table';
+    return type === 'text' || type === 'input' || type === 'flex' || type === 'table';
   }
   if (
     type === 'swiper-item' &&
@@ -290,6 +294,7 @@ export function WidgetStyleBubble({
   onTextChange,
   onSrcChange,
   onLoopChange,
+  onEventsChange,
   onStateFnChange,
   onOpenInspector,
   i18nCatalog,
@@ -312,6 +317,7 @@ export function WidgetStyleBubble({
   onSrcChange?: (src: string) => void;
   projectId?: string;
   onLoopChange?: (loop: WidgetLoop | undefined) => void;
+  onEventsChange?: (events: PageWidget['events']) => void;
   onStateFnChange?: (stateFn: string | undefined, hoverStateId?: string) => void;
   onOpenInspector: () => void;
   i18nCatalog?: PageI18n;
@@ -341,11 +347,13 @@ export function WidgetStyleBubble({
   const showText =
     widget.type === 'text' ||
     widget.type === 'button' ||
+    widget.type === 'checkbox' ||
+    (widget.type === 'input' && !widget.modelValue?.trim()) ||
     ((widget.type === 'th' || widget.type === 'td') && !table?.hideCopy);
   const content =
-    widget.type === 'text' || widget.type === 'th' || widget.type === 'td'
+    widget.type === 'text' || widget.type === 'th' || widget.type === 'td' || widget.type === 'input'
       ? widget.value
-      : widget.type === 'button'
+      : widget.type === 'button' || widget.type === 'checkbox'
         ? widget.text
         : '';
   const [textShadow, setTextShadow] = useState(() => parseCssShadow(display.textShadow));
@@ -724,6 +732,14 @@ export function WidgetStyleBubble({
               />
             </Tooltip>
           ) : null}
+          <Tooltip title={t('lowcode.styleEvents')}>
+            <Button
+              size="small"
+              type={openGroup === 'events' || hasWidgetEvents(widget.events) ? 'primary' : 'text'}
+              icon={<ThunderboltOutlined />}
+              onClick={() => toggleGroup('events')}
+            />
+          </Tooltip>
           <Tooltip title={t('lowcode.styleLoop')}>
             <Button
               size="small"
@@ -798,7 +814,13 @@ export function WidgetStyleBubble({
                 <Select
                   size="small"
                   className={inheritedClass('overflow')}
-                  value={widget.type === 'table' ? (display.overflow ?? 'auto') : (display.overflow ?? 'visible')}
+                  value={
+                    (OVERFLOW_MODES as readonly string[]).includes(display.overflow ?? '')
+                      ? (display.overflow as OverflowMode)
+                      : widget.type === 'table'
+                        ? 'auto'
+                        : 'visible'
+                  }
                   getPopupContainer={popupContainer}
                   onChange={(overflow: OverflowMode) =>
                     patch({
@@ -838,7 +860,11 @@ export function WidgetStyleBubble({
                 <Select
                   size="small"
                   className={inheritedClass('position')}
-                  value={display.position ?? 'static'}
+                  value={
+                    (POSITION_MODES as readonly string[]).includes(display.position ?? '')
+                      ? (display.position as PositionMode)
+                      : 'static'
+                  }
                   getPopupContainer={popupContainer}
                   onChange={(position: PositionMode) =>
                     patch({ position: position === 'static' ? undefined : position })
@@ -1133,6 +1159,16 @@ export function WidgetStyleBubble({
                   />
                 </Inherited>
               </div>
+            ) : null}
+            {openGroup === 'events' && onEventsChange ? (
+              <WidgetEventPanel
+                specs={widgetEventSpecs(widget.type)}
+                events={widget.events}
+                scopeKey={widget.id}
+                projectId={projectId}
+                disabled={disabled}
+                onChange={onEventsChange}
+              />
             ) : null}
             {openGroup === 'loop' && onLoopChange ? (
               <WidgetLoopPanel

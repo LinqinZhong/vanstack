@@ -1,4 +1,6 @@
 import { XMLBuilder, XMLParser, XMLValidator } from 'fast-xml-parser';
+import { buildPageDataScope } from './data';
+import { compactPageEvents, compactWidgetEvents, PAGE_EVENT_SPECS, widgetEventSpecs, type WidgetEvents } from './events';
 import { XmlParseError } from './errors';
 import { copyWidgetRuntimeMeta } from './runtime-meta';
 
@@ -32,17 +34,17 @@ const ANGLE_PATTERN = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+))(deg|rad|grad|turn)?$/i;
 export type WidgetStyle = {
   color?: string;
   textShadow?: string;
-  italic?: boolean;
+  italic?: boolean | string;
   fontFamily?: string;
-  fontSize?: number;
+  fontSize?: number | string;
   fontWeight?: string;
-  underline?: boolean;
-  lineThrough?: boolean;
+  underline?: boolean | string;
+  lineThrough?: boolean | string;
   background?: string;
-  borderTopWidth?: number;
-  borderRightWidth?: number;
-  borderBottomWidth?: number;
-  borderLeftWidth?: number;
+  borderTopWidth?: number | string;
+  borderRightWidth?: number | string;
+  borderBottomWidth?: number | string;
+  borderLeftWidth?: number | string;
   borderStyle?: string;
   borderTopStyle?: string;
   borderRightStyle?: string;
@@ -53,32 +55,32 @@ export type WidgetStyle = {
   borderRightColor?: string;
   borderBottomColor?: string;
   borderLeftColor?: string;
-  radiusTopLeft?: number;
-  radiusTopRight?: number;
-  radiusBottomRight?: number;
-  radiusBottomLeft?: number;
+  radiusTopLeft?: number | string;
+  radiusTopRight?: number | string;
+  radiusBottomRight?: number | string;
+  radiusBottomLeft?: number | string;
   boxShadow?: string;
-  width?: SizeValue;
-  height?: SizeValue;
-  overflow?: OverflowMode;
-  position?: WidgetPosition;
-  zIndex?: number;
-  top?: BoxLength;
-  right?: BoxLength;
-  bottom?: BoxLength;
-  left?: BoxLength;
-  marginTop?: BoxLength;
-  marginRight?: BoxLength;
-  marginBottom?: BoxLength;
-  marginLeft?: BoxLength;
-  paddingTop?: BoxLength;
-  paddingRight?: BoxLength;
-  paddingBottom?: BoxLength;
-  paddingLeft?: BoxLength;
-  rotateX?: AngleValue;
-  rotateY?: AngleValue;
-  rotateZ?: AngleValue;
-  transition?: number;
+  width?: SizeValue | string;
+  height?: SizeValue | string;
+  overflow?: OverflowMode | string;
+  position?: WidgetPosition | string;
+  zIndex?: number | string;
+  top?: BoxLength | string;
+  right?: BoxLength | string;
+  bottom?: BoxLength | string;
+  left?: BoxLength | string;
+  marginTop?: BoxLength | string;
+  marginRight?: BoxLength | string;
+  marginBottom?: BoxLength | string;
+  marginLeft?: BoxLength | string;
+  paddingTop?: BoxLength | string;
+  paddingRight?: BoxLength | string;
+  paddingBottom?: BoxLength | string;
+  paddingLeft?: BoxLength | string;
+  rotateX?: AngleValue | string;
+  rotateY?: AngleValue | string;
+  rotateZ?: AngleValue | string;
+  transition?: number | string;
 };
 
 export const FLEX_DISPLAYS = ['flex', 'inline-flex'] as const;
@@ -113,22 +115,22 @@ export type FlexAlignContent = (typeof FLEX_ALIGN_CONTENTS)[number];
 export type FlexAlignSelf = (typeof FLEX_ALIGN_SELFS)[number];
 
 export type FlexContainerStyle = {
-  display?: FlexDisplay;
-  flexDirection?: FlexDirection;
-  flexWrap?: FlexWrap;
-  justifyContent?: FlexJustifyContent;
-  alignItems?: FlexAlignItems;
-  alignContent?: FlexAlignContent;
-  rowGap?: number;
-  columnGap?: number;
+  display?: FlexDisplay | string;
+  flexDirection?: FlexDirection | string;
+  flexWrap?: FlexWrap | string;
+  justifyContent?: FlexJustifyContent | string;
+  alignItems?: FlexAlignItems | string;
+  alignContent?: FlexAlignContent | string;
+  rowGap?: number | string;
+  columnGap?: number | string;
 };
 
 export type FlexItemStyle = {
-  order?: number;
-  flexGrow?: number;
-  flexShrink?: number;
-  flexBasis?: 'auto' | number;
-  alignSelf?: FlexAlignSelf;
+  order?: number | string;
+  flexGrow?: number | string;
+  flexShrink?: number | string;
+  flexBasis?: 'auto' | number | string;
+  alignSelf?: FlexAlignSelf | string;
 };
 
 export const SWIPER_EASINGS = [
@@ -141,26 +143,109 @@ export const SWIPER_EASINGS = [
 export type SwiperEasing = (typeof SWIPER_EASINGS)[number];
 
 export type SwiperStyle = {
-  indicatorDots?: boolean;
+  indicatorDots?: boolean | string;
   indicatorColor?: string;
   indicatorActiveColor?: string;
-  autoplay?: boolean;
-  current?: number;
-  interval?: number;
-  duration?: number;
-  circular?: boolean;
-  vertical?: boolean;
-  previousMargin?: number;
-  nextMargin?: number;
-  displayMultipleItems?: number;
-  snapToEdge?: boolean;
-  easingFunction?: SwiperEasing;
+  autoplay?: boolean | string;
+  current?: number | string;
+  interval?: number | string;
+  duration?: number | string;
+  circular?: boolean | string;
+  vertical?: boolean | string;
+  previousMargin?: number | string;
+  nextMargin?: number | string;
+  displayMultipleItems?: number | string;
+  snapToEdge?: boolean | string;
+  easingFunction?: SwiperEasing | string;
 };
 
 export const TABLE_ALIGNS = ['start', 'center', 'end'] as const;
 export type TableAlign = (typeof TABLE_ALIGNS)[number];
 export const TABLE_VALIGNS = ['top', 'middle', 'bottom'] as const;
 export type TableValign = (typeof TABLE_VALIGNS)[number];
+export const INPUT_TYPES = ['text', 'password', 'textarea', 'number'] as const;
+export type InputType = (typeof INPUT_TYPES)[number];
+
+export function inputModelDataType(inputType: string | undefined): 'str' | 'num' {
+  return inputType === 'number' ? 'num' : 'str';
+}
+
+export function normalizeInputModelValue(inputType: string | undefined, raw: string): string | null {
+  if (inputModelDataType(inputType) === 'str') {
+    return raw;
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return '0';
+  }
+  return Number.isFinite(Number(trimmed)) ? trimmed : null;
+}
+
+export function inputBoundText(
+  widget: { inputType?: string; modelValue?: string },
+  variables: PageVariable[] | undefined,
+  overrides?: Readonly<Record<string, string>>,
+): string | null {
+  const name = widget.modelValue?.trim();
+  if (!name) {
+    return null;
+  }
+  const variable = variables?.find((item) => item.name === name && item.type === inputModelDataType(widget.inputType));
+  if (!variable) {
+    return '';
+  }
+  if (overrides && Object.prototype.hasOwnProperty.call(overrides, name)) {
+    return overrides[name];
+  }
+  return variable.value;
+}
+
+/** Values in the bound array. Null when `selected` is unset. */
+export function checkboxBoundSelected(
+  widget: { selected?: string },
+  variables: PageVariable[] | undefined,
+  overrides?: Readonly<Record<string, string>>,
+): unknown[] | null {
+  const name = widget.selected?.trim();
+  if (!name) {
+    return null;
+  }
+  const variable = variables?.find((item) => item.name === name && item.type === 'arr');
+  if (!variable) {
+    return [];
+  }
+  const live = (variables ?? []).map((item) => {
+    if (!overrides || !Object.prototype.hasOwnProperty.call(overrides, item.name)) {
+      return item;
+    }
+    return { ...item, value: overrides[item.name] };
+  });
+  const value = buildPageDataScope(live)[name];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value;
+}
+
+/** Bound on/off state for a switch. Null when `modelValue` is unset. */
+export function switchBoundOn(
+  widget: { modelValue?: string },
+  variables: PageVariable[] | undefined,
+  overrides?: Readonly<Record<string, string>>,
+): boolean | null {
+  const name = widget.modelValue?.trim();
+  if (!name) {
+    return null;
+  }
+  const variable = variables?.find((item) => item.name === name && item.type === 'bool');
+  if (!variable) {
+    return false;
+  }
+  const raw =
+    overrides && Object.prototype.hasOwnProperty.call(overrides, name) ? overrides[name] : variable.value;
+  return raw === '1' || raw === 'true';
+}
+
 export const MIN_TABLE_TRACK = 24;
 export const DEFAULT_TABLE_COLUMN_WIDTH = 80;
 export const DEFAULT_TABLE_ROW_HEIGHT = 36;
@@ -223,7 +308,7 @@ export type WidgetContentProps = {
 export type WidgetStateDelta = {
   id: string;
   name?: string;
-  transition?: number;
+  transition?: number | string;
   appliedState?: string;
   props?: WidgetContentProps;
   style?: WidgetStyle;
@@ -246,7 +331,7 @@ type WidgetStates = {
   appliedState?: string;
   stateFn?: string;
   hoverStateId?: string;
-  transition?: number;
+  transition?: number | string;
 };
 
 export const LOOP_FROMS = ['data', 'literal'] as const;
@@ -262,13 +347,46 @@ export type WidgetLoop = {
   index?: string;
 };
 
-type WidgetCommon = WidgetStates & { loop?: WidgetLoop; hidden?: boolean; alias?: string };
+type WidgetCommon = WidgetStates & {
+  loop?: WidgetLoop;
+  hidden?: boolean;
+  alias?: string;
+  events?: WidgetEvents;
+};
 
 export type PageWidget =
   | ({ type: 'image'; id: string; src: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
-  | ({ type: 'icon'; id: string; src: string; size?: number; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
+  | ({ type: 'icon'; id: string; src: string; size?: number | string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({ type: 'text'; id: string; value: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({ type: 'button'; id: string; text: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
+  | ({
+      type: 'input';
+      id: string;
+      value: string;
+      inputType?: InputType | string;
+      modelValue?: string;
+      placeholder?: string;
+      style?: WidgetStyle;
+      item?: FlexItemStyle;
+    } & WidgetCommon)
+  | ({
+      type: 'checkbox';
+      id: string;
+      text: string;
+      value: string;
+      checked?: boolean | string;
+      selected?: string;
+      style?: WidgetStyle;
+      item?: FlexItemStyle;
+    } & WidgetCommon)
+  | ({
+      type: 'switch';
+      id: string;
+      value: boolean | string;
+      modelValue?: string;
+      style?: WidgetStyle;
+      item?: FlexItemStyle;
+    } & WidgetCommon)
   | ({
       type: 'flex';
       id: string;
@@ -339,10 +457,12 @@ function hasFlexItem(
 
 export type PageStyle = {
   background?: string;
-  paddingTop?: number;
-  paddingRight?: number;
-  paddingBottom?: number;
-  paddingLeft?: number;
+  paddingTop?: number | string;
+  paddingRight?: number | string;
+  paddingBottom?: number | string;
+  paddingLeft?: number | string;
+  /** 预览与 H5 的屏幕溢出。缺省为 auto，不写入 XML。编辑画布始终可见。 */
+  overflow?: OverflowMode | string;
 };
 
 export const PAGE_DATA_TYPES = ['num', 'str', 'bool', 'arr', 'obj', 'widget'] as const;
@@ -610,6 +730,7 @@ export type PageXmlDocument = {
   widgets: PageWidget[];
   style?: PageStyle;
   data?: PageVariable[];
+  events?: WidgetEvents;
 };
 
 type OrderedNode = Record<string, unknown> & {
@@ -706,6 +827,67 @@ function parseWidgetAlias(node: OrderedNode): { alias?: string } {
   return raw ? { alias: raw } : {};
 }
 
+const WIDGET_TAGS = [
+  'image',
+  'icon',
+  'text',
+  'button',
+  'input',
+  'checkbox',
+  'switch',
+  'flex',
+  'swiper',
+  'swiper-item',
+  'table',
+  'th',
+  'tr',
+  'td',
+] as const;
+
+function parseWidgetEvents(node: OrderedNode): { events?: WidgetEvents } {
+  const type = WIDGET_TAGS.find((tag) => Object.prototype.hasOwnProperty.call(node, tag));
+  if (!type) {
+    return {};
+  }
+  const raw: WidgetEvents = {};
+  for (const item of widgetEventSpecs(type)) {
+    const ids = attr(node, `@${item.name}`)
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+    if (ids.length > 0) {
+      raw[item.name] = ids;
+    }
+  }
+  const order = attr(node, '@event-order')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (order.length > 0) {
+    raw.order = order;
+  }
+  const events = compactWidgetEvents(type, raw);
+  return events ? { events } : {};
+}
+
+function widgetEventAttrs(type: (typeof WIDGET_TAGS)[number], events: WidgetEvents | undefined): Record<string, string> {
+  const compact = compactWidgetEvents(type, events);
+  if (!compact) {
+    return {};
+  }
+  const attrs: Record<string, string> = {};
+  for (const [name, ids] of Object.entries(compact)) {
+    if (name === 'order' || !ids?.length) {
+      continue;
+    }
+    attrs[`@_@${name}`] = ids.join(',');
+  }
+  if (compact.order?.length) {
+    attrs['@_@event-order'] = compact.order.join(',');
+  }
+  return attrs;
+}
+
 function loopAttrs(loop: WidgetLoop | undefined): Record<string, string> {
   const compact = compactLoop(loop);
   if (!compact) {
@@ -724,73 +906,128 @@ function isTrue(value: string) {
   return value === 'true' || value === '1';
 }
 
-function parseBoolAttr(value: string | undefined): boolean | undefined {
+const STORED_BINDING_EXPR = /^\s*\$\(([\s\S]*)\)\s*$/;
+const STORED_BINDING_PATH =
+  /^\s*\$([\p{ID_Start}$_][\p{ID_Continue}$]*)((?:\.[\p{ID_Start}$_][\p{ID_Continue}$]*)*)\s*$/u;
+
+function storedBinding(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed || (!STORED_BINDING_EXPR.test(trimmed) && !STORED_BINDING_PATH.test(trimmed))) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function parseBoolAttr(value: string | undefined): boolean | string | undefined {
   if (value == null || value === '') {
     return undefined;
   }
-  return isTrue(value);
+  return storedBinding(value) ?? isTrue(value);
 }
 
-function parseNumber(value: string): number | undefined {
+function parseNumber(value: string): number | string | undefined {
   if (!value) {
     return undefined;
+  }
+  const bound = storedBinding(value);
+  if (bound) {
+    return bound;
   }
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function parseNonNegative(value: string): number | undefined {
-  const parsed = parseNumber(value);
-  return parsed != null && parsed >= 0 ? parsed : undefined;
+function asNumber(value: number | string | undefined): number | undefined {
+  return typeof value === 'number' ? value : undefined;
 }
 
-function parseInteger(value: string): number | undefined {
+function parseNonNegative(value: string): number | string | undefined {
+  const bound = storedBinding(value);
+  if (bound) {
+    return bound;
+  }
+  const parsed = parseNumber(value);
+  return typeof parsed === 'number' && parsed >= 0 ? parsed : undefined;
+}
+
+function parseInteger(value: string): number | string | undefined {
   if (!value) {
     return undefined;
+  }
+  const bound = storedBinding(value);
+  if (bound) {
+    return bound;
   }
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function parseNonNegativeInteger(value: string): number | undefined {
+function parseNonNegativeInteger(value: string): number | string | undefined {
+  const bound = storedBinding(value);
+  if (bound) {
+    return bound;
+  }
   const parsed = parseInteger(value);
-  return parsed != null && parsed >= 0 ? parsed : undefined;
+  return typeof parsed === 'number' && parsed >= 0 ? parsed : undefined;
 }
 
-function parsePositiveInteger(value: string): number | undefined {
+function parsePositiveInteger(value: string): number | string | undefined {
+  const bound = storedBinding(value);
+  if (bound) {
+    return bound;
+  }
   const parsed = parseInteger(value);
-  return parsed != null && parsed > 0 ? parsed : undefined;
+  return typeof parsed === 'number' && parsed > 0 ? parsed : undefined;
 }
 
 function parseEnum<T extends string>(value: string, allowed: readonly T[]): T | undefined {
   return (allowed as readonly string[]).includes(value) ? (value as T) : undefined;
 }
 
-function parseRadius(node: OrderedNode, name: string, fallback?: number) {
-  return parseNumber(attr(node, name)) ?? fallback;
+function parseBoundEnum<T extends string>(value: string, allowed: readonly T[]): T | string | undefined {
+  return storedBinding(value) ?? parseEnum(value, allowed);
 }
 
-export function parseSize(raw: string): SizeValue | undefined {
+function parseRadius(node: OrderedNode, name: string, fallback?: number | string): number | string | undefined {
+  const parsed = parseNumber(attr(node, name));
+  if (typeof parsed === 'string') {
+    return parsed;
+  }
+  return parsed ?? fallback;
+}
+
+export function parseSize(raw: string): SizeValue | string | undefined {
+  const bound = storedBinding(raw);
+  if (bound) {
+    return bound;
+  }
   const value = raw.trim().toLowerCase();
   if (!value || value === 'fit-content' || value === 'auto') {
     return undefined;
   }
   if (value.endsWith('%')) {
     const parsed = parseNonNegative(value.slice(0, -1));
-    return parsed == null ? undefined : { mode: '%', value: parsed };
+    return typeof parsed === 'number' ? { mode: '%', value: parsed } : undefined;
   }
   const parsed = parseNonNegative(value.endsWith('px') ? value.slice(0, -2) : value);
-  return parsed == null ? undefined : { mode: 'px', value: parsed };
+  return typeof parsed === 'number' ? { mode: 'px', value: parsed } : undefined;
 }
 
-function formatSize(size: SizeValue): string {
+function formatSize(size: SizeValue | string): string {
+  if (typeof size === 'string') {
+    return size;
+  }
   return size.mode === '%' ? `${size.value}%` : String(size.value);
 }
 
 export function parseBoxLength(
   raw: string,
   options?: { allowNegative?: boolean; allowAuto?: boolean },
-): BoxLength | undefined {
+): BoxLength | string | undefined {
+  const bound = storedBinding(raw);
+  if (bound) {
+    return bound;
+  }
   const value = raw.trim().toLowerCase();
   if (!value) {
     return undefined;
@@ -801,19 +1038,22 @@ export function parseBoxLength(
   const allowNegative = options?.allowNegative !== false;
   if (value.endsWith('%')) {
     const parsed = parseNumber(value.slice(0, -1));
-    if (parsed == null || (!allowNegative && parsed < 0)) {
+    if (typeof parsed !== 'number' || (!allowNegative && parsed < 0)) {
       return undefined;
     }
     return { mode: '%', value: parsed };
   }
   const parsed = parseNumber(value.endsWith('px') ? value.slice(0, -2) : value);
-  if (parsed == null || (!allowNegative && parsed < 0)) {
+  if (typeof parsed !== 'number' || (!allowNegative && parsed < 0)) {
     return undefined;
   }
   return { mode: 'px', value: parsed };
 }
 
-export function formatBoxLength(length: BoxLength): string {
+export function formatBoxLength(length: BoxLength | string): string {
+  if (typeof length === 'string') {
+    return length;
+  }
   if (length.mode === 'auto') {
     return 'auto';
   }
@@ -823,14 +1063,21 @@ export function formatBoxLength(length: BoxLength): string {
   return String(length.value);
 }
 
-export function boxLengthCss(length: BoxLength): string {
+export function boxLengthCss(length: BoxLength | string): string {
+  if (typeof length === 'string') {
+    return length;
+  }
   if (length.mode === 'px') {
     return `${length.value}px`;
   }
   return formatBoxLength(length);
 }
 
-export function parseAngle(raw: string): AngleValue | undefined {
+export function parseAngle(raw: string): AngleValue | string | undefined {
+  const bound = storedBinding(raw);
+  if (bound) {
+    return bound;
+  }
   const value = raw.trim();
   if (!value) {
     return undefined;
@@ -844,7 +1091,10 @@ export function parseAngle(raw: string): AngleValue | undefined {
   return compactAngle({ value: amount, unit });
 }
 
-export function formatAngle(angle: AngleValue): string {
+export function formatAngle(angle: AngleValue | string): string {
+  if (typeof angle === 'string') {
+    return angle;
+  }
   return `${angle.value}${angle.unit}`;
 }
 
@@ -882,7 +1132,10 @@ export function convertAngle(angle: AngleValue, unit: AngleUnit): AngleValue {
   }
 }
 
-export function compactAngle(value: unknown): AngleValue | undefined {
+export function compactAngle(value: unknown): AngleValue | string | undefined {
+  if (typeof value === 'string') {
+    return storedBinding(value);
+  }
   if (value == null || value === false || value === '') {
     return undefined;
   }
@@ -903,7 +1156,10 @@ export function compactAngle(value: unknown): AngleValue | undefined {
   return { value: amount, unit };
 }
 
-export function boxLengthsEqual(a?: BoxLength, b?: BoxLength) {
+export function boxLengthsEqual(a?: BoxLength | string, b?: BoxLength | string) {
+  if (typeof a === 'string' || typeof b === 'string') {
+    return a === b;
+  }
   if (a == null || b == null) {
     return a === b;
   }
@@ -940,7 +1196,10 @@ function normalizeBoxLength(value: unknown): BoxLength | undefined {
 export function compactBoxLength(
   value: unknown,
   kind: 'margin' | 'padding' | 'inset',
-): BoxLength | undefined {
+): BoxLength | string | undefined {
+  if (typeof value === 'string') {
+    return storedBinding(value);
+  }
   const length = normalizeBoxLength(value);
   if (!length) {
     return undefined;
@@ -1023,10 +1282,10 @@ function parseLengthEdges(
 
 function writeInsets(
   attrs: Record<string, string>,
-  top?: BoxLength,
-  right?: BoxLength,
-  bottom?: BoxLength,
-  left?: BoxLength,
+  top?: BoxLength | string,
+  right?: BoxLength | string,
+  bottom?: BoxLength | string,
+  left?: BoxLength | string,
 ) {
   if (top == null && right == null && bottom == null && left == null) {
     return;
@@ -1052,10 +1311,10 @@ function writeInsets(
 function writeEdges(
   attrs: Record<string, string>,
   name: 'margin' | 'padding',
-  top?: BoxLength,
-  right?: BoxLength,
-  bottom?: BoxLength,
-  left?: BoxLength,
+  top?: BoxLength | string,
+  right?: BoxLength | string,
+  bottom?: BoxLength | string,
+  left?: BoxLength | string,
 ) {
   if (top == null && right == null && bottom == null && left == null) {
     return;
@@ -1105,10 +1364,10 @@ function writeUniformOrSides(
 
 function writeBorderWidths(
   attrs: Record<string, string>,
-  top?: number,
-  right?: number,
-  bottom?: number,
-  left?: number,
+  top?: number | string,
+  right?: number | string,
+  bottom?: number | string,
+  left?: number | string,
 ) {
   if (top == null && right == null && bottom == null && left == null) {
     return;
@@ -1150,6 +1409,10 @@ export function compactWidgetStyle(style: WidgetStyle | undefined): WidgetStyle 
   for (const key of STYLE_KEYS) {
     const value = style[key];
     if (value == null || value === '' || (value === false && !BOOLEAN_STYLE_KEYS.has(key))) {
+      continue;
+    }
+    if (typeof value === 'string' && storedBinding(value)) {
+      (next as Record<string, unknown>)[key] = value.trim();
       continue;
     }
     if (key === 'position' && !STORED_POSITIONS.includes(value as WidgetPosition)) {
@@ -1369,7 +1632,10 @@ export function sanitizeWidgetStyle(
   return compactWidgetStyle(next);
 }
 
-export function compactSize(size: SizeValue | undefined): SizeValue | undefined {
+export function compactSize(size: SizeValue | string | undefined): SizeValue | string | undefined {
+  if (typeof size === 'string') {
+    return storedBinding(size);
+  }
   if (!size || (size.mode !== 'px' && size.mode !== '%')) {
     return undefined;
   }
@@ -1385,6 +1651,7 @@ const PAGE_STYLE_KEYS = [
   'paddingRight',
   'paddingBottom',
   'paddingLeft',
+  'overflow',
 ] as const satisfies ReadonlyArray<keyof PageStyle>;
 
 export function compactPageStyle(style: PageStyle | undefined): PageStyle | undefined {
@@ -1398,6 +1665,10 @@ export function compactPageStyle(style: PageStyle | undefined): PageStyle | unde
     if (value == null || value === '') {
       continue;
     }
+    if (typeof value === 'string' && storedBinding(value)) {
+      (next as Record<string, unknown>)[key] = value.trim();
+      continue;
+    }
     if (
       (key === 'paddingTop' ||
         key === 'paddingRight' ||
@@ -1407,6 +1678,11 @@ export function compactPageStyle(style: PageStyle | undefined): PageStyle | unde
       value < 0
     ) {
       continue;
+    }
+    if (key === 'overflow') {
+      if (value === 'auto' || !(OVERFLOW_MODES as readonly string[]).includes(value as string)) {
+        continue;
+      }
     }
     (next as Record<string, unknown>)[key] = value;
   }
@@ -1438,10 +1714,14 @@ export function compactFlexContainer(style: FlexContainerStyle | undefined): Fle
   if (style.alignContent) {
     next.alignContent = style.alignContent;
   }
-  if (style.rowGap != null && style.rowGap >= 0) {
+  if (typeof style.rowGap === 'string' && storedBinding(style.rowGap)) {
+    next.rowGap = style.rowGap.trim();
+  } else if (typeof style.rowGap === 'number' && style.rowGap >= 0) {
     next.rowGap = style.rowGap;
   }
-  if (style.columnGap != null && style.columnGap >= 0) {
+  if (typeof style.columnGap === 'string' && storedBinding(style.columnGap)) {
+    next.columnGap = style.columnGap.trim();
+  } else if (typeof style.columnGap === 'number' && style.columnGap >= 0) {
     next.columnGap = style.columnGap;
   }
 
@@ -1454,16 +1734,24 @@ export function compactFlexItem(style: FlexItemStyle | undefined): FlexItemStyle
   }
 
   const next: FlexItemStyle = {};
-  if (style.order != null && Number.isFinite(style.order)) {
+  if (typeof style.order === 'string' && storedBinding(style.order)) {
+    next.order = style.order.trim();
+  } else if (typeof style.order === 'number' && Number.isFinite(style.order)) {
     next.order = style.order;
   }
-  if (style.flexGrow != null && Number.isFinite(style.flexGrow) && style.flexGrow >= 0) {
+  if (typeof style.flexGrow === 'string' && storedBinding(style.flexGrow)) {
+    next.flexGrow = style.flexGrow.trim();
+  } else if (typeof style.flexGrow === 'number' && Number.isFinite(style.flexGrow) && style.flexGrow >= 0) {
     next.flexGrow = style.flexGrow;
   }
-  if (style.flexShrink != null && Number.isFinite(style.flexShrink) && style.flexShrink >= 0) {
+  if (typeof style.flexShrink === 'string' && storedBinding(style.flexShrink)) {
+    next.flexShrink = style.flexShrink.trim();
+  } else if (typeof style.flexShrink === 'number' && Number.isFinite(style.flexShrink) && style.flexShrink >= 0) {
     next.flexShrink = style.flexShrink;
   }
-  if (style.flexBasis === 'auto') {
+  if (typeof style.flexBasis === 'string' && storedBinding(style.flexBasis)) {
+    next.flexBasis = style.flexBasis.trim();
+  } else if (style.flexBasis === 'auto') {
     next.flexBasis = 'auto';
   } else if (typeof style.flexBasis === 'number' && Number.isFinite(style.flexBasis) && style.flexBasis >= 0) {
     next.flexBasis = style.flexBasis;
@@ -1481,8 +1769,17 @@ export function compactSwiper(style: SwiperStyle | undefined): SwiperStyle | und
   }
 
   const next: SwiperStyle = {};
-  if (style.indicatorDots) {
-    next.indicatorDots = true;
+  const keepBool = (value: boolean | string | undefined) =>
+    typeof value === 'string' && storedBinding(value) ? value.trim() : value ? true : undefined;
+  const keepNum = (value: number | string | undefined, ok: (num: number) => boolean) => {
+    if (typeof value === 'string' && storedBinding(value)) {
+      return value.trim();
+    }
+    return typeof value === 'number' && ok(value) ? value : undefined;
+  };
+  const dots = keepBool(style.indicatorDots);
+  if (dots) {
+    next.indicatorDots = dots;
   }
   if (style.indicatorColor) {
     next.indicatorColor = style.indicatorColor;
@@ -1490,41 +1787,52 @@ export function compactSwiper(style: SwiperStyle | undefined): SwiperStyle | und
   if (style.indicatorActiveColor) {
     next.indicatorActiveColor = style.indicatorActiveColor;
   }
-  if (style.autoplay) {
-    next.autoplay = true;
+  const autoplay = keepBool(style.autoplay);
+  if (autoplay) {
+    next.autoplay = autoplay;
   }
-  if (style.current != null && Number.isInteger(style.current) && style.current >= 0) {
-    next.current = style.current;
+  const current = keepNum(style.current, (num) => Number.isInteger(num) && num >= 0);
+  if (current != null) {
+    next.current = current;
   }
-  if (style.interval != null && Number.isInteger(style.interval) && style.interval > 0) {
-    next.interval = style.interval;
+  const interval = keepNum(style.interval, (num) => Number.isInteger(num) && num > 0);
+  if (interval != null) {
+    next.interval = interval;
   }
-  if (style.duration != null && Number.isInteger(style.duration) && style.duration >= 0) {
-    next.duration = style.duration;
+  const duration = keepNum(style.duration, (num) => Number.isInteger(num) && num >= 0);
+  if (duration != null) {
+    next.duration = duration;
   }
-  if (style.circular) {
-    next.circular = true;
+  const circular = keepBool(style.circular);
+  if (circular) {
+    next.circular = circular;
   }
-  if (style.vertical) {
-    next.vertical = true;
+  const vertical = keepBool(style.vertical);
+  if (vertical) {
+    next.vertical = vertical;
   }
-  if (style.previousMargin != null && Number.isFinite(style.previousMargin) && style.previousMargin >= 0) {
-    next.previousMargin = style.previousMargin;
+  const previousMargin = keepNum(style.previousMargin, (num) => Number.isFinite(num) && num >= 0);
+  if (previousMargin != null) {
+    next.previousMargin = previousMargin;
   }
-  if (style.nextMargin != null && Number.isFinite(style.nextMargin) && style.nextMargin >= 0) {
-    next.nextMargin = style.nextMargin;
+  const nextMargin = keepNum(style.nextMargin, (num) => Number.isFinite(num) && num >= 0);
+  if (nextMargin != null) {
+    next.nextMargin = nextMargin;
   }
-  if (
-    style.displayMultipleItems != null &&
-    Number.isInteger(style.displayMultipleItems) &&
-    style.displayMultipleItems >= 1
-  ) {
-    next.displayMultipleItems = style.displayMultipleItems;
+  const displayMultipleItems = keepNum(
+    style.displayMultipleItems,
+    (num) => Number.isInteger(num) && num >= 1,
+  );
+  if (displayMultipleItems != null) {
+    next.displayMultipleItems = displayMultipleItems;
   }
-  if (style.snapToEdge) {
-    next.snapToEdge = true;
+  const snapToEdge = keepBool(style.snapToEdge);
+  if (snapToEdge) {
+    next.snapToEdge = snapToEdge;
   }
-  if (style.easingFunction) {
+  if (typeof style.easingFunction === 'string' && storedBinding(style.easingFunction)) {
+    next.easingFunction = style.easingFunction.trim();
+  } else if (style.easingFunction) {
     next.easingFunction = style.easingFunction;
   }
 
@@ -1588,8 +1896,8 @@ function parseStyle(node: OrderedNode): WidgetStyle | undefined {
     boxShadow: attr(node, 'box-shadow') || undefined,
     width: parseSize(attr(node, 'width')),
     height: parseSize(attr(node, 'height')),
-    overflow: parseEnum(attr(node, 'overflow'), OVERFLOW_MODES),
-    position: parseEnum(attr(node, 'position'), STORED_POSITIONS),
+    overflow: parseBoundEnum(attr(node, 'overflow'), OVERFLOW_MODES),
+    position: parseBoundEnum(attr(node, 'position'), STORED_POSITIONS),
     zIndex: parseInteger(attr(node, 'z-index')),
     top: parseBoxLength(attr(node, 'top'), { allowAuto: false }) ?? inset?.top,
     right: parseBoxLength(attr(node, 'right'), { allowAuto: false }) ?? inset?.right,
@@ -1612,12 +1920,12 @@ function parseStyle(node: OrderedNode): WidgetStyle | undefined {
 function parseFlex(node: OrderedNode): FlexContainerStyle | undefined {
   const gap = parseNonNegative(attr(node, 'gap'));
   return compactFlexContainer({
-    display: parseEnum(attr(node, 'display'), FLEX_DISPLAYS),
-    flexDirection: parseEnum(attr(node, 'flex-direction'), FLEX_DIRECTIONS),
-    flexWrap: parseEnum(attr(node, 'flex-wrap'), FLEX_WRAPS),
-    justifyContent: parseEnum(attr(node, 'justify-content'), FLEX_JUSTIFY_CONTENTS),
-    alignItems: parseEnum(attr(node, 'align-items'), FLEX_ALIGN_ITEMS),
-    alignContent: parseEnum(attr(node, 'align-content'), FLEX_ALIGN_CONTENTS),
+    display: parseBoundEnum(attr(node, 'display'), FLEX_DISPLAYS),
+    flexDirection: parseBoundEnum(attr(node, 'flex-direction'), FLEX_DIRECTIONS),
+    flexWrap: parseBoundEnum(attr(node, 'flex-wrap'), FLEX_WRAPS),
+    justifyContent: parseBoundEnum(attr(node, 'justify-content'), FLEX_JUSTIFY_CONTENTS),
+    alignItems: parseBoundEnum(attr(node, 'align-items'), FLEX_ALIGN_ITEMS),
+    alignContent: parseBoundEnum(attr(node, 'align-content'), FLEX_ALIGN_CONTENTS),
     rowGap: parseNonNegative(attr(node, 'row-gap')) ?? gap,
     columnGap: parseNonNegative(attr(node, 'column-gap')) ?? gap,
   });
@@ -1630,13 +1938,13 @@ function parseItem(node: OrderedNode): FlexItemStyle | undefined {
     flexGrow: parseNonNegative(attr(node, 'flex-grow')),
     flexShrink: parseNonNegative(attr(node, 'flex-shrink')),
     flexBasis: basisRaw === 'auto' ? 'auto' : parseNonNegative(basisRaw),
-    alignSelf: parseEnum(attr(node, 'align-self'), FLEX_ALIGN_SELFS),
+    alignSelf: parseBoundEnum(attr(node, 'align-self'), FLEX_ALIGN_SELFS),
   });
 }
 
 function parseTableTrack(raw: string, omitDefault: number): number | undefined {
   const parsed = parseNonNegative(raw);
-  if (parsed == null) {
+  if (typeof parsed !== 'number') {
     return undefined;
   }
   const rounded = Math.round(parsed);
@@ -1657,7 +1965,7 @@ function parseTableLines(node: OrderedNode): TableLines | undefined {
   const lines: TableLines = {};
   for (const kind of ['header', 'row', 'column'] as const) {
     const line = compactTableLine({
-      width: parseNonNegativeInteger(attr(node, `${kind}-line-width`)),
+      width: asNumber(parseNonNegativeInteger(attr(node, `${kind}-line-width`))),
       style: parseEnum(attr(node, `${kind}-line-style`), TABLE_LINE_STYLES),
       color: attr(node, `${kind}-line-color`) || undefined,
     });
@@ -1720,20 +2028,20 @@ function trimExtraCells(children: PageWidget[]): PageWidget[] {
 
 function parseSwiper(node: OrderedNode): SwiperStyle | undefined {
   return compactSwiper({
-    indicatorDots: isTrue(attr(node, 'indicator-dots')) || undefined,
+    indicatorDots: parseBoolAttr(attr(node, 'indicator-dots')),
     indicatorColor: attr(node, 'indicator-color') || undefined,
     indicatorActiveColor: attr(node, 'indicator-active-color') || undefined,
-    autoplay: isTrue(attr(node, 'autoplay')) || undefined,
+    autoplay: parseBoolAttr(attr(node, 'autoplay')),
     current: parseNonNegativeInteger(attr(node, 'current')),
     interval: parsePositiveInteger(attr(node, 'interval')),
     duration: parseNonNegativeInteger(attr(node, 'duration')),
-    circular: isTrue(attr(node, 'circular')) || undefined,
-    vertical: isTrue(attr(node, 'vertical')) || undefined,
+    circular: parseBoolAttr(attr(node, 'circular')),
+    vertical: parseBoolAttr(attr(node, 'vertical')),
     previousMargin: parseNonNegative(attr(node, 'previous-margin')),
     nextMargin: parseNonNegative(attr(node, 'next-margin')),
     displayMultipleItems: parsePositiveInteger(attr(node, 'display-multiple-items')),
-    snapToEdge: isTrue(attr(node, 'snap-to-edge')) || undefined,
-    easingFunction: parseEnum(attr(node, 'easing-function'), SWIPER_EASINGS),
+    snapToEdge: parseBoolAttr(attr(node, 'snap-to-edge')),
+    easingFunction: parseBoundEnum(attr(node, 'easing-function'), SWIPER_EASINGS),
   });
 }
 
@@ -1756,13 +2064,19 @@ function styleAttrs(style: WidgetStyle | undefined): Record<string, string> {
   if (compact.fontWeight) {
     attrs['@_font-weight'] = compact.fontWeight;
   }
-  if (compact.italic != null) {
+  if (typeof compact.italic === 'string') {
+    attrs['@_italic'] = compact.italic;
+  } else if (compact.italic != null) {
     attrs['@_italic'] = compact.italic ? 'true' : 'false';
   }
-  if (compact.underline != null) {
+  if (typeof compact.underline === 'string') {
+    attrs['@_underline'] = compact.underline;
+  } else if (compact.underline != null) {
     attrs['@_underline'] = compact.underline ? 'true' : 'false';
   }
-  if (compact.lineThrough != null) {
+  if (typeof compact.lineThrough === 'string') {
+    attrs['@_line-through'] = compact.lineThrough;
+  } else if (compact.lineThrough != null) {
     attrs['@_line-through'] = compact.lineThrough ? 'true' : 'false';
   }
   if (compact.textShadow) {
@@ -1915,7 +2229,9 @@ function swiperAttrs(style: SwiperStyle | undefined): Record<string, string> {
   }
 
   const attrs: Record<string, string> = {};
-  if (compact.indicatorDots) {
+  if (typeof compact.indicatorDots === 'string') {
+    attrs['@_indicator-dots'] = compact.indicatorDots;
+  } else if (compact.indicatorDots) {
     attrs['@_indicator-dots'] = 'true';
   }
   if (compact.indicatorColor) {
@@ -1924,7 +2240,9 @@ function swiperAttrs(style: SwiperStyle | undefined): Record<string, string> {
   if (compact.indicatorActiveColor) {
     attrs['@_indicator-active-color'] = compact.indicatorActiveColor;
   }
-  if (compact.autoplay) {
+  if (typeof compact.autoplay === 'string') {
+    attrs['@_autoplay'] = compact.autoplay;
+  } else if (compact.autoplay) {
     attrs['@_autoplay'] = 'true';
   }
   if (compact.current != null) {
@@ -1936,10 +2254,14 @@ function swiperAttrs(style: SwiperStyle | undefined): Record<string, string> {
   if (compact.duration != null) {
     attrs['@_duration'] = String(compact.duration);
   }
-  if (compact.circular) {
+  if (typeof compact.circular === 'string') {
+    attrs['@_circular'] = compact.circular;
+  } else if (compact.circular) {
     attrs['@_circular'] = 'true';
   }
-  if (compact.vertical) {
+  if (typeof compact.vertical === 'string') {
+    attrs['@_vertical'] = compact.vertical;
+  } else if (compact.vertical) {
     attrs['@_vertical'] = 'true';
   }
   if (compact.previousMargin != null) {
@@ -1951,7 +2273,9 @@ function swiperAttrs(style: SwiperStyle | undefined): Record<string, string> {
   if (compact.displayMultipleItems != null) {
     attrs['@_display-multiple-items'] = String(compact.displayMultipleItems);
   }
-  if (compact.snapToEdge) {
+  if (typeof compact.snapToEdge === 'string') {
+    attrs['@_snap-to-edge'] = compact.snapToEdge;
+  } else if (compact.snapToEdge) {
     attrs['@_snap-to-edge'] = 'true';
   }
   if (compact.easingFunction) {
@@ -1978,6 +2302,45 @@ function findPageRoot(parsed: unknown): OrderedNode {
   throw new XmlParseError('XML does not contain a page root');
 }
 
+function pageEventAttrs(events: WidgetEvents | undefined): Record<string, string> {
+  const compact = compactPageEvents(events);
+  if (!compact) {
+    return {};
+  }
+  const attrs: Record<string, string> = {};
+  for (const item of PAGE_EVENT_SPECS) {
+    const ids = compact[item.name];
+    if (ids && ids.length > 0) {
+      attrs[`@_@${item.name}`] = ids.join(',');
+    }
+  }
+  if (compact.order && compact.order.length > 0) {
+    attrs['@_@event-order'] = compact.order.join(',');
+  }
+  return attrs;
+}
+
+function parsePageEvents(node: OrderedNode): WidgetEvents | undefined {
+  const raw: WidgetEvents = {};
+  for (const item of PAGE_EVENT_SPECS) {
+    const ids = attr(node, `@${item.name}`)
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+    if (ids.length > 0) {
+      raw[item.name] = ids;
+    }
+  }
+  const order = attr(node, '@event-order')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (order.length > 0) {
+    raw.order = order;
+  }
+  return compactPageEvents(raw);
+}
+
 function parsePageStyle(node: OrderedNode): PageStyle | undefined {
   const padding = parseEdges(attr(node, 'padding'));
   return compactPageStyle({
@@ -1986,7 +2349,18 @@ function parsePageStyle(node: OrderedNode): PageStyle | undefined {
     paddingRight: parseNonNegative(attr(node, 'padding-right')) ?? padding?.right,
     paddingBottom: parseNonNegative(attr(node, 'padding-bottom')) ?? padding?.bottom,
     paddingLeft: parseNonNegative(attr(node, 'padding-left')) ?? padding?.left,
+    overflow: parseBoundEnum(attr(node, 'overflow'), OVERFLOW_MODES),
   });
+}
+
+function pagePadding(value: number | string | undefined): BoxLength | string | undefined {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return { mode: 'px', value };
+  }
+  return undefined;
 }
 
 function pageStyleAttrs(style: PageStyle | undefined): Record<string, string> {
@@ -1999,13 +2373,16 @@ function pageStyleAttrs(style: PageStyle | undefined): Record<string, string> {
   if (compact.background) {
     attrs['@_background'] = compact.background;
   }
+  if (compact.overflow) {
+    attrs['@_overflow'] = compact.overflow;
+  }
   writeEdges(
     attrs,
     'padding',
-    compact.paddingTop != null ? { mode: 'px', value: compact.paddingTop } : undefined,
-    compact.paddingRight != null ? { mode: 'px', value: compact.paddingRight } : undefined,
-    compact.paddingBottom != null ? { mode: 'px', value: compact.paddingBottom } : undefined,
-    compact.paddingLeft != null ? { mode: 'px', value: compact.paddingLeft } : undefined,
+    pagePadding(compact.paddingTop),
+    pagePadding(compact.paddingRight),
+    pagePadding(compact.paddingBottom),
+    pagePadding(compact.paddingLeft),
   );
   return attrs;
 }
@@ -2240,10 +2617,10 @@ function mergeProps(base?: WidgetContentProps, overlay?: WidgetContentProps): Wi
 
 function widgetBaseProps(widget: PageWidget): WidgetContentProps | undefined {
   return compactWidgetProps({
-    ...('value' in widget ? { value: widget.value } : {}),
+    ...('value' in widget && widget.type !== 'checkbox' && widget.type !== 'switch' ? { value: widget.value } : {}),
     ...('text' in widget ? { text: widget.text } : {}),
     ...('src' in widget ? { src: widget.src } : {}),
-    ...('size' in widget && widget.size != null ? { size: widget.size } : {}),
+    ...('size' in widget && typeof widget.size === 'number' ? { size: widget.size } : {}),
   });
 }
 
@@ -2314,14 +2691,17 @@ export function diffWidgetState(
   };
 }
 
-function compactTransition(value: number | undefined): number | undefined {
+function compactTransition(value: number | string | undefined): number | string | undefined {
+  if (typeof value === 'string') {
+    return storedBinding(value);
+  }
   if (value == null || !Number.isFinite(value) || value <= 0) {
     return undefined;
   }
   return Math.round(value);
 }
 
-function stateTransition(widget: PageWidget, id: string | null | undefined): number | undefined {
+function stateTransition(widget: PageWidget, id: string | null | undefined): number | string | undefined {
   if (!id) {
     return compactTransition(widget.transition);
   }
@@ -2335,8 +2715,11 @@ function applyResolvedProps(widget: PageWidget, props: WidgetContentProps | unde
   if (widget.type === 'text') {
     return props.value != null ? { ...widget, value: props.value } : widget;
   }
-  if (widget.type === 'button') {
+  if (widget.type === 'button' || widget.type === 'checkbox') {
     return props.text != null ? { ...widget, text: props.text } : widget;
+  }
+  if (widget.type === 'input') {
+    return props.value != null ? { ...widget, value: props.value } : widget;
   }
   if (widget.type === 'image') {
     return props.src != null ? { ...widget, src: props.src } : widget;
@@ -2360,7 +2743,7 @@ function applyResolvedProps(widget: PageWidget, props: WidgetContentProps | unde
 function withResolvedFields(
   widget: PageWidget,
   fields: WidgetStateFields,
-  transition?: number,
+  transition?: number | string,
 ): PageWidget {
   let next = applyResolvedProps(widget, fields.props) as PageWidget;
   next = { ...next };
@@ -2434,8 +2817,8 @@ function layerRole(widget: PageWidget, id: string): WidgetStateRole {
 function stackTransition(
   widget: PageWidget,
   layers: WidgetStateLayer[],
-  inheritedTransition?: number,
-): number | undefined {
+  inheritedTransition?: number | string,
+): number | string | undefined {
   for (let i = layers.length - 1; i >= 0; i -= 1) {
     if (layers[i].role === 'owner') {
       const duration = stateTransition(widget, layers[i].id);
@@ -2451,7 +2834,7 @@ function resolveWidgetNode(
   widget: PageWidget,
   inheritedIds: string[],
   viewing: WidgetStateViewing[],
-  inheritedTransition: number | undefined,
+  inheritedTransition: number | string | undefined,
   appliedStateFor?: (widget: PageWidget) => string | null,
   stateLayersSink?: WeakMap<object, WidgetStateLayer[]>,
 ): PageWidget {
@@ -2508,7 +2891,7 @@ function parseStateProps(node: OrderedNode): WidgetContentProps | undefined {
   }
   if (Object.prototype.hasOwnProperty.call(attrs, '@_size')) {
     const num = parseNumber(String(attrs['@_size']));
-    if (num != null && num > 0) {
+    if (typeof num === 'number' && num > 0) {
       props.size = num;
     }
   }
@@ -2810,6 +3193,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2837,6 +3221,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2859,6 +3244,92 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
+    if (allowContent && Object.prototype.hasOwnProperty.call(child, 'input')) {
+      ids.n += 1;
+      const style = parseStyle(child);
+      const item = asItem ? parseItem(child) : undefined;
+      const extra = widgetStateSpread(child, nodeList(child.input), ancestorIds);
+      const inputType = parseBoundEnum(attr(child, 'type'), INPUT_TYPES);
+      const modelValue = attr(child, 'model-value').trim();
+      const placeholder = attr(child, 'placeholder');
+      widgets.push({
+        type: 'input',
+        id: attr(child, 'id') || `n${ids.n}`,
+        value: attr(child, 'value'),
+        ...(inputType && inputType !== 'text' ? { inputType } : {}),
+        ...(modelValue ? { modelValue } : {}),
+        ...(placeholder ? { placeholder } : {}),
+        ...(style ? { style } : {}),
+        ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
+    if (allowContent && Object.prototype.hasOwnProperty.call(child, 'checkbox')) {
+      ids.n += 1;
+      const style = parseStyle(child);
+      const item = asItem ? parseItem(child) : undefined;
+      const extra = widgetStateSpread(child, nodeList(child.checkbox), ancestorIds);
+      const selected = attr(child, 'selected').trim();
+      widgets.push({
+        type: 'checkbox',
+        id: attr(child, 'id') || `n${ids.n}`,
+        text: attr(child, 'text'),
+        value: attr(child, 'value'),
+        ...(storedBinding(attr(child, 'checked'))
+          ? { checked: storedBinding(attr(child, 'checked')) }
+          : isTrue(attr(child, 'checked'))
+            ? { checked: true }
+            : {}),
+        ...(selected ? { selected } : {}),
+        ...(style ? { style } : {}),
+        ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
+    if (allowContent && Object.prototype.hasOwnProperty.call(child, 'switch')) {
+      ids.n += 1;
+      const style = parseStyle(child);
+      const item = asItem ? parseItem(child) : undefined;
+      const extra = widgetStateSpread(child, nodeList(child.switch), ancestorIds);
+      const modelValue = attr(child, 'model-value').trim();
+      widgets.push({
+        type: 'switch',
+        id: attr(child, 'id') || `n${ids.n}`,
+        value: storedBinding(attr(child, 'value')) ?? isTrue(attr(child, 'value')),
+        ...(modelValue ? { modelValue } : {}),
+        ...(style ? { style } : {}),
+        ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2881,6 +3352,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2906,6 +3378,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2931,6 +3404,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2962,6 +3436,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -2983,6 +3458,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -3013,6 +3489,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -3036,6 +3513,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -3064,6 +3542,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
@@ -3093,6 +3572,7 @@ function widgetHostAttrs(
     ...loopAttrs(widget.loop),
     ...(widget.hidden ? { '@_hidden': 'true' } : {}),
     ...(widget.alias?.trim() ? { '@_alias': widget.alias.trim() } : {}),
+    ...widgetEventAttrs(widget.type, widget.events),
     ...(applied ? { '@_state': applied } : {}),
     ...(hoverValid ? { '@_hover': hoverValid } : {}),
     ...(transition ? { '@_transition': String(transition) } : {}),
@@ -3133,6 +3613,44 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
       return {
         button: inner,
         ':@': widgetHostAttrs(widget, id, style, { '@_text': widget.text, ...item }),
+      };
+    }
+    if (widget.type === 'input') {
+      return {
+        input: inner,
+        ':@': widgetHostAttrs(widget, id, style, {
+          '@_value': widget.value,
+          ...(widget.inputType && widget.inputType !== 'text' ? { '@_type': widget.inputType } : {}),
+          ...(widget.modelValue?.trim() ? { '@_model-value': widget.modelValue.trim() } : {}),
+          ...(widget.placeholder ? { '@_placeholder': widget.placeholder } : {}),
+          ...item,
+        }),
+      };
+    }
+    if (widget.type === 'checkbox') {
+      return {
+        checkbox: inner,
+        ':@': widgetHostAttrs(widget, id, style, {
+          '@_text': widget.text,
+          '@_value': widget.value,
+          ...(typeof widget.checked === 'string'
+            ? { '@_checked': widget.checked }
+            : widget.checked
+              ? { '@_checked': 'true' }
+              : {}),
+          ...(widget.selected?.trim() ? { '@_selected': widget.selected.trim() } : {}),
+          ...item,
+        }),
+      };
+    }
+    if (widget.type === 'switch') {
+      return {
+        switch: inner,
+        ':@': widgetHostAttrs(widget, id, style, {
+          '@_value': typeof widget.value === 'string' ? widget.value : widget.value ? 'true' : 'false',
+          ...(widget.modelValue?.trim() ? { '@_model-value': widget.modelValue.trim() } : {}),
+          ...item,
+        }),
       };
     }
     if (widget.type === 'flex') {
@@ -3191,24 +3709,31 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
   });
 }
 
+/** XML 规范不允许属性名以 @ 开头，校验前先把 `@click` 换成合法名字。真正解析仍保留 `@click`。 */
+function xmlForValidation(xml: string): string {
+  return xml.replace(/(\s)@([A-Za-z_][\w:-]*)=/g, '$1e-$2=');
+}
+
 export function parsePageXml(xml: string): PageXmlDocument {
-  const result = XMLValidator.validate(xml);
+  const result = XMLValidator.validate(xmlForValidation(xml));
   if (result !== true) {
     throw new XmlParseError(result.err.msg);
   }
 
   const pageNode = findPageRoot(pageParser.parse(xml));
   const style = parsePageStyle(pageNode);
+  const events = parsePageEvents(pageNode);
   const { widgets, data } = splitPageChildren(nodeList(pageNode.page));
   return {
     widgets: parseWidgets(widgets, { n: 0 }, 'page'),
     ...(style ? { style } : {}),
     ...(data ? { data } : {}),
+    ...(events ? { events } : {}),
   };
 }
 
 export function serializePageXml(page: PageXmlDocument): string {
-  const attrs = pageStyleAttrs(page.style);
+  const attrs = { ...pageStyleAttrs(page.style), ...pageEventAttrs(page.events) };
   const children = [
     ...(page.data && page.data.length > 0 ? [serializePageData(page.data)] : []),
     ...serializeWidgets(page.widgets, { n: 0 }, 'page'),

@@ -190,3 +190,12 @@ export interface CreateProjectIconGroupInput {
 export interface UpdateProjectIconGroupInput {
   name: string;
 }
+
+export interface WidgetEventScriptDto {
+  id: string;
+  source: string;
+}
+
+export interface PutWidgetEventInput {
+  source: string;
+}

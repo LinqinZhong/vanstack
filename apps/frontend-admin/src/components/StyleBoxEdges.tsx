@@ -11,17 +11,17 @@ import {
 } from '@vanstack/xml';
 
 export type BoxQuad = {
-  top?: number;
-  right?: number;
-  bottom?: number;
-  left?: number;
+  top?: number | string;
+  right?: number | string;
+  bottom?: number | string;
+  left?: number | string;
 };
 
 export type LengthQuad = {
-  top?: BoxLength;
-  right?: BoxLength;
-  bottom?: BoxLength;
-  left?: BoxLength;
+  top?: BoxLength | string;
+  right?: BoxLength | string;
+  bottom?: BoxLength | string;
+  left?: BoxLength | string;
 };
 
 export type BorderEdge = 'top' | 'right' | 'bottom' | 'left';
@@ -87,17 +87,20 @@ function LineLock({
   );
 }
 
-export function pxFromLength(length?: BoxLength): number | undefined {
-  return length && length.mode !== 'auto' ? length.value : undefined;
+export function pxFromLength(length?: BoxLength | string): number | undefined {
+  return typeof length === 'object' && length.mode !== 'auto' ? length.value : undefined;
 }
 
 export function pxLength(value?: number): BoxLength | undefined {
   return value == null ? undefined : { mode: 'px', value };
 }
 
-function asLength(value?: BoxLength | number): BoxLength | undefined {
-  if (value == null) {
+function asLength(value?: BoxLength | number | string): BoxLength | string | undefined {
+  if (value == null || value === '') {
     return undefined;
+  }
+  if (typeof value === 'string') {
+    return isCopyBinding(value) ? value : undefined;
   }
   return typeof value === 'number' ? { mode: 'px', value } : value;
 }
@@ -120,7 +123,7 @@ function unifiedLength(values: LengthQuad) {
   return first;
 }
 
-function pairedLength(a?: BoxLength, b?: BoxLength) {
+function pairedLength(a?: BoxLength | string, b?: BoxLength | string) {
   return a != null && boxLengthsEqual(a, b) ? a : undefined;
 }
 
@@ -161,7 +164,7 @@ function EdgeRow({
   onChange,
 }: {
   label: string;
-  value?: BoxLength;
+  value?: BoxLength | string;
   disabled?: boolean;
   min?: number;
   max?: number;
@@ -169,11 +172,12 @@ function EdgeRow({
   popupContainer?: () => HTMLElement;
   inherited?: boolean;
   line?: ReactNode;
-  onChange: (value: BoxLength | undefined) => void;
+  onChange: (value: BoxLength | string | undefined) => void;
 }) {
   const showUnits = units.length > 1;
-  const mode: BoxLengthMode = value?.mode ?? 'px';
-  const numeric = value && value.mode !== 'auto' ? value.value : undefined;
+  const concrete = typeof value === 'object' ? value : undefined;
+  const mode: BoxLengthMode = concrete?.mode ?? 'px';
+  const numeric = concrete && concrete.mode !== 'auto' ? concrete.value : undefined;
   const auto = mode === 'auto';
 
   return (
@@ -218,9 +222,9 @@ function EdgeRow({
   );
 }
 
-function formatPreviewValue(value?: BoxLength | number) {
+function formatPreviewValue(value?: BoxLength | number | string) {
   const length = asLength(value);
-  if (!length || length.mode === 'auto') {
+  if (!length || typeof length === 'string' || length.mode === 'auto') {
     return 0;
   }
   return length.value;
@@ -369,15 +373,15 @@ export function StyleBoxEdges({
     onChange(compact);
   }
 
-  function writeAll(value: BoxLength | undefined) {
+  function writeAll(value: BoxLength | string | undefined) {
     emit({ top: value, right: value, bottom: value, left: value });
   }
 
-  function writeHorizontal(value: BoxLength | undefined) {
+  function writeHorizontal(value: BoxLength | string | undefined) {
     emit({ ...current, left: value, right: value });
   }
 
-  function writeVertical(value: BoxLength | undefined) {
+  function writeVertical(value: BoxLength | string | undefined) {
     emit({ ...current, top: value, bottom: value });
   }
 
@@ -405,8 +409,8 @@ export function StyleBoxEdges({
   const rows: Array<{
     key: string;
     label: string;
-    value?: BoxLength;
-    onChange: (value: BoxLength | undefined) => void;
+    value?: BoxLength | string;
+    onChange: (value: BoxLength | string | undefined) => void;
     inherited: boolean;
   }> = [
     { key: 'all', label: labels.all, value: unifiedLength(current), onChange: writeAll, inherited: rowInherited.all },

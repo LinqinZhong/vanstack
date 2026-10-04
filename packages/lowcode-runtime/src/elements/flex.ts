@@ -17,8 +17,8 @@ export function renderFlex(
       'data-state': widgetStateAttr(widget, ctx),
       style: mergeCss(
         dynamicStyleCss(widget.style, widgetCssOptions(ctx)),
-        flexContainerCss(widget.flex),
-        flexItemCss(widget.item),
+        flexContainerCss(widget.flex, widgetCssOptions(ctx)),
+        flexItemCss(widget.item, widgetCssOptions(ctx)),
         hiddenCss(widget.hidden, ctx.editing),
       ),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,

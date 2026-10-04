@@ -1,50 +1,5 @@
 import './styles.less';
-import {
-  AppstoreOutlined,
-  ArrowLeftOutlined,
-  CodeOutlined,
-  CopyOutlined,
-  DeleteOutlined,
-  ExpandOutlined,
-  EyeInvisibleOutlined,
-  EyeOutlined,
-  FolderOpenOutlined,
-  GlobalOutlined,
-  PlusOutlined,
-  QuestionCircleOutlined,
-  RedoOutlined,
-  RightOutlined,
-  SaveOutlined,
-  SettingOutlined,
-  SnippetsOutlined,
-  UndoOutlined,
-  UnorderedListOutlined,
-  ZoomInOutlined,
-  ZoomOutOutlined,
-} from '@ant-design/icons';
-import {
-  Button,
-  Card,
-  ConfigProvider,
-  Dropdown,
-  Empty,
-  Form,
-  Input,
-  List,
-  Modal,
-  Popconfirm,
-  Radio,
-  Segmented,
-  Select,
-  Space,
-  Spin,
-  Tag,
-  Tooltip,
-  Tree,
-  Typography,
-  message,
-  theme,
-} from 'antd';
+import { Form, Spin, message } from 'antd';
 import {
   useCallback,
   useEffect,
@@ -52,20 +7,17 @@ import {
   useMemo,
   useRef,
   useState,
-  type FocusEvent,
   type MouseEvent,
   type PointerEvent,
-  type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import type { ProjectDto, ProjectPageDto, ProjectPageVersionDto } from '@vanstack/shared';
 import {
   DEFAULT_TABLE_HEADER_HEIGHT,
   EMPTY_PAGE_XML,
   compactPageI18n,
   compactWidgetStyle,
-  isLoopConfigured,
   parsePageXml,
   serializePageXml,
   type PageI18n,
@@ -84,15 +36,8 @@ import {
   rememberPageId,
   rememberVersionId,
 } from '../../utils/editorSelection';
-import { AssetLibraryPanel } from '../../components/AssetLibraryPanel';
-import { IconLibraryPanel } from '../../components/IconLibraryPanel';
-import { EditorHelpModal } from '../../components/EditorHelpModal';
-import { PageDataPanel } from '../../components/PageDataPanel';
-import { LanguageLibraryPanel } from '../../components/LanguageLibraryModal';
 import { isLowcodeMessage, LOWCODE_MESSAGE_SOURCE } from '../../utils/lowcode-protocol';
-import { PagePropertyInspector, WidgetPropertyInspector } from '../../components/InspectorPropertyGrid';
-import { WidgetStyleBubble, isBoxGroupAllowed, type BoxGroup, type TableBubbleModel, type TableCommand } from '../../components/WidgetStyleBubble';
-import { WidgetStateList } from '../../components/WidgetStateList';
+import { isBoxGroupAllowed, type BoxGroup, type TableBubbleModel, type TableCommand } from '../../components/WidgetStyleBubble';
 import {
   applyRadiusDrag,
   applySizeDrag,
@@ -141,9 +86,7 @@ import {
   type WidgetShortcut,
 } from '../../utils/widgetShortcuts';
 import {
-  ADDABLE_WIDGET_TYPES,
   addWidgetToTree,
-  canMoveWidget,
   cloneWidget,
   collectExpandableKeys,
   collectTreeStateIds,
@@ -162,8 +105,6 @@ import {
   toWidgetTreeData,
   updateWidgetById,
   widgetTreeLabel,
-  widgetTypeName,
-  type WidgetDropPlacement,
   type WidgetPatch,
 } from '../../utils/widgetTree';
 import {
@@ -178,7 +119,6 @@ import {
   moveTableColumn,
   moveTableRow,
   patchTableCells,
-  patchTableCellStyles,
   removeTableColumn,
   removeTableRow,
   rowCellIds,
@@ -190,21 +130,34 @@ import {
 } from '../../utils/tableEdit';
 import {
   collectStateTree,
-  createWidgetState,
-  deleteWidgetState,
   patchResolvedWidget,
   pruneViewingByOwner,
   stateLayersForWidget,
   stateOwnKeys,
-  updateWidgetState,
-  updateHostTransition,
   viewingAfterSelect,
   viewingListFromMap,
   widgetWithStateLayers,
   type ViewingByOwner,
 } from '../../utils/widgetStates';
-import { writeWidgetDrag } from '../../utils/pageData';
-import { CANVAS_RASTER_SCALE, canEditPositionInsets, clampScale, closeStyleToolbarPopups, computeFitView, dragLengthPx, edgeBoxLength, EDIT_OVERFLOW_X, EDIT_OVERFLOW_Y, ENTER_DOUBLE_MS, FOCUS_PADDING, HISTORY_LIMIT, iframePointToClient, isAutoLength, isBoxDragGroup, isSpacingNudgeGroup, KEY_PATTERN, LANGS_DEBOUNCE_MS, liveWidgetCss, mapIframePoint, MAX_SCALE, paintCanvasView, SCREEN_HEIGHT, SCREEN_WIDTH, SERVER_IDLE_MS, sizeLock, snapDevicePixel, spacingAllowsNegative, styleBoxQuad, styleFromBoxQuad, widgetCanvasLabel, zoomViewAt, ZOOM_IDLE_MS, ZOOM_STEP, type CanvasMode, type CenterTab, type HistoryEntry, type SaveStatus, type ViewTransform } from './helpers';
+import { CANVAS_RASTER_SCALE, canEditPositionInsets, clampScale, closeStyleToolbarPopups, computeFitView, dragLengthPx, edgeBoxLength, EDIT_OVERFLOW_X, EDIT_OVERFLOW_Y, ENTER_DOUBLE_MS, FOCUS_PADDING, HISTORY_LIMIT, iframePointToClient, isAutoLength, isBoxDragGroup, isSpacingNudgeGroup, LANGS_DEBOUNCE_MS, liveWidgetCss, mapIframePoint, MAX_SCALE, paintCanvasView, SCREEN_HEIGHT, SCREEN_WIDTH, SERVER_IDLE_MS, sizeLock, snapDevicePixel, spacingAllowsNegative, styleBoxQuad, styleFromBoxQuad, zoomViewAt, ZOOM_IDLE_MS, ZOOM_STEP, type CanvasMode, type CenterTab, type HistoryEntry, type SaveStatus, type ViewTransform } from './helpers';
+import {
+  AddWidgetModal,
+  AliasModal,
+  CanvasWorkspace,
+  CreateVersionModal,
+  EditorHeader,
+  EditorInspector,
+  EditorLibraries,
+  EditorRail,
+  PageFormModal,
+  PageListPanel,
+  ProjectMissing,
+  VersionListPanel,
+  WidgetTreePanel,
+  type EditorNav,
+  type PageFormValues,
+  type VersionFormValues,
+} from './components';
 
 export function ProjectEditorPage() {
   const { t } = useTranslation();
@@ -220,7 +173,7 @@ export function ProjectEditorPage() {
   const [pageData, setPageData] = useState<PageVariable[]>([]);
   const [pageI18n, setPageI18n] = useState<PageI18n | undefined>(undefined);
   const [previewLocale, setPreviewLocale] = useState<string | null>(null);
-  const [leftNav, setLeftNav] = useState<'develop' | 'i18n' | 'assets' | 'icons'>('develop');
+  const [leftNav, setLeftNav] = useState<EditorNav>('develop');
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
   const [tableRange, setTableRange] = useState<TableRange | null>(null);
   const [tableEditId, setTableEditId] = useState<string | null>(null);
@@ -232,13 +185,12 @@ export function ProjectEditorPage() {
   const [loading, setLoading] = useState(true);
   const [pageModalOpen, setPageModalOpen] = useState(false);
   const [editingPage, setEditingPage] = useState<ProjectPageDto | null>(null);
-  const [pageForm] = Form.useForm<{ name: string; key: string; description?: string }>();
+  const [pageForm] = Form.useForm<PageFormValues>();
   const [versionModalOpen, setVersionModalOpen] = useState(false);
   const [widgetModalOpen, setWidgetModalOpen] = useState(false);
   const [aliasModalId, setAliasModalId] = useState<string | null>(null);
   const [aliasInput, setAliasInput] = useState('');
-  const [versionForm] = Form.useForm<{ source: 'blank' | 'copy'; copyFromId?: string }>();
-  const createVersionSource = Form.useWatch('source', versionForm);
+  const [versionForm] = Form.useForm<VersionFormValues>();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const widgetBoxRef = useRef<{ widgetId: string; width: number; height: number } | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -1683,7 +1635,6 @@ export function ProjectEditorPage() {
       rememberTableEditView();
       tableEditIdRef.current = owning.table.id;
       setTableEditId(owning.table.id);
-      centerTableInView(owning.table.id);
     }
     clearTableRange();
     selectedWidgetIdRef.current = id;
@@ -1959,43 +1910,6 @@ export function ProjectEditorPage() {
     }
   }
 
-  function centerTableInView(tableId: string) {
-    const doc = iframeRef.current?.contentDocument;
-    const table = doc?.querySelector(`[data-widget-id="${CSS.escape(tableId)}"]`);
-    const page = doc?.querySelector('.lowcode-page');
-    const row =
-      table instanceof HTMLElement
-        ? (table.querySelector<HTMLElement>(':scope > .lowcode-table-head') ??
-          table.querySelector<HTMLElement>(':scope > [data-widget-type="tr"]') ??
-          table)
-        : null;
-    if (!(page instanceof HTMLElement) || !(row instanceof HTMLElement)) {
-      return;
-    }
-    const pageRect = page.getBoundingClientRect();
-    const rect = row.getBoundingClientRect();
-    if (pageRect.width <= 0 || pageRect.height <= 0 || rect.width <= 0 || rect.height <= 0) {
-      return;
-    }
-    const layoutX = ((rect.left - pageRect.left) / pageRect.width) * SCREEN_WIDTH;
-    const layoutY = ((rect.top - pageRect.top) / pageRect.height) * SCREEN_HEIGHT;
-    const layoutW = (rect.width / pageRect.width) * SCREEN_WIDTH;
-    const layoutH = (rect.height / pageRect.height) * SCREEN_HEIGHT;
-    const current = viewRef.current;
-    const scale = current.scale;
-    const frameX = current.x + tableContentPinRef.current.x;
-    const frameY = current.y + tableContentPinRef.current.y;
-    const rowCenterX = layoutX + layoutW / 2;
-    const rowCenterY = layoutY + layoutH / 2;
-    const next = {
-      scale,
-      x: frameX + (SCREEN_WIDTH / 2 - rowCenterX) * scale,
-      y: frameY + (SCREEN_HEIGHT * 0.2 - rowCenterY) * scale,
-    };
-    tableContentPinRef.current = { x: frameX - next.x, y: frameY - next.y };
-    applyView(next);
-  }
-
   function enterTableEdit() {
     const selected = findWidget(widgetsRef.current, selectedWidgetIdRef.current);
     if (!selected || selected.type !== 'table' || modeRef.current !== 'edit' || readOnlyRef.current) {
@@ -2011,7 +1925,6 @@ export function ProjectEditorPage() {
     if (headerId) {
       selectWidget(headerId);
     }
-    centerTableInView(selected.id);
   }
 
   function handleWidgetEnter(event: {
@@ -3312,14 +3225,6 @@ export function ProjectEditorPage() {
     setAliasModalId(null);
   }
 
-  function treeDropPlacement(dropToGap: boolean, nodePos: string, dropPosition: number): WidgetDropPlacement {
-    if (!dropToGap) {
-      return 'inside';
-    }
-    const offset = dropPosition - Number(nodePos.split('-').at(-1));
-    return offset === -1 ? 'before' : 'after';
-  }
-
   function undoWidgetEdit() {
     if (readOnlyRef.current || pastRef.current.length === 0) {
       return;
@@ -3638,12 +3543,7 @@ export function ProjectEditorPage() {
   }
 
   if (missing || !project) {
-    return (
-      <Card>
-        <Typography.Paragraph>{t('lowcode.projectMissing')}</Typography.Paragraph>
-        <Link to="/">{t('lowcode.backHome')}</Link>
-      </Card>
-    );
+    return <ProjectMissing />;
   }
 
   const selectedWidget = findWidget(widgets, selectedWidgetId);
@@ -3655,7 +3555,6 @@ export function ProjectEditorPage() {
   const selectedOwnKeys = selectedWidget
     ? stateOwnKeys(selectedWidget, stateLayersForWidget(widgets, selectedWidget.id, viewingByOwner))
     : null;
-  const selectedCanvasLabel = selectedWidget ? widgetCanvasLabel(selectedWidget, t) : null;
   const owningTable = findOwningTable(widgets, tableRange?.tableId ?? selectedWidgetId);
   const activeRange = tableRange && owningTable && tableRange.tableId === owningTable.table.id ? tableRange : null;
   const rangeWidget = activeRange
@@ -3733,78 +3632,17 @@ export function ProjectEditorPage() {
 
   return (
     <div className="editor-shell">
-      <div className="editor-header">
-        <Space>
-          <Link to="/">
-            <Button size="small" icon={<ArrowLeftOutlined />}>
-              {t('lowcode.backHome')}
-            </Button>
-          </Link>
-          <Typography.Title level={4} style={{ margin: 0 }}>
-            {project.name}
-          </Typography.Title>
-          <Typography.Text type="secondary">{project.key}</Typography.Text>
-        </Space>
-        <Space align="center">
-          {versionsOpen ? null : (
-            <Button size="small" icon={<UnorderedListOutlined />} onClick={() => setVersionsOpen(true)}>
-              {t('lowcode.showVersions')}
-            </Button>
-          )}
-          <Button size="small" icon={<QuestionCircleOutlined />} onClick={() => setHelpOpen(true)}>
-            {t('lowcode.help')}
-          </Button>
-          <Button
-            size="small"
-            type="primary"
-            icon={<SaveOutlined />}
-            title={`${t('lowcode.updateVersion')} (${modifier}+S)`}
-            disabled={!selectedVersion || versionLocked}
-            onClick={() => void saveCurrentVersion()}
-          >
-            {t('lowcode.updateVersion')}
-          </Button>
-        </Space>
-      </div>
+      <EditorHeader
+        project={project}
+        versionsOpen={versionsOpen}
+        modifier={modifier}
+        saveDisabled={!selectedVersion || versionLocked}
+        onShowVersions={() => setVersionsOpen(true)}
+        onOpenHelp={() => setHelpOpen(true)}
+        onSave={() => void saveCurrentVersion()}
+      />
       <div className="editor-body">
-        <nav className="editor-rail" aria-label={`${t('lowcode.i18nDevelop')} / ${t('lowcode.i18nLibrary')} / ${t('lowcode.assetLibrary')}`}>
-          <Tooltip title={t('lowcode.i18nDevelop')} placement="right">
-            <button
-              type="button"
-              className={['editor-rail-btn', leftNav === 'develop' ? 'is-active' : ''].filter(Boolean).join(' ')}
-              onClick={() => setLeftNav('develop')}
-            >
-              <CodeOutlined />
-            </button>
-          </Tooltip>
-          <Tooltip title={t('lowcode.i18nLibrary')} placement="right">
-            <button
-              type="button"
-              className={['editor-rail-btn', leftNav === 'i18n' ? 'is-active' : ''].filter(Boolean).join(' ')}
-              onClick={() => setLeftNav('i18n')}
-            >
-              <GlobalOutlined />
-            </button>
-          </Tooltip>
-          <Tooltip title={t('lowcode.assetLibrary')} placement="right">
-            <button
-              type="button"
-              className={['editor-rail-btn', leftNav === 'assets' ? 'is-active' : ''].filter(Boolean).join(' ')}
-              onClick={() => setLeftNav('assets')}
-            >
-              <FolderOpenOutlined />
-            </button>
-          </Tooltip>
-          <Tooltip title={t('lowcode.iconLibrary')} placement="right">
-            <button
-              type="button"
-              className={['editor-rail-btn', leftNav === 'icons' ? 'is-active' : ''].filter(Boolean).join(' ')}
-              onClick={() => setLeftNav('icons')}
-            >
-              <AppstoreOutlined />
-            </button>
-          </Tooltip>
-        </nav>
+        <EditorRail value={leftNav} onChange={setLeftNav} />
         <div className="editor-main">
           <div
             className={[
@@ -3815,904 +3653,184 @@ export function ProjectEditorPage() {
               .join(' ')}
           >
             <div className="editor-left">
-              <Card
-                size="small"
-                className="editor-panel"
-                title={t('lowcode.pages')}
-                extra={
-                  <Button size="small" icon={<PlusOutlined />} onClick={openCreatePage}>
-                    {t('lowcode.createPage')}
-                  </Button>
-                }
-              >
-                {pages.length === 0 ? (
-                  <Empty description={t('lowcode.emptyPages')} />
-                ) : (
-                  <List
-                    dataSource={pages}
-                    renderItem={(page) => (
-                      <List.Item
-                        className={page.id === selectedPageId ? 'is-selected' : undefined}
-                        actions={[
-                          <Button key="edit" type="link" onClick={() => openEditPage(page)}>
-                            {t('lowcode.edit')}
-                          </Button>,
-                          <Popconfirm
-                            key="del"
-                            title={t('lowcode.confirmDelete')}
-                            onConfirm={() => void removePage(page)}
-                          >
-                            <Button type="link" danger>
-                              {t('lowcode.delete')}
-                            </Button>
-                          </Popconfirm>,
-                        ]}
-                        onClick={() => setSelectedPageId(page.id)}
-                      >
-                        <List.Item.Meta title={page.name} description={page.key} />
-                      </List.Item>
-                    )}
-                  />
-                )}
-              </Card>
-
-              <Card
-                size="small"
-                className="editor-panel widget-tree-panel"
-                title={t('lowcode.widgetTree')}
-                extra={
-                  <div className="widget-tree-actions">
-                    <TreeActionButton
-                      title={`${t('lowcode.undo')} (${modifier}+Z)`}
-                      icon={<UndoOutlined />}
-                      disabled={!canUndo}
-                      onClick={undoWidgetEdit}
-                    />
-                    <TreeActionButton
-                      title={`${t('lowcode.redo')} (${modifier}+Shift+Z)`}
-                      icon={<RedoOutlined />}
-                      disabled={!canRedo}
-                      onClick={redoWidgetEdit}
-                    />
-                    <TreeActionButton
-                      title={`${t('lowcode.copyWidget')} (${modifier}+C)`}
-                      icon={<CopyOutlined />}
-                      disabled={!canCopy}
-                      onClick={copySelectedWidget}
-                    />
-                    <TreeActionButton
-                      title={`${t('lowcode.pasteWidget')} (${modifier}+V)`}
-                      icon={<SnippetsOutlined />}
-                      disabled={!canPaste}
-                      onClick={pasteClipboard}
-                    />
-                    <TreeActionButton
-                      title={`${t('lowcode.deleteWidget')} (Del)`}
-                      icon={<DeleteOutlined />}
-                      disabled={!canDelete}
-                      danger
-                      onClick={deleteSelectedWidget}
-                    />
-                    <Tooltip title={t('lowcode.addWidget')}>
-                      <Button
-                        size="small"
-                        icon={<PlusOutlined />}
-                        disabled={!selectedPage || readOnly}
-                        onClick={() => setWidgetModalOpen(true)}
-                      />
-                    </Tooltip>
-                  </div>
-                }
-              >
-                {widgets.length === 0 ? (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('lowcode.emptyWidgets')} />
-                ) : (
-                  <div ref={widgetTreeHostRef}>
-                    <Tree
-                      className="widget-tree"
-                      blockNode
-                      virtual={false}
-                      autoExpandParent={false}
-                      draggable={!readOnly && !canDragWidgetToData ? { icon: false } : false}
-                      allowDrop={({ dragNode, dropNode, dropPosition }) => {
-                        const placement: WidgetDropPlacement =
-                          dropPosition === 0 ? 'inside' : dropPosition < 0 ? 'before' : 'after';
-                        return canMoveWidget(widgets, String(dragNode.key), String(dropNode.key), placement);
-                      }}
-                      expandedKeys={expandedKeys}
-                      selectedKeys={selectedWidgetId ? [selectedWidgetId] : []}
-                      treeData={widgetTreeData}
-                      titleRender={(node) => {
-                        const widgetId = String(node.key);
-                        const widget = findWidget(widgets, widgetId);
-                        const looped = isLoopConfigured(widget?.loop);
-                        const hidden = Boolean(widget?.hidden);
-                        const alias = widget?.alias?.trim();
-                        const titleClasses = [
-                          'widget-tree-title',
-                          hidden ? 'is-hidden' : '',
-                          selectedWidgetId === widgetId ? 'is-row-selected' : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' ');
-                        return (
-                          <Dropdown
-                            trigger={['contextMenu']}
-                            menu={{
-                              items: [
-                                {
-                                  key: 'alias',
-                                  label: t('lowcode.setAlias'),
-                                  disabled: readOnly,
-                                },
-                              ],
-                              onClick: ({ key }) => {
-                                if (key === 'alias') {
-                                  openAliasModal(widgetId);
-                                }
-                              },
-                            }}
-                          >
-                            <span
-                              className={titleClasses}
-                              onContextMenu={() => selectWidget(widgetId)}
-                            >
-                              <span
-                                className={
-                                  canDragWidgetToData
-                                    ? 'widget-tree-drag-title'
-                                    : alias
-                                      ? 'widget-tree-title-label is-alias'
-                                      : 'widget-tree-title-label'
-                                }
-                                draggable={canDragWidgetToData}
-                                onDragStart={(event) => {
-                                  event.stopPropagation();
-                                  event.dataTransfer.effectAllowed = 'copy';
-                                  writeWidgetDrag(event.dataTransfer, widgetId);
-                                }}
-                              >
-                                {alias ?? (typeof node.title === 'string' ? node.title : widgetId)}
-                              </span>
-                              {looped ? (
-                                <button
-                                  type="button"
-                                  className="widget-tree-loop"
-                                  title={t('lowcode.styleLoop')}
-                                  onMouseDown={(event) => event.stopPropagation()}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    openWidgetLoopPanel(widgetId);
-                                  }}
-                                >
-                                  <UnorderedListOutlined />
-                                </button>
-                              ) : null}
-                              <span className="widget-tree-actions-inline">
-                                <button
-                                  type="button"
-                                  className="widget-tree-visibility"
-                                  title={hidden ? t('lowcode.showWidget') : t('lowcode.hideWidget')}
-                                  disabled={readOnly}
-                                  onMouseDown={(event) => event.stopPropagation()}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    toggleWidgetHidden(widgetId);
-                                  }}
-                                >
-                                  {hidden ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-                                </button>
-                              </span>
-                            </span>
-                          </Dropdown>
-                        );
-                      }}
-                      onExpand={(keys) => setExpandedKeys(keys.map(String))}
-                      onSelect={(keys) => {
-                        if (keys[0]) {
-                          selectWidget(String(keys[0]));
-                        }
-                      }}
-                      onDrop={(info) => {
-                        if (readOnly) {
-                          return;
-                        }
-                        const dragId = String(info.dragNode.key);
-                        const dropId = String(info.node.key);
-                        const placement = treeDropPlacement(info.dropToGap, info.node.pos, info.dropPosition);
-                        const nextWidgets = moveWidget(widgetsRef.current, dragId, dropId, placement);
-                        if (!nextWidgets) {
-                          return;
-                        }
-                        if (placement === 'inside') {
-                          setExpandedKeys((prev) => (prev.includes(dropId) ? prev : [...prev, dropId]));
-                        }
-                        commitWidgets(nextWidgets, dragId);
-                      }}
-                      onDoubleClick={(_event, node) => {
-                        const widgetId = String(node.key);
-                        if (widgetId) {
-                          focusWidgetById(widgetId);
-                        }
-                      }}
-                    />
-                  </div>
-                )}
-              </Card>
-            </div>
-
-            <Card
-              size="small"
-              className="editor-canvas-card"
-              tabList={[
-                { key: 'layout', tab: t('lowcode.tabLayout') },
-                { key: 'data', tab: t('lowcode.tabData') },
-                { key: 'events', tab: t('lowcode.tabEvents') },
-              ]}
-              activeTabKey={centerTab}
-              onTabChange={(key) => {
-                const next = key as CenterTab;
-                setCenterTab(next);
-                if (next === 'layout' && !userAdjustedRef.current) {
-                  window.requestAnimationFrame(() => fitCanvas(false));
-                }
-              }}
-              tabBarExtraContent={
-                <Select
-                  size="small"
-                  className="canvas-locale-select"
-                  placeholder={t('lowcode.i18nLibrary')}
-                  suffixIcon={<GlobalOutlined />}
-                  value={previewLocale ?? undefined}
-                  options={(pageI18n?.langs ?? []).map((lang) => ({
-                    value: lang.key,
-                    label: lang.name || lang.key,
-                  }))}
-                  onChange={(value: string) => setPreviewLocale(value)}
-                  disabled={(pageI18n?.langs ?? []).length === 0}
-                />
-              }
-            >
-              <div className="canvas-card-body">
-                <div
-                  className={['canvas-wrap', centerTab === 'layout' ? '' : 'is-hidden'].filter(Boolean).join(' ')}
-                  onPointerDownCapture={onCanvasPanPointerDown}
-                  onPointerMove={onCanvasPointerMove}
-                  onPointerUp={onCanvasPointerUp}
-                  onPointerCancel={onCanvasPointerUp}
-                  onMouseDownCapture={(event) => {
-                    if (event.button === 1) {
-                      event.preventDefault();
-                    }
-                  }}
-                  onAuxClick={(event) => event.preventDefault()}
-                >
-                  <div
-                    ref={stageRef}
-                    className={[
-                      'canvas-stage',
-                      panning || panningRef.current ? 'is-panning' : '',
-                      previewing ? 'is-preview' : '',
-                      canvasSettling ? 'is-settling' : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                    onPointerDown={onCanvasPointerDown}
-                    onMouseDown={onCanvasMouseDown}
-                  >
-                    {canvasSettling ? (
-                      <div className="canvas-settle" aria-busy="true">
-                        <Spin />
-                      </div>
-                    ) : null}
-                    <div ref={phoneScreenRef} className="phone-screen">
-                      <iframe
-                        ref={iframeRef}
-                        className="preview-frame"
-                        title={t('lowcode.preview')}
-                        src="/preview"
-                        scrolling="no"
-                        onLoad={() => {
-                          window.setTimeout(() => {
-                            if (!readyRef.current) {
-                              sendPreview();
-                            }
-                          }, 300);
-                        }}
-                      />
-                    </div>
-                    <div
-                      ref={phoneFrameRef}
-                      className={['phone-page-frame', !previewing && tableEditId ? 'is-table-editing' : '']
-                        .filter(Boolean)
-                        .join(' ')}
-                    />
-                    {showStyleChrome && selectedCanvasLabel ? (
-                      <div className="canvas-selection-label" title={selectedCanvasLabel}>
-                        {selectedCanvasLabel}
-                      </div>
-                    ) : null}
-                    {showStyleChrome ? (
-                      <div
-                        className="widget-style-bubble-host"
-                        onPointerDown={(event) => {
-                          // Stop a canvas spacing drag from flushing measured insets over bubble edits.
-                          if (spacingDragRef.current) {
-                            spacingDragRef.current = null;
-                            setSpacingDragCursor(null, null);
-                            syncSelectChrome();
-                          }
-                          event.stopPropagation();
-                        }}
-                      >
-                        {bubbleWidget ? (
-                          <WidgetStyleBubble
-                            widget={bubbleWidget}
-                            style={bubbleWidget.style}
-                            ownKeys={rangeWidget ? undefined : (selectedOwnKeys ?? undefined)}
-                            i18nCatalog={pageI18n}
-                            projectId={project.id}
-                            variables={pageData}
-                            disabled={readOnly}
-                            openGroup={openBoxGroup}
-                            onOpenGroupChange={handleOpenBoxGroupChange}
-                            table={tableBubble}
-                            onTableLines={
-                              bubbleWidget.type === 'table'
-                                ? (lines) =>
-                                    updateWidget(bubbleWidget.id, { lines }, `edit:${bubbleWidget.id}:lines`)
-                                : undefined
-                            }
-                            onStyleDelta={
-                              rangeWidget
-                                ? (delta) => {
-                                    const next = patchTableCellStyles(widgetsRef.current, tableStyleIds, delta);
-                                    if (next !== widgetsRef.current) {
-                                      const rangeKey = activeRange
-                                        ? `${activeRange.kind}:${activeRange.tableId}:${'index' in activeRange ? activeRange.index : 'rowId' in activeRange ? activeRange.rowId : 'header'}`
-                                        : 'range';
-                                      commitWidgets(next, selectedWidgetIdRef.current, `edit:table-style:${rangeKey}`);
-                                    }
-                                  }
-                                : undefined
-                            }
-                            onChange={(nextStyle) =>
-                              updateWidget(
-                                bubbleWidget.id,
-                                { style: nextStyle },
-                                `edit:${bubbleWidget.id}:style`,
-                              )
-                            }
-                            onSrcChange={
-                              bubbleWidget.type === 'image' || bubbleWidget.type === 'icon'
-                                ? (src) =>
-                                  updateWidget(bubbleWidget.id, { src }, `edit:${bubbleWidget.id}:src`)
-                                : undefined
-                            }
-                            onTextChange={
-                              bubbleWidget.type === 'text' ||
-                              bubbleWidget.type === 'button' ||
-                              ((bubbleWidget.type === 'th' || bubbleWidget.type === 'td') && !rangeWidget)
-                                ? (text) =>
-                                  updateWidget(
-                                    bubbleWidget.id,
-                                    bubbleWidget.type === 'button' ? { text } : { value: text },
-                                    `edit:${bubbleWidget.id}:${bubbleWidget.type === 'button' ? 'text' : 'value'}`,
-                                  )
-                                : undefined
-                            }
-                            onLoopChange={(loop) =>
-                              updateWidget(bubbleWidget.id, { loop }, `loop:${bubbleWidget.id}`)
-                            }
-                            onStateFnChange={(stateFn, hoverStateId) =>
-                              updateWidget(
-                                bubbleWidget.id,
-                                { stateFn, hoverStateId },
-                                `stateFn:${bubbleWidget.id}`,
-                              )
-                            }
-                            onOpenInspector={() => setInspectorOpen(true)}
-                            onToolbarPopupChange={(open) => {
-                              toolbarPopupOpenRef.current = open;
-                              if (!open) {
-                                iframeRef.current?.classList.remove('is-color-picking');
-                              }
-                            }}
-                          />
-                        ) : (
-                          <ConfigProvider theme={{ algorithm: theme.defaultAlgorithm }}>
-                            <div className="widget-style-bubble">
-                              <Tooltip
-                                title={selectedWidget ? t('lowcode.widgetInspector') : t('lowcode.pageInspector')}
-                              >
-                                <Button
-                                  size="small"
-                                  type="text"
-                                  icon={<SettingOutlined />}
-                                  onClick={() => setInspectorOpen(true)}
-                                />
-                              </Tooltip>
-                            </div>
-                          </ConfigProvider>
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                  {showStyleChrome && selectedWidget && !readOnly ? (
-                    <WidgetStateList
-                      items={visibleStates}
-                      viewingOwnerId={viewingOwnerId}
-                      viewingState={viewingState}
-                      usedIds={collectTreeStateIds(widgets)}
-                      onSelect={(row) => {
-                        if (!row.owned && row.id && !row.scopeId) {
-                          const inheritedId = row.id;
-                          setViewingOwnerId(row.ownerId);
-                          setViewingState(inheritedId);
-                          setViewingByOwner((prev) => ({
-                            ...prev,
-                            [row.ownerId]: inheritedId,
-                            [selectedWidget.id]: null,
-                          }));
-                          return;
-                        }
-                        const scopeOwnerId = row.scopeOwnerId;
-                        const scopeId = row.scopeId;
-                        if (scopeId && scopeOwnerId) {
-                          setViewingOwnerId(row.id ? row.ownerId : scopeOwnerId);
-                          setViewingState(row.id ?? scopeId);
-                          setViewingByOwner((prev) => ({
-                            ...prev,
-                            [scopeOwnerId]: scopeId,
-                            [row.ownerId]: row.id ?? null,
-                          }));
-                          return;
-                        }
-                        setViewingOwnerId(row.ownerId);
-                        setViewingState(row.id);
-                        setViewingByOwner((prev) => {
-                          const next: ViewingByOwner = { ...prev, [row.ownerId]: row.id };
-                          if (row.id == null) {
-                            for (const key of Object.keys(next)) {
-                              if (key !== row.ownerId) {
-                                next[key] = null;
-                              }
-                            }
-                          }
-                          return next;
-                        });
-                      }}
-                      onCreate={(id, name, from, transition) => {
-                        const scopeId = from.scopeId ?? (!from.owned ? from.id : null);
-                        const scopeOwnerId = from.scopeOwnerId ?? (!from.owned ? from.ownerId : undefined);
-                        const created = createWidgetState(
-                          widgets,
-                          selectedWidget.id,
-                          id,
-                          name,
-                          from.id,
-                          from.owned && !from.scopeId,
-                          transition,
-                          scopeId,
-                        );
-                        commitWidgets(created, selectedWidgetId);
-                        setViewingOwnerId(selectedWidget.id);
-                        setViewingState(id);
-                        setViewingByOwner((prev) => {
-                          const next: ViewingByOwner = { ...prev, [selectedWidget.id]: id };
-                          if (scopeId && scopeOwnerId) {
-                            next[scopeOwnerId] = scopeId;
-                          }
-                          return next;
-                        });
-                      }}
-                      onEdit={(from, name, transition) => {
-                        if (from.id == null) {
-                          commitWidgets(updateHostTransition(widgets, selectedWidget.id, transition), selectedWidgetId);
-                          return;
-                        }
-                        if (!name) {
-                          return;
-                        }
-                        commitWidgets(
-                          updateWidgetState(widgets, selectedWidget.id, from.id, name, transition, from.scopeId),
-                          selectedWidgetId,
-                        );
-                      }}
-                      onDelete={(row) => {
-                        if (!row.id) {
-                          return;
-                        }
-                        commitWidgets(deleteWidgetState(widgets, selectedWidget.id, row.id, row.scopeId), selectedWidgetId);
-                        if (viewingOwnerId === selectedWidget.id && viewingState === row.id) {
-                          setViewingOwnerId(row.scopeOwnerId ?? selectedWidget.id);
-                          setViewingState(row.scopeId ?? null);
-                        }
-                        setViewingByOwner((prev) => {
-                          if (prev[selectedWidget.id] !== row.id) {
-                            return prev;
-                          }
-                          return { ...prev, [selectedWidget.id]: null };
-                        });
-                      }}
-                    />
-                  ) : null}
-                  <div className="canvas-toolbar">
-                    <Button size="small" icon={<ZoomOutOutlined />} onClick={() => zoomBy(1 / ZOOM_STEP)} />
-                    <Typography.Text ref={zoomLabelRef} className="canvas-zoom">
-                      {Math.round(view.scale * 100)}%
-                    </Typography.Text>
-                    <Button size="small" icon={<ZoomInOutlined />} onClick={() => zoomBy(ZOOM_STEP)} />
-                    <Button
-                      size="small"
-                      icon={<ExpandOutlined />}
-                      onClick={() => {
-                        const tableId = tableEditIdRef.current;
-                        if (tableId) {
-                          centerTableInView(tableId);
-                          return;
-                        }
-                        fitCanvas(false);
-                      }}
-                    >
-                      {t('lowcode.canvasReset')}
-                    </Button>
-                    <Segmented
-                      size="small"
-                      value={mode}
-                      onChange={(value) => {
-                        const next = value as CanvasMode;
-                        if (next === modeRef.current) {
-                          return;
-                        }
-                        settleGenRef.current += 1;
-                        canvasSettlingRef.current = true;
-                        setCanvasSettling(true);
-                        setMode(next);
-                      }}
-                      options={[
-                        { label: t('lowcode.modeEdit'), value: 'edit' },
-                        { label: t('lowcode.modePreview'), value: 'preview' },
-                      ]}
-                    />
-                  </div>
-                </div>
-                {centerTab === 'data' ? (
-                  <PageDataPanel
-                    variables={pageData}
-                    widgets={widgets}
-                    disabled={readOnly}
-                    onChange={commitPageData}
-                    onEndCoalesce={endCoalesce}
-                  />
-                ) : null}
-                {centerTab === 'events' ? (
-                  <div className="page-events-panel">
-                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('lowcode.eventsEmpty')} />
-                  </div>
-                ) : null}
-              </div>
-            </Card>
-
-            {versionsOpen ? (
-              <div className="editor-versions">
-                <button
-                  type="button"
-                  className="versions-collapse"
-                  aria-label={t('lowcode.collapseVersions')}
-                  title={t('lowcode.collapseVersions')}
-                  onClick={() => setVersionsOpen(false)}
-                >
-                  <RightOutlined />
-                </button>
-                <Card
-                  size="small"
-                  className="editor-panel"
-                  title={t('lowcode.versions')}
-                  extra={
-                    <Button size="small" disabled={!selectedPage} onClick={openCreateVersion}>
-                      {t('lowcode.createVersion')}
-                    </Button>
+              <PageListPanel
+                pages={pages}
+                selectedPageId={selectedPageId}
+                onCreate={openCreatePage}
+                onEdit={openEditPage}
+                onDelete={removePage}
+                onSelect={setSelectedPageId}
+              />
+              <WidgetTreePanel
+                widgets={widgets}
+                treeData={widgetTreeData}
+                readOnly={readOnly}
+                canDragWidgetToData={canDragWidgetToData}
+                expandedKeys={expandedKeys}
+                selectedWidgetId={selectedWidgetId}
+                treeHostRef={widgetTreeHostRef}
+                modifier={modifier}
+                canUndo={canUndo}
+                canRedo={canRedo}
+                canCopy={canCopy}
+                canPaste={canPaste}
+                canDelete={canDelete}
+                addDisabled={!selectedPage || readOnly}
+                onUndo={undoWidgetEdit}
+                onRedo={redoWidgetEdit}
+                onCopy={copySelectedWidget}
+                onPaste={pasteClipboard}
+                onDelete={deleteSelectedWidget}
+                onAdd={() => setWidgetModalOpen(true)}
+                onOpenAlias={openAliasModal}
+                onOpenLoop={openWidgetLoopPanel}
+                onToggleHidden={toggleWidgetHidden}
+                onExpand={setExpandedKeys}
+                onSelect={selectWidget}
+                onFocus={focusWidgetById}
+                onMove={(dragId, dropId, placement) => {
+                  const nextWidgets = moveWidget(widgetsRef.current, dragId, dropId, placement);
+                  if (!nextWidgets) {
+                    return;
                   }
-                >
-                  {versions.length === 0 ? (
-                    <Empty description={t('lowcode.emptyVersions')} />
-                  ) : (
-                    <Radio.Group
-                      value={selectedVersionId}
-                      onChange={(event) => {
-                        const version = versions.find((item) => item.id === event.target.value);
-                        if (version) {
-                          selectVersion(version);
-                        }
-                      }}
-                      style={{ width: '100%' }}
-                    >
-                      <List
-                        className="version-list"
-                        dataSource={versions}
-                        renderItem={(version) => (
-                          <List.Item>
-                            <div className="version-item">
-                              <Radio value={version.id}>
-                                <Space size={6}>
-                                  <span>v{version.versionNo}</span>
-                                  <Tag
-                                    color={
-                                      version.status === 'in_use'
-                                        ? 'success'
-                                        : version.status === 'published'
-                                          ? 'blue'
-                                          : 'default'
-                                    }
-                                  >
-                                    {t(`lowcode.versionStatus.${version.status}`)}
-                                  </Tag>
-                                </Space>
-                              </Radio>
-                              <div className="version-item-actions">
-                                {version.status === 'draft' ? (
-                                  <Button type="link" onClick={() => void publishVersion(version)}>
-                                    {t('lowcode.publishVersion')}
-                                  </Button>
-                                ) : null}
-                                {version.status === 'published' ? (
-                                  <Button type="link" onClick={() => void activateVersion(version)}>
-                                    {t('lowcode.useVersion')}
-                                  </Button>
-                                ) : null}
-                                {version.status === 'in_use' ? null : (
-                                  <Popconfirm
-                                    title={t('lowcode.confirmDelete')}
-                                    onConfirm={() => void removeVersion(version)}
-                                  >
-                                    <Button type="link" danger>
-                                      {t('lowcode.delete')}
-                                    </Button>
-                                  </Popconfirm>
-                                )}
-                              </div>
-                            </div>
-                          </List.Item>
-                        )}
-                      />
-                    </Radio.Group>
-                  )}
-                </Card>
-              </div>
+                  if (placement === 'inside') {
+                    setExpandedKeys((prev) => (prev.includes(dropId) ? prev : [...prev, dropId]));
+                  }
+                  commitWidgets(nextWidgets, dragId);
+                }}
+              />
+            </div>
+            <CanvasWorkspace
+              centerTab={centerTab}
+              setCenterTab={setCenterTab}
+              userAdjustedRef={userAdjustedRef}
+              fitCanvas={fitCanvas}
+              pageI18n={pageI18n}
+              previewLocale={previewLocale}
+              setPreviewLocale={setPreviewLocale}
+              onCanvasPanPointerDown={onCanvasPanPointerDown}
+              onCanvasPointerMove={onCanvasPointerMove}
+              onCanvasPointerUp={onCanvasPointerUp}
+              onCanvasPointerDown={onCanvasPointerDown}
+              onCanvasMouseDown={onCanvasMouseDown}
+              stageRef={stageRef}
+              phoneScreenRef={phoneScreenRef}
+              phoneFrameRef={phoneFrameRef}
+              iframeRef={iframeRef}
+              readyRef={readyRef}
+              zoomLabelRef={zoomLabelRef}
+              panning={panning}
+              panningRef={panningRef}
+              previewing={previewing}
+              canvasSettling={canvasSettling}
+              tableEditId={tableEditId}
+              sendPreview={sendPreview}
+              showStyleChrome={showStyleChrome}
+              selectedWidget={selectedWidget}
+              selectedWidgetId={selectedWidgetId}
+              bubbleWidget={bubbleWidget}
+              rangeWidget={rangeWidget}
+              selectedOwnKeys={selectedOwnKeys}
+              pageData={pageData}
+              readOnly={readOnly}
+              openBoxGroup={openBoxGroup}
+              handleOpenBoxGroupChange={handleOpenBoxGroupChange}
+              tableBubble={tableBubble}
+              projectId={project.id}
+              updateWidget={updateWidget}
+              commitWidgets={commitWidgets}
+              widgetsRef={widgetsRef}
+              selectedWidgetIdRef={selectedWidgetIdRef}
+              tableStyleIds={tableStyleIds}
+              activeRange={activeRange}
+              spacingDragRef={spacingDragRef}
+              syncSelectChrome={syncSelectChrome}
+              toolbarPopupOpenRef={toolbarPopupOpenRef}
+              setInspectorOpen={setInspectorOpen}
+              widgets={widgets}
+              visibleStates={visibleStates}
+              viewingOwnerId={viewingOwnerId}
+              viewingState={viewingState}
+              setViewingOwnerId={setViewingOwnerId}
+              setViewingState={setViewingState}
+              setViewingByOwner={setViewingByOwner}
+              view={view}
+              zoomBy={zoomBy}
+              mode={mode}
+              modeRef={modeRef}
+              settleGenRef={settleGenRef}
+              canvasSettlingRef={canvasSettlingRef}
+              setCanvasSettling={setCanvasSettling}
+              setMode={setMode}
+              commitPageData={commitPageData}
+              endCoalesce={endCoalesce}
+            />
+            {versionsOpen ? (
+              <VersionListPanel
+                versions={versions}
+                selectedVersionId={selectedVersionId}
+                createDisabled={!selectedPage}
+                onCollapse={() => setVersionsOpen(false)}
+                onCreate={openCreateVersion}
+                onSelect={selectVersion}
+                onPublish={publishVersion}
+                onActivate={activateVersion}
+                onDelete={removeVersion}
+              />
             ) : null}
           </div>
-          {leftNav === 'i18n' ? (
-            <Card size="small" className="editor-panel language-library-card" title={t('lowcode.i18nLibrary')}>
-              <LanguageLibraryPanel catalog={pageI18n} onChange={commitPageI18n} />
-            </Card>
-          ) : null}
-          {leftNav === 'assets' ? (
-            <Card size="small" className="editor-panel language-library-card" title={t('lowcode.assetLibrary')}>
-              <AssetLibraryPanel projectId={project.id} />
-            </Card>
-          ) : null}
-          {leftNav === 'icons' ? (
-            <Card size="small" className="editor-panel language-library-card" title={t('lowcode.iconLibrary')}>
-              <IconLibraryPanel projectId={project.id} />
-            </Card>
-          ) : null}
+          <EditorLibraries
+            leftNav={leftNav}
+            projectId={project.id}
+            catalog={pageI18n}
+            onI18nChange={commitPageI18n}
+          />
         </div>
       </div>
-
-      <ConfigProvider
-        theme={{
-          algorithm: theme.darkAlgorithm,
-          token: {
-            colorPrimary: '#3dba9a',
-            colorBgContainer: '#33404c',
-            colorBgContainerDisabled: '#2a333c',
-            colorBgElevated: '#171e25',
-            colorError: '#ff4d4f',
-            colorBorder: 'rgba(255, 255, 255, 0.26)',
-            colorText: 'rgba(255, 255, 255, 0.92)',
-            colorTextHeading: 'rgba(255, 255, 255, 0.95)',
-            colorTextLabel: 'rgba(255, 255, 255, 0.84)',
-            colorTextPlaceholder: 'rgba(255, 255, 255, 0.48)',
-            colorFillTertiary: 'rgba(255, 255, 255, 0.12)',
-          },
-        }}
-      >
-        <EditorHelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
-        <Modal
-          className="inspector-modal"
-          open={inspectorOpen}
-          title={
-            selectedWidget
-              ? t('lowcode.widgetInspectorTitle', {
-                type: widgetTypeName(selectedWidget.type, t),
-                id: selectedWidget.id,
-              })
-              : t('lowcode.pageInspector')
-          }
-          footer={null}
-          width={920}
-          mask={{closable: !inspectorInvalid}}
-          keyboard={!inspectorInvalid}
-          styles={{ body: { maxHeight: 'none', overflow: 'visible' } }}
-          onCancel={() => {
-            if (inspectorInvalid) {
-              message.warning(t('lowcode.propInvalidClose'));
-              return;
-            }
-            setInspectorOpen(false);
-          }}
-          destroyOnHidden
-        >
-          {selectedDisplayWidget ? (
-            <CoalesceField onLeave={endCoalesce}>
-              <WidgetPropertyInspector
-                widget={selectedDisplayWidget}
-                parentType={selectedParent?.type}
-                disabled={readOnly}
-                i18nCatalog={pageI18n}
-                projectId={project.id}
-                ownKeys={selectedOwnKeys ?? undefined}
-                onPatch={(patch, coalesceKey) => updateWidget(selectedDisplayWidget.id, patch, coalesceKey)}
-                onInvalidChange={setInspectorInvalid}
-              />
-            </CoalesceField>
-          ) : (
-            <CoalesceField onLeave={endCoalesce}>
-              <PagePropertyInspector
-                style={pageStyle}
-                disabled={readOnly}
-                onChange={(style, field) => updatePageStyle(style, `edit:page:${field}`)}
-                onInvalidChange={setInspectorInvalid}
-              />
-            </CoalesceField>
-          )}
-        </Modal>
-      </ConfigProvider>
-
-      <Modal
+      <EditorInspector
+        helpOpen={helpOpen}
+        onHelpClose={() => setHelpOpen(false)}
+        open={inspectorOpen}
+        widget={selectedDisplayWidget}
+        parentType={selectedParent?.type}
+        readOnly={readOnly}
+        pageI18n={pageI18n}
+        projectId={project.id}
+        ownKeys={selectedOwnKeys}
+        pageStyle={pageStyle}
+        invalid={inspectorInvalid}
+        onInvalidChange={setInspectorInvalid}
+        onClose={() => setInspectorOpen(false)}
+        onPatch={updateWidget}
+        onPageStyle={(style, field) => updatePageStyle(style, `edit:page:${field}`)}
+        onLeave={endCoalesce}
+      />
+      <AddWidgetModal
         open={widgetModalOpen}
-        title={t('lowcode.addWidget')}
-        footer={null}
-        onCancel={() => setWidgetModalOpen(false)}
-        destroyOnHidden
-      >
-        <div className="widget-type-picker">
-          {ADDABLE_WIDGET_TYPES.map((type) => (
-            <Button
-              key={type}
-              block
-              onClick={() => {
-                addWidget(type);
-                setWidgetModalOpen(false);
-              }}
-            >
-              {widgetTypeName(type, t)}
-            </Button>
-          ))}
-        </div>
-      </Modal>
-
-      <Modal
+        onClose={() => setWidgetModalOpen(false)}
+        onAdd={addWidget}
+      />
+      <AliasModal
         open={aliasModalId !== null}
-        title={t('lowcode.setAlias')}
+        value={aliasInput}
+        onChange={setAliasInput}
         onOk={submitAlias}
         onCancel={() => setAliasModalId(null)}
-        destroyOnHidden
-      >
-        <Input
-          value={aliasInput}
-          onChange={(event) => setAliasInput(event.target.value)}
-          onPressEnter={submitAlias}
-          placeholder={t('lowcode.aliasPlaceholder')}
-          maxLength={30}
-          autoFocus
-        />
-      </Modal>
-
-      <Modal
+      />
+      <PageFormModal
         open={pageModalOpen}
-        title={editingPage ? t('lowcode.editPage') : t('lowcode.createPage')}
+        editing={Boolean(editingPage)}
+        form={pageForm}
         onOk={() => void submitPage()}
         onCancel={() => setPageModalOpen(false)}
-        destroyOnHidden
-      >
-        <Form form={pageForm} layout="vertical">
-          <Form.Item name="name" label={t('lowcode.pageName')} rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item
-            name="key"
-            label={t('lowcode.key')}
-            rules={[{ required: true }, { pattern: KEY_PATTERN, message: t('lowcode.keyHint') }]}
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item name="description" label={t('lowcode.description')}>
-            <Input.TextArea rows={3} />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal
-        className="version-create-modal"
+      />
+      <CreateVersionModal
         open={versionModalOpen}
-        title={t('lowcode.createVersion')}
+        form={versionForm}
+        versions={versions}
         onOk={() => void submitCreateVersion()}
         onCancel={() => setVersionModalOpen(false)}
-        destroyOnHidden
-      >
-        <Form
-          className="version-create-form"
-          form={versionForm}
-          layout="horizontal"
-          labelAlign="left"
-          colon={false}
-          initialValues={{ source: 'blank' }}
-        >
-          <Form.Item name="source" label={t('lowcode.createVersionSource')} rules={[{ required: true }]}>
-            <Radio.Group>
-              <Radio value="blank">{t('lowcode.createVersionBlank')}</Radio>
-              <Radio value="copy" disabled={versions.length === 0}>
-                {t('lowcode.createVersionCopy')}
-              </Radio>
-            </Radio.Group>
-          </Form.Item>
-          {createVersionSource === 'copy' ? (
-            <Form.Item
-              name="copyFromId"
-              label={t('lowcode.createVersionFrom')}
-              rules={[{ required: true, message: t('lowcode.createVersionFromRequired') }]}
-            >
-              <Select
-                placeholder={t('lowcode.createVersionFrom')}
-                options={versions.map((version) => ({
-                  value: version.id,
-                  label: `v${version.versionNo} · ${t(`lowcode.versionStatus.${version.status}`)}`,
-                }))}
-              />
-            </Form.Item>
-          ) : null}
-        </Form>
-      </Modal>
-    </div>
-  );
-}
-
-function TreeActionButton({
-  title,
-  icon,
-  disabled,
-  danger,
-  onClick,
-}: {
-  title: string;
-  icon: ReactNode;
-  disabled?: boolean;
-  danger?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <Tooltip title={title}>
-      <span>
-        <Button size="small" icon={icon} disabled={disabled} danger={danger} onClick={onClick} />
-      </span>
-    </Tooltip>
-  );
-}
-
-function CoalesceField({ onLeave, children }: { onLeave: () => void; children: ReactNode }) {
-  return (
-    <div
-      onBlur={(event: FocusEvent<HTMLDivElement>) => {
-        const next = event.relatedTarget;
-        if (next instanceof Node && event.currentTarget.contains(next)) {
-          return;
-        }
-        onLeave();
-      }}
-    >
-      {children}
+      />
     </div>
   );
 }

@@ -24,8 +24,15 @@ import { useTranslation } from 'react-i18next';
 import {
   DEFAULT_SWIPER_HEIGHT,
   DEFAULT_SWIPER_WIDTH,
+  DEFAULT_TABLE_HEADER_HEIGHT,
+  MIN_TABLE_TRACK,
+  TABLE_LINE_STYLES,
+  compactTableLine,
+  compactTableLines,
   OVERFLOW_MODES,
   POSITION_MODES,
+  TABLE_ALIGNS,
+  TABLE_VALIGNS,
   isCopyBinding,
   isLoopConfigured,
   isStateFnConfigured,
@@ -35,6 +42,11 @@ import {
   type PageVariable,
   type PageWidget,
   type PositionMode,
+  type TableAlign,
+  type TableLine,
+  type TableLineStyle,
+  type TableLines,
+  type TableValign,
   type WidgetLoop,
   type WidgetStyle,
 } from '@vanstack/xml';
@@ -59,12 +71,38 @@ const DEFAULT_BUTTON_BACKGROUND = '#ffffff';
 
 export type BoxGroup = 'content' | 'margin' | 'padding' | 'radius' | 'border' | 'size' | 'overflow' | 'position' | 'rotate' | 'loop';
 
+export type TableCommand =
+  | 'add-column'
+  | 'remove-column'
+  | 'move-column-left'
+  | 'move-column-right'
+  | 'add-row'
+  | 'remove-row'
+  | 'move-row-up'
+  | 'move-row-down';
+
+export type TableBubbleModel = {
+  headerHeight: number | null;
+  onHeaderHeight?: (value: number) => void;
+  hideCopy?: boolean;
+  align?: TableAlign;
+  valign?: TableValign;
+  onAlign?: (value: TableAlign | undefined) => void;
+  onValign?: (value: TableValign | undefined) => void;
+};
+
 export function isBoxGroupAllowed(type: PageWidget['type'], group: BoxGroup) {
   if (group === 'loop') {
     return true;
   }
+  if (type === 'tr') {
+    return false;
+  }
+  if (type === 'th' || type === 'td') {
+    return group === 'padding' || group === 'radius';
+  }
   if (group === 'overflow') {
-    return type === 'text' || type === 'flex';
+    return type === 'text' || type === 'flex' || type === 'table';
   }
   if (
     type === 'swiper-item' &&
@@ -260,12 +298,16 @@ export function WidgetStyleBubble({
   disabled,
   onToolbarPopupChange,
   ownKeys,
+  table,
+  onTableLines,
+  onStyleDelta,
 }: {
   widget: PageWidget;
   style?: WidgetStyle;
   openGroup: BoxGroup | null;
   onOpenGroupChange: (group: BoxGroup | null) => void;
   onChange: (style: WidgetStyle | undefined) => void;
+  onStyleDelta?: (delta: Partial<WidgetStyle>) => void;
   onTextChange?: (text: string) => void;
   onSrcChange?: (src: string) => void;
   projectId?: string;
@@ -277,6 +319,8 @@ export function WidgetStyleBubble({
   disabled?: boolean;
   onToolbarPopupChange?: (open: boolean) => void;
   ownKeys?: Set<string>;
+  table?: TableBubbleModel;
+  onTableLines?: (lines: TableLines | undefined) => void;
 }) {
   const { t, i18n } = useTranslation();
   const modifier = modifierShortcutLabel();
@@ -294,8 +338,16 @@ export function WidgetStyleBubble({
   const display: WidgetStyle = current;
   const Inherited = ({ active, children }: { active?: boolean; children: ReactNode }) =>
     active ? <div className="widget-style-inherited">{children}</div> : <>{children}</>;
-  const showText = widget.type === 'text' || widget.type === 'button';
-  const content = widget.type === 'text' ? widget.value : widget.type === 'button' ? widget.text : '';
+  const showText =
+    widget.type === 'text' ||
+    widget.type === 'button' ||
+    ((widget.type === 'th' || widget.type === 'td') && !table?.hideCopy);
+  const content =
+    widget.type === 'text' || widget.type === 'th' || widget.type === 'td'
+      ? widget.value
+      : widget.type === 'button'
+        ? widget.text
+        : '';
   const [textShadow, setTextShadow] = useState(() => parseCssShadow(display.textShadow));
   const [openPopup, setOpenPopup] = useState<string | null>(null);
   const [stateFnOpen, setStateFnOpen] = useState(false);
@@ -340,8 +392,34 @@ export function WidgetStyleBubble({
     if (disabled) {
       return;
     }
+    if (onStyleDelta) {
+      onStyleDelta(next);
+      return;
+    }
     const merged = { ...current, ...next };
     onChange(sanitizeWidgetStyle(widget.type, merged));
+  }
+
+  function patchTableLine(kind: keyof TableLines, partial: Partial<TableLine>) {
+    if (disabled || widget.type !== 'table' || !onTableLines) {
+      return;
+    }
+    const prev = widget.lines?.[kind] ?? {};
+    const merged: TableLine = { ...prev, ...partial };
+    if ('width' in partial && (partial.width == null || partial.width <= 0)) {
+      delete merged.width;
+    }
+    if ('style' in partial && !partial.style) {
+      delete merged.style;
+    }
+    if ('color' in partial && !partial.color) {
+      delete merged.color;
+    }
+    let line = compactTableLine(merged);
+    if (line && line.width == null && (line.style || line.color)) {
+      line = { ...line, width: 1 };
+    }
+    onTableLines(compactTableLines({ ...widget.lines, [kind]: line }));
   }
 
   function patchTextShadow(next: Partial<ShadowValue>) {
@@ -520,6 +598,35 @@ export function WidgetStyleBubble({
               </Tooltip>
             </>
           ) : null}
+          {(widget.type === 'th' || widget.type === 'td') && table?.onAlign && table.onValign ? (
+            <>
+              <Tooltip title={t('lowcode.tableAlign')}>
+                <Select
+                  size="small"
+                  value={table.align ?? 'start'}
+                  disabled={disabled}
+                  popupMatchSelectWidth={false}
+                  getPopupContainer={() => document.body}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  options={TABLE_ALIGNS.map((value) => ({ value, label: t(`lowcode.tableAlign${value.charAt(0).toUpperCase()}${value.slice(1)}`) }))}
+                  onChange={(align: TableAlign) => table.onAlign?.(align === 'start' ? undefined : align)}
+                />
+              </Tooltip>
+              <Tooltip title={t('lowcode.tableValign')}>
+                <Select
+                  size="small"
+                  value={table.valign ?? 'middle'}
+                  disabled={disabled}
+                  popupMatchSelectWidth={false}
+                  getPopupContainer={() => document.body}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  options={TABLE_VALIGNS.map((value) => ({ value, label: t(`lowcode.tableValign${value.charAt(0).toUpperCase()}${value.slice(1)}`) }))}
+                  onChange={(valign: TableValign) => table.onValign?.(valign === 'middle' ? undefined : valign)}
+                />
+              </Tooltip>
+            </>
+          ) : null}
+          {widget.type !== 'tr' ? (
           <ColorIconPicker
             title={t('lowcode.styleBackground')}
             kind="fill"
@@ -536,6 +643,7 @@ export function WidgetStyleBubble({
               })
             }
           />
+          ) : null}
           {isBoxGroupAllowed(widget.type, 'size') ? (
             <Tooltip title={`${t('lowcode.styleSize')} (${modifier}+T)`}>
               <Button
@@ -690,16 +798,39 @@ export function WidgetStyleBubble({
                 <Select
                   size="small"
                   className={inheritedClass('overflow')}
-                  value={display.overflow ?? 'visible'}
+                  value={widget.type === 'table' ? (display.overflow ?? 'auto') : (display.overflow ?? 'visible')}
                   getPopupContainer={popupContainer}
                   onChange={(overflow: OverflowMode) =>
-                    patch({ overflow: overflow === 'visible' ? undefined : overflow })
+                    patch({
+                      overflow:
+                        widget.type === 'table'
+                          ? overflow === 'auto'
+                            ? undefined
+                            : overflow
+                          : overflow === 'visible'
+                            ? undefined
+                            : overflow,
+                    })
                   }
                   options={OVERFLOW_MODES.map((value) => ({
                     value,
                     label: t(`lowcode.styleOverflow${value.charAt(0).toUpperCase()}${value.slice(1)}`),
                   }))}
                 />
+                {widget.type === 'table' && table?.onHeaderHeight ? (
+                  <Tooltip title={t('lowcode.tableHeaderHeight')}>
+                    <InputNumber
+                      size="small"
+                      min={MIN_TABLE_TRACK}
+                      precision={0}
+                      value={table.headerHeight ?? DEFAULT_TABLE_HEADER_HEIGHT}
+                      disabled={disabled}
+                      onChange={(value) => {
+                        if (value != null) table.onHeaderHeight?.(value);
+                      }}
+                    />
+                  </Tooltip>
+                ) : null}
               </div>
             ) : null}
             {openGroup === 'position' && isBoxGroupAllowed(widget.type, 'position') ? (
@@ -823,7 +954,7 @@ export function WidgetStyleBubble({
                   min={0}
                   max={20}
                   showPreview={false}
-                  stroke={{ color: display.borderColor, style: display.borderStyle }}
+                  stroke={{ color: display.borderTopColor ?? display.borderColor, style: display.borderTopStyle ?? display.borderStyle }}
                   ownKeys={ownKeys}
                   edgeKeys={{ top: 'borderTopWidth', right: 'borderRightWidth', bottom: 'borderBottomWidth', left: 'borderLeftWidth' }}
                   baseValues={{ top: current.borderTopWidth, right: current.borderRightWidth, bottom: current.borderBottomWidth, left: current.borderLeftWidth }}
@@ -833,51 +964,120 @@ export function WidgetStyleBubble({
                     bottom: display.borderBottomWidth,
                     left: display.borderLeftWidth,
                   }}
-                  onChange={(quad) => {
-                    const hasWidth = [quad.top, quad.right, quad.bottom, quad.left].some((value) => pxFromLength(value));
+                  lines={{
+                    style: {
+                      top: display.borderTopStyle ?? display.borderStyle,
+                      right: display.borderRightStyle ?? display.borderStyle,
+                      bottom: display.borderBottomStyle ?? display.borderStyle,
+                      left: display.borderLeftStyle ?? display.borderStyle,
+                    },
+                    color: {
+                      top: display.borderTopColor ?? display.borderColor,
+                      right: display.borderRightColor ?? display.borderColor,
+                      bottom: display.borderBottomColor ?? display.borderColor,
+                      left: display.borderLeftColor ?? display.borderColor,
+                    },
+                  }}
+                  linePopup={(id) => popupProps(`border-line-${id}`)}
+                  onLineChange={(lines) => {
+                    const widths = {
+                      top: current.borderTopWidth,
+                      right: current.borderRightWidth,
+                      bottom: current.borderBottomWidth,
+                      left: current.borderLeftWidth,
+                    };
                     patch({
-                      borderTopWidth: pxFromLength(quad.top),
-                      borderRightWidth: pxFromLength(quad.right),
-                      borderBottomWidth: pxFromLength(quad.bottom),
-                      borderLeftWidth: pxFromLength(quad.left),
-                      borderStyle: hasWidth ? current.borderStyle || 'solid' : current.borderStyle,
+                      borderTopStyle: lines.style.top,
+                      borderRightStyle: lines.style.right,
+                      borderBottomStyle: lines.style.bottom,
+                      borderLeftStyle: lines.style.left,
+                      borderTopColor: lines.color.top,
+                      borderRightColor: lines.color.right,
+                      borderBottomColor: lines.color.bottom,
+                      borderLeftColor: lines.color.left,
+                      borderTopWidth: lines.style.top || lines.color.top ? widths.top ?? 1 : widths.top,
+                      borderRightWidth: lines.style.right || lines.color.right ? widths.right ?? 1 : widths.right,
+                      borderBottomWidth: lines.style.bottom || lines.color.bottom ? widths.bottom ?? 1 : widths.bottom,
+                      borderLeftWidth: lines.style.left || lines.color.left ? widths.left ?? 1 : widths.left,
+                    });
+                  }}
+                  onChange={(quad) => {
+                    const widths = {
+                      top: pxFromLength(quad.top),
+                      right: pxFromLength(quad.right),
+                      bottom: pxFromLength(quad.bottom),
+                      left: pxFromLength(quad.left),
+                    };
+                    const styles = {
+                      top: current.borderTopStyle ?? current.borderStyle,
+                      right: current.borderRightStyle ?? current.borderStyle,
+                      bottom: current.borderBottomStyle ?? current.borderStyle,
+                      left: current.borderLeftStyle ?? current.borderStyle,
+                    };
+                    patch({
+                      borderTopWidth: widths.top,
+                      borderRightWidth: widths.right,
+                      borderBottomWidth: widths.bottom,
+                      borderLeftWidth: widths.left,
+                      borderTopStyle: widths.top ? styles.top || 'solid' : styles.top,
+                      borderRightStyle: widths.right ? styles.right || 'solid' : styles.right,
+                      borderBottomStyle: widths.bottom ? styles.bottom || 'solid' : styles.bottom,
+                      borderLeftStyle: widths.left ? styles.left || 'solid' : styles.left,
                     });
                   }}
                 />
-                <div className="style-border-meta">
-                  <BindingLock bound={isInherited('borderStyle') ? undefined : current.borderStyle} resetKey={widget.id}>
-                    <Select
-                    size="small"
-                    className={inheritedClass('borderStyle')}
-                    allowClear
-                    value={display.borderStyle}
-                    placeholder={t('lowcode.styleBorderNone')}
-                    getPopupContainer={popupContainer}
-                    onChange={(borderStyle) => patch({ borderStyle: borderStyle || undefined })}
-                    options={[
-                      { value: 'solid', label: t('lowcode.styleBorderSolid') },
-                      { value: 'dashed', label: t('lowcode.styleBorderDashed') },
-                      { value: 'dotted', label: t('lowcode.styleBorderDotted') },
-                    ]}
-                  />
-                  </BindingLock>
-                  <BindingLock
-                    bound={isInherited('borderColor') ? undefined : current.borderColor}
-                    resetKey={widget.id}
-                    onContinue={() => popupProps('border-color').onOpenChange(true)}
-                  >
-                    <ColorPicker
-                    size="small"
-                    className={inheritedClass('borderColor')}
-                    allowClear
-                    destroyOnHidden
-                    value={colorValue(display.borderColor)}
-                    getPopupContainer={popupContainer}
-                    {...popupProps('border-color')}
-                    onChange={(value, css) => patch({ borderColor: value.cleared ? undefined : css })}
-                  />
-                  </BindingLock>
-                </div>
+                {widget.type === 'table' && onTableLines ? (
+                  <div className="table-line-fields">
+                    {(['header', 'row', 'column'] as const).map((kind) => {
+                      const line = widget.lines?.[kind];
+                      const labelKey = kind === 'header' ? 'tableLineHeader' : kind === 'row' ? 'tableLineRow' : 'tableLineColumn';
+                      return (
+                        <div className="table-line-row" key={kind}>
+                          <span className="table-line-row-label">{t(`lowcode.${labelKey}`)}</span>
+                          <InputNumber
+                            size="small"
+                            min={0}
+                            max={20}
+                            precision={0}
+                            value={line?.width}
+                            disabled={disabled}
+                            onChange={(value) => patchTableLine(kind, { width: value ?? undefined })}
+                          />
+                          <Select
+                            size="small"
+                            allowClear
+                            value={line?.style}
+                            disabled={disabled}
+                            placeholder={t('lowcode.styleBorderNone')}
+                            popupMatchSelectWidth={false}
+                            getPopupContainer={popupContainer}
+                            onChange={(value: TableLineStyle | null) => patchTableLine(kind, { style: value || undefined })}
+                            options={TABLE_LINE_STYLES.map((value) => ({
+                              value,
+                              label: t(`lowcode.styleBorder${value.charAt(0).toUpperCase()}${value.slice(1)}`),
+                            }))}
+                          />
+                          <BindingLock
+                            bound={line?.color && isCopyBinding(line.color) ? line.color : undefined}
+                            resetKey={`${widget.id}:${kind}-line`}
+                            onContinue={() => popupProps(`table-line-${kind}`).onOpenChange(true)}
+                          >
+                            <ColorPicker
+                              size="small"
+                              allowClear
+                              destroyOnHidden
+                              value={colorValue(line?.color)}
+                              disabled={disabled}
+                              getPopupContainer={popupContainer}
+                              {...popupProps(`table-line-${kind}`)}
+                              onChange={(value, css) => patchTableLine(kind, { color: value.cleared ? undefined : css })}
+                            />
+                          </BindingLock>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
             ) : null}
             {openGroup === 'radius' && isBoxGroupAllowed(widget.type, 'radius') ? (

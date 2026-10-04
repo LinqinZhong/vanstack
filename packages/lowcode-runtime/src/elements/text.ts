@@ -1,7 +1,7 @@
 import { createElement, type ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
 import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
-import { resolveWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
+import { displayWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
 export function renderText(
   widget: Extract<PageWidget, { type: 'text' }>,
@@ -23,6 +23,6 @@ export function renderText(
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,
     },
-    resolveWidgetCopy(widget.value, ctx),
+    displayWidgetCopy(widget.value, ctx, Boolean(ctx.summarizeCopy)),
   );
 }

@@ -95,7 +95,13 @@ export function applyCommon<T extends PageWidget>(widget: T, patch: WidgetPatch)
       delete next.style;
     }
   }
-  if ('item' in patch && widget.type !== 'swiper-item') {
+  if (
+    'item' in patch &&
+    widget.type !== 'swiper-item' &&
+    widget.type !== 'th' &&
+    widget.type !== 'tr' &&
+    widget.type !== 'td'
+  ) {
     const withItem = next as T & { item?: FlexItemStyle };
     if (patch.item) {
       withItem.item = patch.item;

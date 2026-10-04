@@ -1,9 +1,11 @@
-import { InputNumber, Select } from 'antd';
+import { ColorPicker, InputNumber, Modal, Select } from 'antd';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { CSSProperties } from 'react';
 import {
   boxLengthsEqual,
   compactBoxLength,
+  isCopyBinding,
   type BoxLength,
   type BoxLengthMode,
 } from '@vanstack/xml';
@@ -21,6 +23,69 @@ export type LengthQuad = {
   bottom?: BoxLength;
   left?: BoxLength;
 };
+
+export type BorderEdge = 'top' | 'right' | 'bottom' | 'left';
+
+export type BorderLineQuad = {
+  top?: string;
+  right?: string;
+  bottom?: string;
+  left?: string;
+};
+
+const BORDER_LINE_STYLES = ['solid', 'dashed', 'dotted'] as const;
+
+function sharedText(values: Array<string | undefined>) {
+  if (values.some((value) => value !== values[0])) {
+    return undefined;
+  }
+  return values[0];
+}
+
+function colorValue(value: string | undefined) {
+  if (!value || isCopyBinding(value)) {
+    return null;
+  }
+  return value;
+}
+
+function LineLock({
+  bound,
+  resetKey,
+  children,
+  onContinue,
+}: {
+  bound?: string;
+  resetKey?: string;
+  children: ReactNode;
+  onContinue?: () => void;
+}) {
+  const { t } = useTranslation();
+  const [released, setReleased] = useState(false);
+  const locked = isCopyBinding(bound ?? '') && !released;
+
+  useEffect(() => {
+    setReleased(false);
+  }, [resetKey, bound]);
+
+  function confirm(event: { preventDefault(): void; stopPropagation(): void }) {
+    event.preventDefault();
+    event.stopPropagation();
+    Modal.confirm({
+      title: t('lowcode.styleBindingOverwrite'),
+      onOk: () => {
+        setReleased(true);
+        onContinue?.();
+      },
+    });
+  }
+
+  return (
+    <span className="widget-style-binding" data-bound={locked ? '' : undefined} onMouseDownCapture={locked ? confirm : undefined}>
+      {children}
+    </span>
+  );
+}
 
 export function pxFromLength(length?: BoxLength): number | undefined {
   return length && length.mode !== 'auto' ? length.value : undefined;
@@ -92,6 +157,7 @@ function EdgeRow({
   units,
   popupContainer,
   inherited,
+  line,
   onChange,
 }: {
   label: string;
@@ -102,6 +168,7 @@ function EdgeRow({
   units: readonly BoxLengthMode[];
   popupContainer?: () => HTMLElement;
   inherited?: boolean;
+  line?: ReactNode;
   onChange: (value: BoxLength | undefined) => void;
 }) {
   const showUnits = units.length > 1;
@@ -146,6 +213,7 @@ function EdgeRow({
           options={units.map((unit) => ({ value: unit, label: unit }))}
         />
       ) : null}
+      {line}
     </div>
   );
 }
@@ -239,6 +307,9 @@ export function StyleBoxEdges({
   ownKeys,
   edgeKeys,
   baseValues,
+  lines,
+  onLineChange,
+  linePopup,
   onChange,
 }: {
   resetKey?: string;
@@ -255,6 +326,9 @@ export function StyleBoxEdges({
   ownKeys?: Set<string>;
   edgeKeys?: { top?: string; right?: string; bottom?: string; left?: string };
   baseValues?: LengthQuad | BoxQuad;
+  lines?: { style: BorderLineQuad; color: BorderLineQuad };
+  onLineChange?: (lines: { style: BorderLineQuad; color: BorderLineQuad }) => void;
+  linePopup?: (id: string) => { open: boolean; onOpenChange: (open: boolean) => void };
   onChange: (values: LengthQuad) => void;
 }) {
   const { t } = useTranslation();
@@ -362,23 +436,91 @@ export function StyleBoxEdges({
     { key: 'right', label: labels.right, value: current.right, onChange: (value) => emit({ ...current, right: value }), inherited: rowInherited.right },
   ];
 
+  const rowSides: Record<string, BorderEdge[]> = {
+    all: ['top', 'right', 'bottom', 'left'],
+    vertical: ['top', 'bottom'],
+    horizontal: ['left', 'right'],
+    top: ['top'],
+    left: ['left'],
+    bottom: ['bottom'],
+    right: ['right'],
+  };
+
+  function writeLines(sides: BorderEdge[], kindName: 'style' | 'color', value: string | undefined) {
+    if (!lines || !onLineChange) {
+      return;
+    }
+    const next = {
+      style: { ...lines.style },
+      color: { ...lines.color },
+    };
+    for (const side of sides) {
+      next[kindName][side] = value;
+    }
+    onLineChange(next);
+  }
+
   return (
-    <div className={`style-box-edges is-rows${numericOnly ? ' is-px-only' : ''}`}>
+    <div className={`style-box-edges is-rows${numericOnly ? ' is-px-only' : ''}${lines ? ' has-lines' : ''}`}>
       {showPreview ? <BoxPreview values={current} kind={kind} stroke={stroke} /> : null}
-      {rows.map((row) => (
-        <EdgeRow
-          key={row.key}
-          label={row.label}
-          value={row.value}
-          disabled={disabled}
-          min={min}
-          max={max}
-          units={units}
-          popupContainer={popupContainer}
-          inherited={row.inherited}
-          onChange={row.onChange}
-        />
-      ))}
+      {rows.map((row) => {
+        const sides = rowSides[row.key] ?? [];
+        const lineStyle = lines ? sharedText(sides.map((side) => lines.style[side])) : undefined;
+        const lineColor = lines ? sharedText(sides.map((side) => lines.color[side])) : undefined;
+        return (
+          <EdgeRow
+            key={row.key}
+            label={row.label}
+            value={row.value}
+            disabled={disabled}
+            min={min}
+            max={max}
+            units={units}
+            popupContainer={popupContainer}
+            inherited={row.inherited}
+            onChange={row.onChange}
+            line={
+              lines && onLineChange ? (
+                <>
+                  <Select
+                    size="small"
+                    allowClear
+                    disabled={disabled}
+                    value={lineStyle === 'solid' || lineStyle === 'dashed' || lineStyle === 'dotted' ? lineStyle : undefined}
+                    placeholder={t('lowcode.styleBorderNone')}
+                    popupMatchSelectWidth={false}
+                    getPopupContainer={popupContainer ?? (() => document.body)}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onChange={(value: (typeof BORDER_LINE_STYLES)[number] | null) =>
+                      writeLines(sides, 'style', value || undefined)
+                    }
+                    options={BORDER_LINE_STYLES.map((value) => ({
+                      value,
+                      label: t(`lowcode.styleBorder${value.charAt(0).toUpperCase()}${value.slice(1)}`),
+                    }))}
+                  />
+                  <LineLock
+                    bound={lineColor && isCopyBinding(lineColor) ? lineColor : undefined}
+                    resetKey={`${row.key}:${lineColor ?? ''}`}
+                    onContinue={() => linePopup?.(`${row.key}-color`)?.onOpenChange(true)}
+                  >
+                    <ColorPicker
+                      size="small"
+                      allowClear
+                      disabled={disabled}
+                      destroyOnHidden
+                      value={colorValue(lineColor)}
+                      getPopupContainer={popupContainer ?? (() => document.body)}
+                      {...linePopup?.(`${row.key}-color`)}
+                      onChange={(value, css) => writeLines(sides, 'color', value.cleared ? undefined : css)}
+                    />
+                  </LineLock>
+                </>
+              ) : null
+            }
+          />
+        );
+      })}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { renderIcon } from './icon';
 import { renderImage } from './image';
 import { renderSwiper } from './swiper';
 import { renderSwiperItem } from './swiper-item';
+import { renderTable, renderTd, renderTh, renderTr } from './table';
 import { renderText } from './text';
 import type { WidgetRenderContext } from '../widget-render';
 
@@ -25,5 +26,13 @@ export function widgetElement(widget: PageWidget, ctx: WidgetRenderContext): Rea
       return renderSwiper(widget, ctx);
     case 'swiper-item':
       return renderSwiperItem(widget, ctx);
+    case 'table':
+      return renderTable(widget, ctx);
+    case 'th':
+      return renderTh(widget, ctx);
+    case 'tr':
+      return renderTr(widget, ctx);
+    case 'td':
+      return renderTd(widget, ctx);
   }
 }

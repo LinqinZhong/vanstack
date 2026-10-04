@@ -69,13 +69,14 @@ export function paintCanvasView(
   frame: HTMLDivElement | null,
   view: ViewTransform,
   hasEditOverflow: boolean,
+  framePin: { x: number; y: number } = { x: 0, y: 0 },
 ) {
   const camera = iframe?.contentDocument?.querySelector<HTMLElement>('.preview-camera');
   if (camera) {
     camera.style.transform = cameraTransform(view, hasEditOverflow);
   }
   if (frame) {
-    frame.style.transform = `translate3d(${view.x}px, ${view.y}px, 0)`;
+    frame.style.transform = `translate3d(${view.x + framePin.x}px, ${view.y + framePin.y}px, 0)`;
     frame.style.width = `${snapDevicePixel(SCREEN_WIDTH * view.scale)}px`;
     frame.style.height = `${snapDevicePixel(SCREEN_HEIGHT * view.scale)}px`;
   }
@@ -342,12 +343,20 @@ export function liveWidgetCss(style: WidgetStyle | undefined) {
     borderRightWidth: px(style?.borderRightWidth),
     borderBottomWidth: px(style?.borderBottomWidth),
     borderLeftWidth: px(style?.borderLeftWidth),
+    borderTopStyle: style?.borderTopStyle ?? style?.borderStyle ?? '',
+    borderRightStyle: style?.borderRightStyle ?? style?.borderStyle ?? '',
+    borderBottomStyle: style?.borderBottomStyle ?? style?.borderStyle ?? '',
+    borderLeftStyle: style?.borderLeftStyle ?? style?.borderStyle ?? '',
+    borderTopColor: style?.borderTopColor ?? style?.borderColor ?? '',
+    borderRightColor: style?.borderRightColor ?? style?.borderColor ?? '',
+    borderBottomColor: style?.borderBottomColor ?? style?.borderColor ?? '',
+    borderLeftColor: style?.borderLeftColor ?? style?.borderColor ?? '',
+    borderStyle: '',
+    borderColor: '',
     borderTopLeftRadius: px(style?.radiusTopLeft),
     borderTopRightRadius: px(style?.radiusTopRight),
     borderBottomRightRadius: px(style?.radiusBottomRight),
     borderBottomLeftRadius: px(style?.radiusBottomLeft),
-    borderStyle: style?.borderStyle ?? '',
-    borderColor: style?.borderColor ?? '',
     width: style?.width?.mode === 'px' ? `${style.width.value}px` : style?.width?.mode === '%' ? `${style.width.value}%` : '',
     height: style?.height?.mode === 'px' ? `${style.height.value}px` : style?.height?.mode === '%' ? `${style.height.value}%` : '',
     position: style?.position ?? '',

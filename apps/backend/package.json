@@ -25,6 +25,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "fast-xml-parser": "^5.2.5",
+    "mongodb": "^6.21.0",
     "multer": "^2.0.2",
     "mysql2": "^3.24.4",
     "nestjs-i18n": "^10.5.1",

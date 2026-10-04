@@ -746,7 +746,13 @@ export function WidgetPropertyInspector({
   const flex = widget.type === 'flex' ? (widget.flex ?? {}) : undefined;
   const swiper = widget.type === 'swiper' ? (widget.swiper ?? {}) : undefined;
   const item =
-    parentType === 'flex' && widget.type !== 'swiper-item' ? (widget.item ?? {}) : undefined;
+    parentType === 'flex' &&
+    widget.type !== 'swiper-item' &&
+    widget.type !== 'th' &&
+    widget.type !== 'tr' &&
+    widget.type !== 'td'
+      ? (widget.item ?? {})
+      : undefined;
 
   function patchStyle(next: Partial<WidgetStyle>) {
     onPatch({ style: sanitizeWidgetStyle(widget.type, { ...style, ...next }) }, `edit:${widget.id}:style`);
@@ -1088,20 +1094,47 @@ export function WidgetPropertyInspector({
     );
   }
 
-  if (widget.type !== 'swiper-item') {
+  if (widget.type !== 'swiper-item' && widget.type !== 'th' && widget.type !== 'tr' && widget.type !== 'td') {
   items.push(
     {
-      key: 'borderColor',
-      value: style.borderColor ?? '',
-      onChange: (raw) => accepted(parseCssColor(raw), (borderColor) => patchStyle({ borderColor })),
+      key: 'borderTopColor',
+      value: style.borderTopColor ?? style.borderColor ?? '',
+      onChange: (raw) => accepted(parseCssColor(raw), (borderTopColor) => patchStyle({ borderTopColor })),
     },
     {
-      key: 'borderStyle',
-      value: style.borderStyle ?? '',
-      onChange: (raw) =>
-        accepted(parseBorderStyle(raw), (borderStyle) =>
-          patchStyle({ borderStyle }),
-        ),
+      key: 'borderRightColor',
+      value: style.borderRightColor ?? style.borderColor ?? '',
+      onChange: (raw) => accepted(parseCssColor(raw), (borderRightColor) => patchStyle({ borderRightColor })),
+    },
+    {
+      key: 'borderBottomColor',
+      value: style.borderBottomColor ?? style.borderColor ?? '',
+      onChange: (raw) => accepted(parseCssColor(raw), (borderBottomColor) => patchStyle({ borderBottomColor })),
+    },
+    {
+      key: 'borderLeftColor',
+      value: style.borderLeftColor ?? style.borderColor ?? '',
+      onChange: (raw) => accepted(parseCssColor(raw), (borderLeftColor) => patchStyle({ borderLeftColor })),
+    },
+    {
+      key: 'borderTopStyle',
+      value: style.borderTopStyle ?? style.borderStyle ?? '',
+      onChange: (raw) => accepted(parseBorderStyle(raw), (borderTopStyle) => patchStyle({ borderTopStyle })),
+    },
+    {
+      key: 'borderRightStyle',
+      value: style.borderRightStyle ?? style.borderStyle ?? '',
+      onChange: (raw) => accepted(parseBorderStyle(raw), (borderRightStyle) => patchStyle({ borderRightStyle })),
+    },
+    {
+      key: 'borderBottomStyle',
+      value: style.borderBottomStyle ?? style.borderStyle ?? '',
+      onChange: (raw) => accepted(parseBorderStyle(raw), (borderBottomStyle) => patchStyle({ borderBottomStyle })),
+    },
+    {
+      key: 'borderLeftStyle',
+      value: style.borderLeftStyle ?? style.borderStyle ?? '',
+      onChange: (raw) => accepted(parseBorderStyle(raw), (borderLeftStyle) => patchStyle({ borderLeftStyle })),
     },
     boxProp(
       'borderWidth',
@@ -1117,16 +1150,21 @@ export function WidgetPropertyInspector({
           borderRightWidth: quad.right,
           borderBottomWidth: quad.bottom,
           borderLeftWidth: quad.left,
-          borderStyle:
-            [quad.top, quad.right, quad.bottom, quad.left].some((value) => value)
-              ? style.borderStyle || 'solid'
-              : style.borderStyle,
+          borderTopStyle: quad.top ? style.borderTopStyle || style.borderStyle || 'solid' : style.borderTopStyle,
+          borderRightStyle: quad.right ? style.borderRightStyle || style.borderStyle || 'solid' : style.borderRightStyle,
+          borderBottomStyle: quad.bottom ? style.borderBottomStyle || style.borderStyle || 'solid' : style.borderBottomStyle,
+          borderLeftStyle: quad.left ? style.borderLeftStyle || style.borderStyle || 'solid' : style.borderLeftStyle,
         }),
     ),
     pxProp('borderTopWidth', style.borderTopWidth, (borderTopWidth) => patchStyle({ borderTopWidth })),
     pxProp('borderRightWidth', style.borderRightWidth, (borderRightWidth) => patchStyle({ borderRightWidth })),
     pxProp('borderBottomWidth', style.borderBottomWidth, (borderBottomWidth) => patchStyle({ borderBottomWidth })),
     pxProp('borderLeftWidth', style.borderLeftWidth, (borderLeftWidth) => patchStyle({ borderLeftWidth })),
+  );
+  }
+
+  if (widget.type !== 'swiper-item') {
+  items.push(
     boxProp(
       'borderRadius',
       {

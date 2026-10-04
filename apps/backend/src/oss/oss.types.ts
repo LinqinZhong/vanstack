@@ -26,4 +26,8 @@ export abstract class OssStorage {
   ensureReady(): Promise<void> {
     return Promise.resolve();
   }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
 }

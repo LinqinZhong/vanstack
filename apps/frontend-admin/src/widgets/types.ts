@@ -3,6 +3,9 @@ import type {
   FlexItemStyle,
   PageWidget,
   SwiperStyle,
+  TableAlign,
+  TableLines,
+  TableValign,
   WidgetLoop,
   WidgetStyle,
 } from '@vanstack/xml';
@@ -21,6 +24,14 @@ export type WidgetPatch = {
   flex?: FlexContainerStyle | undefined;
   swiper?: SwiperStyle | undefined;
   item?: FlexItemStyle | undefined;
+  freezeHeader?: boolean;
+  freezeFooter?: boolean;
+  headerHeight?: number;
+  lines?: TableLines;
+  width?: number;
+  height?: number;
+  align?: TableAlign;
+  valign?: TableValign;
 };
 
 export type WidgetTranslate = (key: string) => string;
@@ -37,8 +48,8 @@ export type WidgetCloneContext = {
   cloneChild: (widget: PageWidget) => PageWidget;
 };
 
-/** `content` accepts every widget except `swiper-item`. */
-export type WidgetAccepts = 'none' | 'content' | 'swiper-item';
+/** `content` accepts every widget except swiper pages and table parts. */
+export type WidgetAccepts = 'none' | 'content' | 'swiper-item' | 'table-section' | 'table-cell';
 
 export interface WidgetHelperInterface<T extends PageWidget = PageWidget> {
   readonly type: T['type'];

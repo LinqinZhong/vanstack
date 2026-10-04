@@ -62,7 +62,11 @@ pnpm start:desktop
 
 - **I18n**：前端 `zh` / `en` 切换；后端通过 `x-lang` 或 `Accept-Language` 返回对应文案。
 - **TypeORM**：默认 SQLite（`apps/backend/data/vanstack.sqlite`），也可使用 MySQL / PostgreSQL。
-- **OSS**：默认写入本地 `apps/backend/uploads/`；设置 `OSS_DRIVER=s3` 后走 MinIO / S3 / 兼容对象存储。
+- **对象存储**：页面 XML、语言快照、素材和图标写入 MongoDB（`OSS_DRIVER=mongo`，库名 `vanstack`）。也可改回本地目录（`local`）或 MinIO / S3（`s3`）。
+
+## MongoDB
+
+页面内容默认存在本机 MongoDB：`mongodb://localhost:27017`，数据库 `vanstack`。
 
 ## PostgreSQL + MinIO
 

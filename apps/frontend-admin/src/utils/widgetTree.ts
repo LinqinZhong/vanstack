@@ -176,7 +176,6 @@ export function updateWidgetById(
   id: string,
   patcher: (widget: PageWidget) => PageWidget,
 ): PageWidget[] {
-  debugger
   return widgets.map((widget) => {
     if (widget.id === id) {
       return patcher(widget);
@@ -219,6 +218,43 @@ function ensureItemThenAppend(swiper: Extract<PageWidget, { type: 'swiper' }>, w
   };
 }
 
+function firstTableCell(table: Extract<PageWidget, { type: 'table' }>): PageWidget | null {
+  const header = table.children.find((child) => child.type === 'th');
+  if (header) {
+    return header;
+  }
+  for (const row of table.children) {
+    if (row.type !== 'tr') {
+      continue;
+    }
+    const cell = row.children.find((child) => child.type === 'td');
+    if (cell) {
+      return cell;
+    }
+  }
+  return null;
+}
+
+function tableCellForInsert(widgets: PageWidget[], selected: PageWidget): PageWidget | null {
+  if (selected.type === 'th' || selected.type === 'td') {
+    return selected;
+  }
+  if (selected.type === 'tr') {
+    return selected.children.find((child) => child.type === 'td') ?? null;
+  }
+  if (selected.type === 'table') {
+    return firstTableCell(selected);
+  }
+  let parent = findParentWidget(widgets, selected.id);
+  while (parent) {
+    if (parent.type === 'th' || parent.type === 'td') {
+      return parent;
+    }
+    parent = findParentWidget(widgets, parent.id);
+  }
+  return null;
+}
+
 function placeInContainer(selected: PageWidget, widget: PageWidget): PageWidget | null {
   if (selected.type === 'swiper') {
     if (widget.type === 'swiper-item') {
@@ -246,6 +282,13 @@ export function addWidgetToTree(
     const next = placeInContainer(selected, widget);
     if (next) {
       return updateWidgetById(widgets, selected.id, () => next);
+    }
+    const cell = tableCellForInsert(widgets, selected);
+    if (cell && cell.id !== selected.id) {
+      const placed = placeInContainer(cell, widget);
+      if (placed) {
+        return updateWidgetById(widgets, cell.id, () => placed);
+      }
     }
   }
   if (!canContain('page', widget.type)) {

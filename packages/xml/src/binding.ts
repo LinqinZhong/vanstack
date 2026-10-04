@@ -86,6 +86,25 @@ export function isCopyBinding(raw: string): boolean {
   return Boolean(trimmed) && (EXPR_BINDING.test(trimmed) || PATH_BINDING.test(trimmed));
 }
 
+export type CopyBindingLabel =
+  | { kind: 'static' }
+  | { kind: 'expr'; source: string }
+  | { kind: 'path'; field: string; source: string };
+
+/** 编辑态单元格文案：$() 是表达式，路径绑定只露出最后一层字段。 */
+export function describeCopyBinding(raw: string): CopyBindingLabel {
+  const source = raw.trim();
+  if (EXPR_BINDING.test(source)) {
+    return { kind: 'expr', source };
+  }
+  const pathMatch = PATH_BINDING.exec(source);
+  if (!pathMatch) {
+    return { kind: 'static' };
+  }
+  const parts = pathMatch[2] ? pathMatch[2].slice(1).split('.').filter(Boolean) : [];
+  return { kind: 'path', field: parts.length > 0 ? parts[parts.length - 1] : pathMatch[1], source };
+}
+
 export function resolveCopyBinding(raw: string, scope: BindingScope): string {
   const exprMatch = EXPR_BINDING.exec(raw);
   if (exprMatch) {

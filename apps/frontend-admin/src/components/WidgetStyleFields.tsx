@@ -467,46 +467,68 @@ export function WidgetStyleFields({
             disabled={disabled}
             min={0}
             max={20}
-            stroke={{ color: current.borderColor, style: current.borderStyle }}
+            stroke={{ color: current.borderTopColor ?? current.borderColor, style: current.borderTopStyle ?? current.borderStyle }}
             values={{
               top: current.borderTopWidth,
               right: current.borderRightWidth,
               bottom: current.borderBottomWidth,
               left: current.borderLeftWidth,
             }}
-            onChange={(quad) => {
-              const hasWidth = [quad.top, quad.right, quad.bottom, quad.left].some((value) => pxFromLength(value));
+            lines={{
+              style: {
+                top: current.borderTopStyle ?? current.borderStyle,
+                right: current.borderRightStyle ?? current.borderStyle,
+                bottom: current.borderBottomStyle ?? current.borderStyle,
+                left: current.borderLeftStyle ?? current.borderStyle,
+              },
+              color: {
+                top: current.borderTopColor ?? current.borderColor,
+                right: current.borderRightColor ?? current.borderColor,
+                bottom: current.borderBottomColor ?? current.borderColor,
+                left: current.borderLeftColor ?? current.borderColor,
+              },
+            }}
+            onLineChange={(lines) => {
               patch({
-                borderTopWidth: pxFromLength(quad.top),
-                borderRightWidth: pxFromLength(quad.right),
-                borderBottomWidth: pxFromLength(quad.bottom),
-                borderLeftWidth: pxFromLength(quad.left),
-                borderStyle: hasWidth ? current.borderStyle || 'solid' : current.borderStyle,
+                borderTopStyle: lines.style.top,
+                borderRightStyle: lines.style.right,
+                borderBottomStyle: lines.style.bottom,
+                borderLeftStyle: lines.style.left,
+                borderTopColor: lines.color.top,
+                borderRightColor: lines.color.right,
+                borderBottomColor: lines.color.bottom,
+                borderLeftColor: lines.color.left,
+                borderTopWidth: lines.style.top || lines.color.top ? current.borderTopWidth ?? 1 : current.borderTopWidth,
+                borderRightWidth: lines.style.right || lines.color.right ? current.borderRightWidth ?? 1 : current.borderRightWidth,
+                borderBottomWidth: lines.style.bottom || lines.color.bottom ? current.borderBottomWidth ?? 1 : current.borderBottomWidth,
+                borderLeftWidth: lines.style.left || lines.color.left ? current.borderLeftWidth ?? 1 : current.borderLeftWidth,
+              });
+            }}
+            onChange={(quad) => {
+              const widths = {
+                top: pxFromLength(quad.top),
+                right: pxFromLength(quad.right),
+                bottom: pxFromLength(quad.bottom),
+                left: pxFromLength(quad.left),
+              };
+              const styles = {
+                top: current.borderTopStyle ?? current.borderStyle,
+                right: current.borderRightStyle ?? current.borderStyle,
+                bottom: current.borderBottomStyle ?? current.borderStyle,
+                left: current.borderLeftStyle ?? current.borderStyle,
+              };
+              patch({
+                borderTopWidth: widths.top,
+                borderRightWidth: widths.right,
+                borderBottomWidth: widths.bottom,
+                borderLeftWidth: widths.left,
+                borderTopStyle: widths.top ? styles.top || 'solid' : styles.top,
+                borderRightStyle: widths.right ? styles.right || 'solid' : styles.right,
+                borderBottomStyle: widths.bottom ? styles.bottom || 'solid' : styles.bottom,
+                borderLeftStyle: widths.left ? styles.left || 'solid' : styles.left,
               });
             }}
           />
-          <div className="style-border-meta">
-            <Select
-              size="small"
-              allowClear
-              disabled={disabled}
-              value={current.borderStyle}
-              placeholder={t('lowcode.styleBorderNone')}
-              onChange={(borderStyle) => patch({ borderStyle: borderStyle || undefined })}
-              options={[
-                { value: 'solid', label: t('lowcode.styleBorderSolid') },
-                { value: 'dashed', label: t('lowcode.styleBorderDashed') },
-                { value: 'dotted', label: t('lowcode.styleBorderDotted') },
-              ]}
-            />
-            <ColorPicker
-              size="small"
-              allowClear
-              disabled={disabled}
-              value={colorValue(current.borderColor)}
-              onChange={(value, css) => patch({ borderColor: value.cleared ? undefined : css })}
-            />
-          </div>
         </div>
       </Form.Item>
       <Form.Item label={t('lowcode.styleBorderRadius')}>

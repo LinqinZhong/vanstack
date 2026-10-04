@@ -8,9 +8,9 @@ import { OssService } from './oss.service';
 export class FilesController {
   constructor(private readonly oss: OssService) {}
 
-  @Get('content/:key')
-  async getContent(@Param('key') key: string, @Res() response: Response) {
-    const object = await this.oss.getObject(decodeURIComponent(key));
+  @Get('content/*key')
+  async getContent(@Param('key') key: string | string[], @Res() response: Response) {
+    const object = await this.oss.getObject(objectKey(key));
     if (!object) {
       throw new NotFoundException();
     }
@@ -18,4 +18,17 @@ export class FilesController {
     response.setHeader('Cache-Control', 'public, max-age=60');
     response.send(object.body);
   }
+}
+
+function objectKey(key: string | string[]) {
+  const parts = Array.isArray(key) ? key : [key];
+  return parts
+    .map((part) => {
+      try {
+        return decodeURIComponent(part);
+      } catch {
+        return part;
+      }
+    })
+    .join('/');
 }

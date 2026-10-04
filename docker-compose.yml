@@ -16,6 +16,14 @@ services:
       timeout: 5s
       retries: 10
 
+  mongo:
+    image: mongo:7
+    container_name: vanstack-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+
   minio:
     image: minio/minio:latest
     container_name: vanstack-minio
@@ -44,4 +52,5 @@ services:
 
 volumes:
   pgdata:
+  mongodata:
   miniodata:

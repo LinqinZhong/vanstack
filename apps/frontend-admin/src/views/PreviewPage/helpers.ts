@@ -87,6 +87,14 @@ const LIVE_STYLE_KEYS = [
   'borderRightWidth',
   'borderBottomWidth',
   'borderLeftWidth',
+  'borderTopStyle',
+  'borderRightStyle',
+  'borderBottomStyle',
+  'borderLeftStyle',
+  'borderTopColor',
+  'borderRightColor',
+  'borderBottomColor',
+  'borderLeftColor',
   'borderTopLeftRadius',
   'borderTopRightRadius',
   'borderBottomRightRadius',
@@ -116,7 +124,27 @@ export function applyLiveWidgetCss(root: HTMLElement | null, widgetId: string, c
     return false;
   }
   const fillSlot = node.dataset.widgetType === 'swiper-item';
+  const tablePart = node.dataset.widgetType === 'th' || node.dataset.widgetType === 'tr' || node.dataset.widgetType === 'td';
+  const keepTrackSize = tablePart || node.dataset.widgetType === 'table';
   for (const key of LIVE_STYLE_KEYS) {
+    if (keepTrackSize && (key === 'width' || key === 'height') && !css[key]) {
+      continue;
+    }
+    if (
+      tablePart &&
+      (key === 'width' ||
+        key === 'height' ||
+        key.startsWith('margin') ||
+        key === 'position' ||
+        key === 'top' ||
+        key === 'right' ||
+        key === 'bottom' ||
+        key === 'left' ||
+        key === 'zIndex' ||
+        key === 'transform')
+    ) {
+      continue;
+    }
     if (fillSlot && (key === 'width' || key === 'height')) {
       node.style[key] = '100%';
       continue;

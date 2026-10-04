@@ -27,12 +27,72 @@ export type LowcodePreviewMessage = {
   viewingState: string | null;
   viewingStates?: Array<{ ownerId: string; state: string | null }> | null;
   spacingDrag: 'padding' | 'margin' | 'radius' | 'border' | 'size' | 'position' | 'rotate' | null;
+  tableLayout?: boolean;
+  tableChrome?: TableChromeState | null;
+  tableEditing?: boolean;
+  settle?: number;
+};
+
+export type TableChromeState = {
+  tableId: string;
+  range: { kind: 'column'; index: number } | { kind: 'row'; rowId: string } | { kind: 'header' } | null;
+  freezeHeader: boolean;
+  freezeFooter: boolean;
+  footerRowId: string | null;
 };
 
 export type LowcodeSelectMessage = {
   source: typeof LOWCODE_MESSAGE_SOURCE;
   type: 'select';
   widgetId: string | null;
+};
+
+export type LowcodeTableSelectMessage = {
+  source: typeof LOWCODE_MESSAGE_SOURCE;
+  type: 'table-select';
+  tableId: string;
+  target: 'column' | 'row' | 'header';
+  index?: number;
+  rowId?: string;
+};
+
+export type LowcodeTableModeMessage = {
+  source: typeof LOWCODE_MESSAGE_SOURCE;
+  type: 'table-mode';
+  action: 'enter' | 'exit';
+};
+
+export type LowcodeTableCommandMessage = {
+  source: typeof LOWCODE_MESSAGE_SOURCE;
+  type: 'table-command';
+  command:
+    | 'add-column'
+    | 'remove-column'
+    | 'move-column-left'
+    | 'move-column-right'
+    | 'add-row'
+    | 'remove-row'
+    | 'move-row-up'
+    | 'move-row-down';
+};
+
+export type LowcodeTableFreezeMessage = {
+  source: typeof LOWCODE_MESSAGE_SOURCE;
+  type: 'table-freeze';
+  target: 'header' | 'footer';
+};
+
+export type LowcodeTableResizeMessage = {
+  source: typeof LOWCODE_MESSAGE_SOURCE;
+  type: 'table-resize';
+  tableId: string;
+  target: 'column' | 'row' | 'header';
+  index?: number;
+  rowId?: string;
+  value: number;
+  nextValue?: number;
+  nextRowId?: string;
+  phase: 'move' | 'up';
 };
 
 export type LowcodeDismissToolbarMessage = {
@@ -146,10 +206,21 @@ export type LowcodeWidgetHoverMessage = {
   height: number;
 };
 
+export type LowcodeCanvasSettledMessage = {
+  source: typeof LOWCODE_MESSAGE_SOURCE;
+  type: 'canvas-settled';
+  settle: number;
+};
+
 export type LowcodeMessage =
   | LowcodeReadyMessage
   | LowcodePreviewMessage
   | LowcodeSelectMessage
+  | LowcodeTableSelectMessage
+  | LowcodeTableModeMessage
+  | LowcodeTableCommandMessage
+  | LowcodeTableFreezeMessage
+  | LowcodeTableResizeMessage
   | LowcodeDismissToolbarMessage
   | LowcodeFocusWidgetMessage
   | LowcodeCanvasWheelMessage
@@ -162,12 +233,18 @@ export type LowcodeMessage =
   | LowcodeWidgetStyleMessage
   | LowcodeSelectChromeMessage
   | LowcodeWidgetHoverMessage
-  | LowcodeWidgetBoxMessage;
+  | LowcodeWidgetBoxMessage
+  | LowcodeCanvasSettledMessage;
 
 const MESSAGE_TYPES = new Set([
   'ready',
   'preview',
   'select',
+  'table-select',
+  'table-mode',
+  'table-command',
+  'table-freeze',
+  'table-resize',
   'dismiss-toolbar',
   'focus-widget',
   'canvas-wheel',
@@ -182,6 +259,7 @@ const MESSAGE_TYPES = new Set([
   'select-chrome',
   'widget-hover',
   'widget-box',
+  'canvas-settled',
 ]);
 
 export function isLowcodeMessage(value: unknown): value is LowcodeMessage {

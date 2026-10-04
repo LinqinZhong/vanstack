@@ -24,14 +24,16 @@ export type PageViewing =
 export type LowcodePageProps = {
   xml: string;
   editing: boolean;
+  tableLayout?: boolean;
   locale?: string;
   catalog?: PageI18n;
   viewing: PageViewing;
+  dynamicTextLabel?: string;
 };
 
 const EMPTY_SCOPE: BindingScope = { data: Object.create(null) as Record<string, unknown> };
 
-export function LowcodePage({ xml, editing, locale, catalog, viewing }: LowcodePageProps): ReactElement {
+export function LowcodePage({ xml, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel }: LowcodePageProps): ReactElement {
   const page = useMemo(() => parsePageXml(xml), [xml]);
   const [hoverInstanceKeys, setHoverInstanceKeys] = useState<string[]>([]);
 
@@ -68,10 +70,12 @@ export function LowcodePage({ xml, editing, locale, catalog, viewing }: LowcodeP
     };
   }
 
-  function render(widget: PageWidget): ReactElement {
+  function render(widget: PageWidget, options?: { summarizeCopy?: boolean }): ReactElement {
     const meta = widgetInstanceMeta(widget);
+    const summarizeCopy = Boolean(options?.summarizeCopy);
     return widgetElement(widget, {
       editing,
+      tableLayout: Boolean(tableLayout),
       animate: !editing,
       catalog,
       locale: currentLocale,
@@ -79,7 +83,9 @@ export function LowcodePage({ xml, editing, locale, catalog, viewing }: LowcodeP
       bindingScope: meta?.scope ?? EMPTY_SCOPE,
       instanceKey: meta?.key ?? widget.id,
       hoverFor,
-      render,
+      summarizeCopy,
+      dynamicTextLabel,
+      render: (child, childOptions) => render(child, childOptions ?? options),
       stateLayers,
     });
   }

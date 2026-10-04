@@ -44,7 +44,15 @@ export type WidgetStyle = {
   borderBottomWidth?: number;
   borderLeftWidth?: number;
   borderStyle?: string;
+  borderTopStyle?: string;
+  borderRightStyle?: string;
+  borderBottomStyle?: string;
+  borderLeftStyle?: string;
   borderColor?: string;
+  borderTopColor?: string;
+  borderRightColor?: string;
+  borderBottomColor?: string;
+  borderLeftColor?: string;
   radiusTopLeft?: number;
   radiusTopRight?: number;
   radiusBottomRight?: number;
@@ -149,6 +157,62 @@ export type SwiperStyle = {
   easingFunction?: SwiperEasing;
 };
 
+export const TABLE_ALIGNS = ['start', 'center', 'end'] as const;
+export type TableAlign = (typeof TABLE_ALIGNS)[number];
+export const TABLE_VALIGNS = ['top', 'middle', 'bottom'] as const;
+export type TableValign = (typeof TABLE_VALIGNS)[number];
+export const MIN_TABLE_TRACK = 24;
+export const DEFAULT_TABLE_COLUMN_WIDTH = 80;
+export const DEFAULT_TABLE_ROW_HEIGHT = 36;
+export const DEFAULT_TABLE_HEADER_HEIGHT = 36;
+export const DEFAULT_TABLE_WIDTH: SizeValue = { mode: 'px', value: 240 };
+export const DEFAULT_TABLE_HEIGHT: SizeValue = { mode: 'px', value: 120 };
+
+export const TABLE_LINE_STYLES = ['solid', 'dashed', 'dotted'] as const;
+export type TableLineStyle = (typeof TABLE_LINE_STYLES)[number];
+export type TableLine = {
+  width?: number;
+  style?: TableLineStyle;
+  color?: string;
+};
+export type TableLines = {
+  header?: TableLine;
+  row?: TableLine;
+  column?: TableLine;
+};
+
+export function compactTableLine(line: TableLine | undefined): TableLine | undefined {
+  if (!line) {
+    return undefined;
+  }
+  const next: TableLine = {};
+  if (typeof line.width === 'number' && Number.isFinite(line.width) && line.width > 0) {
+    next.width = Math.min(20, Math.trunc(line.width));
+  }
+  if (line.style && (TABLE_LINE_STYLES as readonly string[]).includes(line.style)) {
+    next.style = line.style;
+  }
+  const color = line.color?.trim();
+  if (color) {
+    next.color = color;
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+export function compactTableLines(lines: TableLines | undefined): TableLines | undefined {
+  if (!lines) {
+    return undefined;
+  }
+  const next: TableLines = {};
+  for (const kind of ['header', 'row', 'column'] as const) {
+    const line = compactTableLine(lines[kind]);
+    if (line) {
+      next[kind] = line;
+    }
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
 export type WidgetContentProps = {
   value?: string;
   text?: string;
@@ -226,9 +290,52 @@ export type PageWidget =
       id: string;
       children: PageWidget[];
       style?: WidgetStyle;
+    } & WidgetCommon)
+  | ({
+      type: 'table';
+      id: string;
+      children: PageWidget[];
+      style?: WidgetStyle;
+      freezeHeader?: boolean;
+      freezeFooter?: boolean;
+      headerHeight?: number;
+      lines?: TableLines;
+      item?: FlexItemStyle;
+    } & WidgetCommon)
+  | ({
+      type: 'th';
+      id: string;
+      value: string;
+      children: PageWidget[];
+      width?: number;
+      align?: TableAlign;
+      valign?: TableValign;
+      style?: WidgetStyle;
+    } & WidgetCommon)
+  | ({
+      type: 'tr';
+      id: string;
+      children: PageWidget[];
+      height?: number;
+      style?: WidgetStyle;
+    } & WidgetCommon)
+  | ({
+      type: 'td';
+      id: string;
+      value: string;
+      children: PageWidget[];
+      align?: TableAlign;
+      valign?: TableValign;
+      style?: WidgetStyle;
     } & WidgetCommon);
 
-type WidgetParent = 'page' | 'flex' | 'swiper' | 'swiper-item';
+type WidgetParent = 'page' | 'flex' | 'swiper' | 'swiper-item' | 'table' | 'tr' | 'th' | 'td';
+
+function hasFlexItem(
+  widget: PageWidget,
+): widget is Exclude<PageWidget, { type: 'swiper-item' | 'th' | 'tr' | 'td' }> {
+  return widget.type !== 'swiper-item' && widget.type !== 'th' && widget.type !== 'tr' && widget.type !== 'td';
+}
 
 export type PageStyle = {
   background?: string;
@@ -540,7 +647,15 @@ const STYLE_KEYS = [
   'borderBottomWidth',
   'borderLeftWidth',
   'borderStyle',
+  'borderTopStyle',
+  'borderRightStyle',
+  'borderBottomStyle',
+  'borderLeftStyle',
   'borderColor',
+  'borderTopColor',
+  'borderRightColor',
+  'borderBottomColor',
+  'borderLeftColor',
   'radiusTopLeft',
   'radiusTopRight',
   'radiusBottomRight',
@@ -963,6 +1078,31 @@ function writeEdges(
   }
 }
 
+function writeUniformOrSides(
+  attrs: Record<string, string>,
+  shorthand: string,
+  sides: { top?: string; right?: string; bottom?: string; left?: string },
+  names: { top: string; right: string; bottom: string; left: string },
+) {
+  const { top, right, bottom, left } = sides;
+  if (top && top === right && right === bottom && bottom === left) {
+    attrs[`@_${shorthand}`] = top;
+    return;
+  }
+  if (top) {
+    attrs[`@_${names.top}`] = top;
+  }
+  if (right) {
+    attrs[`@_${names.right}`] = right;
+  }
+  if (bottom) {
+    attrs[`@_${names.bottom}`] = bottom;
+  }
+  if (left) {
+    attrs[`@_${names.left}`] = left;
+  }
+}
+
 function writeBorderWidths(
   attrs: Record<string, string>,
   top?: number,
@@ -1085,6 +1225,19 @@ export function compactWidgetStyle(style: WidgetStyle | undefined): WidgetStyle 
     ) {
       continue;
     }
+    if (
+      (key === 'borderStyle' ||
+        key === 'borderTopStyle' ||
+        key === 'borderRightStyle' ||
+        key === 'borderBottomStyle' ||
+        key === 'borderLeftStyle') &&
+      value !== 'solid' &&
+      value !== 'dashed' &&
+      value !== 'dotted' &&
+      !(typeof value === 'string' && value.includes('{{'))
+    ) {
+      continue;
+    }
     (next as Record<string, unknown>)[key] = value;
   }
 
@@ -1103,6 +1256,21 @@ export function compactWidgetStyle(style: WidgetStyle | undefined): WidgetStyle 
     delete next.bottom;
     delete next.left;
     delete next.zIndex;
+  }
+
+  if (next.borderStyle) {
+    next.borderTopStyle ??= next.borderStyle;
+    next.borderRightStyle ??= next.borderStyle;
+    next.borderBottomStyle ??= next.borderStyle;
+    next.borderLeftStyle ??= next.borderStyle;
+    delete next.borderStyle;
+  }
+  if (next.borderColor) {
+    next.borderTopColor ??= next.borderColor;
+    next.borderRightColor ??= next.borderColor;
+    next.borderBottomColor ??= next.borderColor;
+    next.borderLeftColor ??= next.borderColor;
+    delete next.borderColor;
   }
 
   return Object.keys(next).length > 0 ? next : undefined;
@@ -1128,7 +1296,15 @@ export function sanitizeWidgetStyle(
     delete next.borderBottomWidth;
     delete next.borderLeftWidth;
     delete next.borderStyle;
+    delete next.borderTopStyle;
+    delete next.borderRightStyle;
+    delete next.borderBottomStyle;
+    delete next.borderLeftStyle;
     delete next.borderColor;
+    delete next.borderTopColor;
+    delete next.borderRightColor;
+    delete next.borderBottomColor;
+    delete next.borderLeftColor;
     delete next.radiusTopLeft;
     delete next.radiusTopRight;
     delete next.radiusBottomRight;
@@ -1149,8 +1325,46 @@ export function sanitizeWidgetStyle(
     next.width = compactSize(next.width) ?? DEFAULT_SWIPER_WIDTH;
     next.height = compactSize(next.height) ?? DEFAULT_SWIPER_HEIGHT;
   }
-  if (type === 'image' || type === 'swiper-item') {
+  if (type === 'image' || type === 'swiper-item' || type === 'th' || type === 'tr' || type === 'td') {
     delete next.overflow;
+  }
+  if (type === 'th' || type === 'tr' || type === 'td') {
+    delete next.width;
+    delete next.height;
+    delete next.borderTopWidth;
+    delete next.borderRightWidth;
+    delete next.borderBottomWidth;
+    delete next.borderLeftWidth;
+    delete next.borderStyle;
+    delete next.borderTopStyle;
+    delete next.borderRightStyle;
+    delete next.borderBottomStyle;
+    delete next.borderLeftStyle;
+    delete next.borderColor;
+    delete next.borderTopColor;
+    delete next.borderRightColor;
+    delete next.borderBottomColor;
+    delete next.borderLeftColor;
+    delete next.marginTop;
+    delete next.marginRight;
+    delete next.marginBottom;
+    delete next.marginLeft;
+    delete next.position;
+    delete next.zIndex;
+    delete next.top;
+    delete next.right;
+    delete next.bottom;
+    delete next.left;
+    delete next.rotateX;
+    delete next.rotateY;
+    delete next.rotateZ;
+  }
+  if (type === 'table') {
+    next.width = compactSize(next.width) ?? DEFAULT_TABLE_WIDTH;
+    next.height = compactSize(next.height) ?? DEFAULT_TABLE_HEIGHT;
+    if (next.overflow === 'auto') {
+      delete next.overflow;
+    }
   }
   return compactWidgetStyle(next);
 }
@@ -1358,7 +1572,15 @@ function parseStyle(node: OrderedNode): WidgetStyle | undefined {
     borderBottomWidth: parseNonNegative(attr(node, 'border-bottom-width')) ?? border?.bottom,
     borderLeftWidth: parseNonNegative(attr(node, 'border-left-width')) ?? border?.left,
     borderStyle: attr(node, 'border-style') || undefined,
+    borderTopStyle: attr(node, 'border-top-style') || undefined,
+    borderRightStyle: attr(node, 'border-right-style') || undefined,
+    borderBottomStyle: attr(node, 'border-bottom-style') || undefined,
+    borderLeftStyle: attr(node, 'border-left-style') || undefined,
     borderColor: attr(node, 'border-color') || undefined,
+    borderTopColor: attr(node, 'border-top-color') || undefined,
+    borderRightColor: attr(node, 'border-right-color') || undefined,
+    borderBottomColor: attr(node, 'border-bottom-color') || undefined,
+    borderLeftColor: attr(node, 'border-left-color') || undefined,
     radiusTopLeft: parseRadius(node, 'border-top-left-radius', radius),
     radiusTopRight: parseRadius(node, 'border-top-right-radius', radius),
     radiusBottomRight: parseRadius(node, 'border-bottom-right-radius', radius),
@@ -1409,6 +1631,90 @@ function parseItem(node: OrderedNode): FlexItemStyle | undefined {
     flexShrink: parseNonNegative(attr(node, 'flex-shrink')),
     flexBasis: basisRaw === 'auto' ? 'auto' : parseNonNegative(basisRaw),
     alignSelf: parseEnum(attr(node, 'align-self'), FLEX_ALIGN_SELFS),
+  });
+}
+
+function parseTableTrack(raw: string, omitDefault: number): number | undefined {
+  const parsed = parseNonNegative(raw);
+  if (parsed == null) {
+    return undefined;
+  }
+  const rounded = Math.round(parsed);
+  if (rounded < MIN_TABLE_TRACK || rounded === omitDefault) {
+    return undefined;
+  }
+  return rounded;
+}
+
+function tableTrackAttr(name: string, value: number | undefined, omitDefault: number): Record<string, string> {
+  if (value == null || value < MIN_TABLE_TRACK || value === omitDefault) {
+    return {};
+  }
+  return { [`@_${name}`]: String(Math.round(value)) };
+}
+
+function parseTableLines(node: OrderedNode): TableLines | undefined {
+  const lines: TableLines = {};
+  for (const kind of ['header', 'row', 'column'] as const) {
+    const line = compactTableLine({
+      width: parseNonNegativeInteger(attr(node, `${kind}-line-width`)),
+      style: parseEnum(attr(node, `${kind}-line-style`), TABLE_LINE_STYLES),
+      color: attr(node, `${kind}-line-color`) || undefined,
+    });
+    if (line) {
+      lines[kind] = line;
+    }
+  }
+  return compactTableLines(lines);
+}
+
+function tableLineAttrs(lines: TableLines | undefined): Record<string, string> {
+  const compact = compactTableLines(lines);
+  if (!compact) {
+    return {};
+  }
+  const attrs: Record<string, string> = {};
+  for (const kind of ['header', 'row', 'column'] as const) {
+    const line = compact[kind];
+    if (!line) {
+      continue;
+    }
+    if (line.width != null) {
+      attrs[`@_${kind}-line-width`] = String(line.width);
+    }
+    if (line.style) {
+      attrs[`@_${kind}-line-style`] = line.style;
+    }
+    if (line.color) {
+      attrs[`@_${kind}-line-color`] = line.color;
+    }
+  }
+  return attrs;
+}
+
+function cellAlignAttrs(align: TableAlign | undefined, valign: TableValign | undefined): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  if (align && align !== 'start') {
+    attrs['@_align'] = align;
+  }
+  if (valign && valign !== 'middle') {
+    attrs['@_valign'] = valign;
+  }
+  return attrs;
+}
+
+function orderTableChildren(children: PageWidget[]): PageWidget[] {
+  return [...children.filter((child) => child.type === 'th'), ...children.filter((child) => child.type === 'tr')];
+}
+
+function trimExtraCells(children: PageWidget[]): PageWidget[] {
+  const columns = children.filter((child) => child.type === 'th').length;
+  return children.map((child) => {
+    if (child.type !== 'tr') {
+      return child;
+    }
+    const cells = child.children.filter((cell) => cell.type === 'td').slice(0, columns);
+    return cells.length === child.children.length ? child : { ...child, children: cells };
   });
 }
 
@@ -1472,12 +1778,28 @@ function styleAttrs(style: WidgetStyle | undefined): Record<string, string> {
     compact.borderBottomWidth,
     compact.borderLeftWidth,
   );
-  if (compact.borderStyle) {
-    attrs['@_border-style'] = compact.borderStyle;
-  }
-  if (compact.borderColor) {
-    attrs['@_border-color'] = compact.borderColor;
-  }
+  writeUniformOrSides(attrs, 'border-style', {
+    top: compact.borderTopStyle,
+    right: compact.borderRightStyle,
+    bottom: compact.borderBottomStyle,
+    left: compact.borderLeftStyle,
+  }, {
+    top: 'border-top-style',
+    right: 'border-right-style',
+    bottom: 'border-bottom-style',
+    left: 'border-left-style',
+  });
+  writeUniformOrSides(attrs, 'border-color', {
+    top: compact.borderTopColor,
+    right: compact.borderRightColor,
+    bottom: compact.borderBottomColor,
+    left: compact.borderLeftColor,
+  }, {
+    top: 'border-top-color',
+    right: 'border-right-color',
+    bottom: 'border-bottom-color',
+    left: 'border-left-color',
+  });
   if (compact.radiusTopLeft != null) {
     attrs['@_border-top-left-radius'] = String(compact.radiusTopLeft);
   }
@@ -1943,7 +2265,7 @@ function widgetFieldBase(widget: PageWidget): WidgetStateFields {
     props: widgetBaseProps(widget),
     style: compactWidgetStyle(widget.style),
     flex: widget.type === 'flex' ? compactFlexContainer(widget.flex) : undefined,
-    item: widget.type === 'swiper-item' ? undefined : compactFlexItem(widget.item),
+    item: hasFlexItem(widget) ? compactFlexItem(widget.item) : undefined,
     swiper: widget.type === 'swiper' ? compactSwiper(widget.swiper) : undefined,
   };
 }
@@ -1952,7 +2274,7 @@ export function resolveWidgetStateStack(widget: PageWidget, layers: WidgetStateL
   let props = widgetBaseProps(widget);
   let style = compactWidgetStyle(widget.style);
   let flex = widget.type === 'flex' ? compactFlexContainer(widget.flex) : undefined;
-  let item = widget.type === 'swiper-item' ? undefined : compactFlexItem(widget.item);
+  let item = hasFlexItem(widget) ? compactFlexItem(widget.item) : undefined;
   let swiper = widget.type === 'swiper' ? compactSwiper(widget.swiper) : undefined;
   let activeOverride: WidgetStateDelta | undefined;
   for (const layer of layers) {
@@ -1966,7 +2288,7 @@ export function resolveWidgetStateStack(widget: PageWidget, layers: WidgetStateL
     props = mergeProps(props, delta?.props);
     style = mergeStyle(style, delta?.style);
     flex = widget.type === 'flex' ? mergeFlex(flex, delta?.flex) : undefined;
-    item = widget.type === 'swiper-item' ? undefined : mergeItem(item, delta?.item);
+    item = hasFlexItem(widget) ? mergeItem(item, delta?.item) : undefined;
     swiper = widget.type === 'swiper' ? mergeSwiper(swiper, delta?.swiper) : undefined;
   }
   return { props, style, flex, item, swiper };
@@ -1981,7 +2303,7 @@ export function diffWidgetState(
   const props = diffRecord(origin.props, next.props, compactWidgetProps);
   const style = diffRecord(origin.style, next.style, compactWidgetStyle);
   const flex = widget.type === 'flex' ? diffRecord(origin.flex, next.flex, compactFlexContainer) : undefined;
-  const item = widget.type === 'swiper-item' ? undefined : diffRecord(origin.item, next.item, compactFlexItem);
+  const item = hasFlexItem(widget) ? diffRecord(origin.item, next.item, compactFlexItem) : undefined;
   const swiper = widget.type === 'swiper' ? diffRecord(origin.swiper, next.swiper, compactSwiper) : undefined;
   return {
     ...(props ? { props } : {}),
@@ -2029,6 +2351,9 @@ function applyResolvedProps(widget: PageWidget, props: WidgetContentProps | unde
     }
     return next;
   }
+  if (widget.type === 'th' || widget.type === 'td') {
+    return props.value != null ? { ...widget, value: props.value } : widget;
+  }
   return widget;
 }
 
@@ -2052,7 +2377,7 @@ function withResolvedFields(
       delete next.flex;
     }
   }
-  if (next.type !== 'swiper-item') {
+  if (hasFlexItem(next)) {
     if (fields.item) {
       next.item = fields.item;
     } else {
@@ -2292,7 +2617,7 @@ function compactDeltaForWrite(widget: PageWidget, delta: WidgetStateDelta, base?
     props: compactWidgetProps({ ...origin.props, ...delta.props }),
     style: compactWidgetStyle({ ...origin.style, ...delta.style }),
     flex: widget.type === 'flex' ? compactFlexContainer({ ...origin.flex, ...delta.flex }) : undefined,
-    item: widget.type === 'swiper-item' ? undefined : compactFlexItem({ ...origin.item, ...delta.item }),
+    item: hasFlexItem(widget) ? compactFlexItem({ ...origin.item, ...delta.item }) : undefined,
     swiper: widget.type === 'swiper' ? compactSwiper({ ...origin.swiper, ...delta.swiper }) : undefined,
   };
   return {
@@ -2318,17 +2643,16 @@ function serializeDeltaNode(
     ...propsAttrs(compact.props),
     ...styleAttrs(compact.style),
     ...(widget.type === 'flex' ? flexAttrs(compact.flex) : {}),
-    ...(asItem && widget.type !== 'swiper-item' ? itemAttrs(compact.item) : {}),
+    ...(asItem && hasFlexItem(widget) ? itemAttrs(compact.item) : {}),
     ...(widget.type === 'swiper' ? swiperAttrs(compact.swiper) : {}),
   };
   const nestedBase: WidgetStateFields = {
     props: compactWidgetProps({ ...((base ?? widgetFieldBase(widget)).props ?? {}), ...(compact.props ?? {}) }),
     style: compactWidgetStyle({ ...((base ?? widgetFieldBase(widget)).style ?? {}), ...(compact.style ?? {}) }),
     flex: widget.type === 'flex' ? compactFlexContainer({ ...((base ?? widgetFieldBase(widget)).flex ?? {}), ...(compact.flex ?? {}) }) : undefined,
-    item:
-      widget.type === 'swiper-item'
-        ? undefined
-        : compactFlexItem({ ...((base ?? widgetFieldBase(widget)).item ?? {}), ...(compact.item ?? {}) }),
+    item: hasFlexItem(widget)
+      ? compactFlexItem({ ...((base ?? widgetFieldBase(widget)).item ?? {}), ...(compact.item ?? {}) })
+      : undefined,
     swiper:
       widget.type === 'swiper'
         ? compactSwiper({ ...((base ?? widgetFieldBase(widget)).swiper ?? {}), ...(compact.swiper ?? {}) })
@@ -2375,10 +2699,31 @@ function serializeStateChildren(widget: PageWidget, ids: { n: number }, parent: 
     .map((delta) => serializeDeltaNode('__', delta, widget, asItem))
     .filter((node): node is OrderedNode => Boolean(node));
   const childParent: WidgetParent =
-    widget.type === 'flex' ? 'flex' : widget.type === 'swiper' ? 'swiper' : widget.type === 'swiper-item' ? 'swiper-item' : parent;
+    widget.type === 'flex'
+      ? 'flex'
+      : widget.type === 'swiper'
+        ? 'swiper'
+        : widget.type === 'swiper-item'
+          ? 'swiper-item'
+          : widget.type === 'table'
+            ? 'table'
+            : widget.type === 'tr'
+              ? 'tr'
+              : widget.type === 'th'
+                ? 'th'
+                : widget.type === 'td'
+                  ? 'td'
+                  : parent;
+  const childSource = widget.type === 'table' ? orderTableChildren(widget.children) : undefined;
   const children =
-    widget.type === 'flex' || widget.type === 'swiper' || widget.type === 'swiper-item'
-      ? serializeWidgets(widget.children, ids, childParent)
+    widget.type === 'flex' ||
+    widget.type === 'swiper' ||
+    widget.type === 'swiper-item' ||
+    widget.type === 'table' ||
+    widget.type === 'tr' ||
+    widget.type === 'th' ||
+    widget.type === 'td'
+      ? serializeWidgets(childSource ?? widget.children, ids, childParent)
       : [];
   return [...owned, ...overrides, ...children];
 }
@@ -2446,7 +2791,9 @@ function parseWidgets(
   const widgets: PageWidget[] = [];
   const asItem = parent === 'flex';
   const allowSwiperItem = parent === 'swiper';
-  const allowContent = parent !== 'swiper';
+  const allowTableSection = parent === 'table';
+  const allowTableCell = parent === 'tr';
+  const allowContent = parent !== 'swiper' && parent !== 'table' && parent !== 'tr';
 
   for (const child of nodes) {
     if (allowContent && Object.prototype.hasOwnProperty.call(child, 'image')) {
@@ -2592,6 +2939,37 @@ function parseWidgets(
       });
       continue;
     }
+    if (allowContent && Object.prototype.hasOwnProperty.call(child, 'table')) {
+      ids.n += 1;
+      const style = sanitizeWidgetStyle('table', parseStyle(child));
+      const headerHeight = parseTableTrack(attr(child, 'header-height'), DEFAULT_TABLE_HEADER_HEIGHT);
+      const freezeHeader = isTrue(attr(child, 'freeze-header')) || undefined;
+      const freezeFooter = isTrue(attr(child, 'freeze-footer')) || undefined;
+      const lines = parseTableLines(child);
+      const item = asItem ? parseItem(child) : undefined;
+      const extra = widgetStateSpread(child, nodeList(child.table), ancestorIds);
+      const nextIds = [...ancestorIds, ...extraDeclaredIds(extra)];
+      widgets.push({
+        type: 'table',
+        id: attr(child, 'id') || `n${ids.n}`,
+        children: trimExtraCells(parseWidgets(extra.rest, ids, 'table', nextIds)),
+        ...(style ? { style } : {}),
+        ...(freezeHeader ? { freezeHeader } : {}),
+        ...(freezeFooter ? { freezeFooter } : {}),
+        ...(headerHeight != null ? { headerHeight } : {}),
+        ...(lines ? { lines } : {}),
+        ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
     if (allowSwiperItem && Object.prototype.hasOwnProperty.call(child, 'swiper-item')) {
       ids.n += 1;
       const style = sanitizeWidgetStyle('swiper-item', parseStyle(child));
@@ -2601,6 +2979,87 @@ function parseWidgets(
         type: 'swiper-item',
         id: attr(child, 'id') || `n${ids.n}`,
         children: parseWidgets(extra.rest, ids, 'swiper-item', nextIds),
+        ...(style ? { style } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
+    if (allowTableSection && Object.prototype.hasOwnProperty.call(child, 'th')) {
+      ids.n += 1;
+      const style = sanitizeWidgetStyle('th', parseStyle(child));
+      const width = parseTableTrack(attr(child, 'width'), DEFAULT_TABLE_COLUMN_WIDTH);
+      const align = parseEnum(attr(child, 'align'), TABLE_ALIGNS);
+      const valign = parseEnum(attr(child, 'valign'), TABLE_VALIGNS);
+      const storedAlign = align === 'start' ? undefined : align;
+      const storedValign = valign === 'middle' ? undefined : valign;
+      const extra = widgetStateSpread(child, nodeList(child.th), ancestorIds);
+      const nextIds = [...ancestorIds, ...extraDeclaredIds(extra)];
+      widgets.push({
+        type: 'th',
+        id: attr(child, 'id') || `n${ids.n}`,
+        value: attr(child, 'value'),
+        children: parseWidgets(extra.rest, ids, 'th', nextIds),
+        ...(width != null ? { width } : {}),
+        ...(storedAlign ? { align: storedAlign } : {}),
+        ...(storedValign ? { valign: storedValign } : {}),
+        ...(style ? { style } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
+    if (allowTableSection && Object.prototype.hasOwnProperty.call(child, 'tr')) {
+      ids.n += 1;
+      const style = sanitizeWidgetStyle('tr', parseStyle(child));
+      const height = parseTableTrack(attr(child, 'height'), DEFAULT_TABLE_ROW_HEIGHT);
+      const extra = widgetStateSpread(child, nodeList(child.tr), ancestorIds);
+      const nextIds = [...ancestorIds, ...extraDeclaredIds(extra)];
+      widgets.push({
+        type: 'tr',
+        id: attr(child, 'id') || `n${ids.n}`,
+        children: parseWidgets(extra.rest, ids, 'tr', nextIds),
+        ...(height != null ? { height } : {}),
+        ...(style ? { style } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
+    if (allowTableCell && Object.prototype.hasOwnProperty.call(child, 'td')) {
+      ids.n += 1;
+      const style = sanitizeWidgetStyle('td', parseStyle(child));
+      const align = parseEnum(attr(child, 'align'), TABLE_ALIGNS);
+      const valign = parseEnum(attr(child, 'valign'), TABLE_VALIGNS);
+      const storedAlign = align === 'start' ? undefined : align;
+      const storedValign = valign === 'middle' ? undefined : valign;
+      const extra = widgetStateSpread(child, nodeList(child.td), ancestorIds);
+      const nextIds = [...ancestorIds, ...extraDeclaredIds(extra)];
+      widgets.push({
+        type: 'td',
+        id: attr(child, 'id') || `n${ids.n}`,
+        value: attr(child, 'value'),
+        children: parseWidgets(extra.rest, ids, 'td', nextIds),
+        ...(storedAlign ? { align: storedAlign } : {}),
+        ...(storedValign ? { valign: storedValign } : {}),
         ...(style ? { style } : {}),
         ...parseWidgetLoop(child),
         ...parseWidgetHidden(child),
@@ -2646,7 +3105,7 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
     ids.n += 1;
     const id = widget.id || `n${ids.n}`;
     const style = styleAttrs(sanitizeWidgetStyle(widget.type, widget.style));
-    const item = asItem && widget.type !== 'swiper-item' ? itemAttrs(widget.item) : {};
+    const item = asItem && hasFlexItem(widget) ? itemAttrs(widget.item) : {};
     const inner = serializeStateChildren(widget, ids, parent);
     if (widget.type === 'image') {
       return {
@@ -2686,6 +3145,43 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
       return {
         swiper: inner,
         ':@': widgetHostAttrs(widget, id, style, { ...swiperAttrs(widget.swiper), ...item }),
+      };
+    }
+    if (widget.type === 'table') {
+      return {
+        table: inner,
+        ':@': widgetHostAttrs(widget, id, style, {
+          ...(widget.freezeHeader ? { '@_freeze-header': 'true' } : {}),
+          ...(widget.freezeFooter ? { '@_freeze-footer': 'true' } : {}),
+          ...tableTrackAttr('header-height', widget.headerHeight, DEFAULT_TABLE_HEADER_HEIGHT),
+          ...tableLineAttrs(widget.lines),
+          ...item,
+        }),
+      };
+    }
+    if (widget.type === 'th') {
+      return {
+        th: inner,
+        ':@': widgetHostAttrs(widget, id, style, {
+          '@_value': widget.value,
+          ...tableTrackAttr('width', widget.width, DEFAULT_TABLE_COLUMN_WIDTH),
+          ...cellAlignAttrs(widget.align, widget.valign),
+        }),
+      };
+    }
+    if (widget.type === 'tr') {
+      return {
+        tr: inner,
+        ':@': widgetHostAttrs(widget, id, style, tableTrackAttr('height', widget.height, DEFAULT_TABLE_ROW_HEIGHT)),
+      };
+    }
+    if (widget.type === 'td') {
+      return {
+        td: inner,
+        ':@': widgetHostAttrs(widget, id, style, {
+          '@_value': widget.value,
+          ...cellAlignAttrs(widget.align, widget.valign),
+        }),
       };
     }
     return {

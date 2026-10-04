@@ -277,6 +277,9 @@ function applyPropsToWidget(widget: PageWidget, props: WidgetContentProps | unde
     }
     return next;
   }
+  if (widget.type === 'th' || widget.type === 'td') {
+    return props.value != null ? { ...widget, value: props.value } : widget;
+  }
   return widget;
 }
 
@@ -295,7 +298,7 @@ export function widgetWithStateLayers(widget: PageWidget, layers: WidgetStateLay
       delete next.flex;
     }
   }
-  if (next.type !== 'swiper-item') {
+  if (next.type !== 'swiper-item' && next.type !== 'th' && next.type !== 'tr' && next.type !== 'td') {
     if (fields.item) {
       next.item = fields.item;
     } else {
@@ -343,7 +346,7 @@ export function widgetWithStateLayerDelta(widget: PageWidget, layers: WidgetStat
       delete next.flex;
     }
   }
-  if (next.type !== 'swiper-item') {
+  if (next.type !== 'swiper-item' && next.type !== 'th' && next.type !== 'tr' && next.type !== 'td') {
     if (delta.item) {
       next.item = delta.item;
     } else {
@@ -371,7 +374,7 @@ export function stateOwnKeys(widget: PageWidget, layers: WidgetStateLayer[]): Se
   for (const key of Object.keys(delta.props ?? {})) keys.add(key);
   for (const key of Object.keys(delta.style ?? {})) keys.add(key);
   if (widget.type === 'flex') for (const key of Object.keys(delta.flex ?? {})) keys.add(key);
-  if (widget.type !== 'swiper-item') for (const key of Object.keys(delta.item ?? {})) keys.add(key);
+  if (widget.type !== 'swiper-item' && widget.type !== 'th' && widget.type !== 'tr' && widget.type !== 'td') for (const key of Object.keys(delta.item ?? {})) keys.add(key);
   if (widget.type === 'swiper') for (const key of Object.keys(delta.swiper ?? {})) keys.add(key);
   return keys;
 }
@@ -842,6 +845,30 @@ export function patchResolvedWidget(
   const hasPropPatch =
     patch.value != null || patch.text != null || patch.src != null || patch.size != null;
   const hasVisual = 'style' in patch || 'flex' in patch || 'item' in patch || 'swiper' in patch;
+  if ('freezeHeader' in patch) {
+    baseContent.freezeHeader = patch.freezeHeader;
+  }
+  if ('freezeFooter' in patch) {
+    baseContent.freezeFooter = patch.freezeFooter;
+  }
+  if ('headerHeight' in patch) {
+    baseContent.headerHeight = patch.headerHeight;
+  }
+  if ('lines' in patch) {
+    baseContent.lines = patch.lines;
+  }
+  if ('width' in patch) {
+    baseContent.width = patch.width;
+  }
+  if ('height' in patch) {
+    baseContent.height = patch.height;
+  }
+  if ('align' in patch) {
+    baseContent.align = patch.align;
+  }
+  if ('valign' in patch) {
+    baseContent.valign = patch.valign;
+  }
 
   if (layers.length === 0) {
     if (patch.value != null) {

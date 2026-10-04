@@ -10,6 +10,7 @@ import {
   type PageStyle,
   type PageWidget,
   type SizeValue,
+  type TableLine,
   type WidgetStyle,
 } from '@vanstack/xml';
 
@@ -123,23 +124,66 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
     css.background = background;
   }
 
-  const borderColor = cssText(style.borderColor, options);
-  const borderStyle = cssText(style.borderStyle, options);
-  const hasBorderWidth =
-    style.borderTopWidth != null ||
-    style.borderRightWidth != null ||
-    style.borderBottomWidth != null ||
-    style.borderLeftWidth != null;
-  const hasBorder = hasBorderWidth || borderStyle || borderColor;
-  if (hasBorder) {
-    const unsetWidth = hasBorderWidth ? 0 : 1;
-    css.borderTopWidth = `${style.borderTopWidth ?? unsetWidth}px`;
-    css.borderRightWidth = `${style.borderRightWidth ?? unsetWidth}px`;
-    css.borderBottomWidth = `${style.borderBottomWidth ?? unsetWidth}px`;
-    css.borderLeftWidth = `${style.borderLeftWidth ?? unsetWidth}px`;
-    css.borderStyle = borderStyle || 'solid';
-    if (borderColor) {
-      css.borderColor = borderColor;
+  const borderEdges = [
+    {
+      width: style.borderTopWidth,
+      line: style.borderTopStyle || style.borderStyle,
+      color: style.borderTopColor || style.borderColor,
+      apply(width: string, line: string, color: string | undefined) {
+        css.borderTopWidth = width;
+        css.borderTopStyle = line as CSSProperties['borderTopStyle'];
+        if (color) {
+          css.borderTopColor = color;
+        }
+      },
+    },
+    {
+      width: style.borderRightWidth,
+      line: style.borderRightStyle || style.borderStyle,
+      color: style.borderRightColor || style.borderColor,
+      apply(width: string, line: string, color: string | undefined) {
+        css.borderRightWidth = width;
+        css.borderRightStyle = line as CSSProperties['borderRightStyle'];
+        if (color) {
+          css.borderRightColor = color;
+        }
+      },
+    },
+    {
+      width: style.borderBottomWidth,
+      line: style.borderBottomStyle || style.borderStyle,
+      color: style.borderBottomColor || style.borderColor,
+      apply(width: string, line: string, color: string | undefined) {
+        css.borderBottomWidth = width;
+        css.borderBottomStyle = line as CSSProperties['borderBottomStyle'];
+        if (color) {
+          css.borderBottomColor = color;
+        }
+      },
+    },
+    {
+      width: style.borderLeftWidth,
+      line: style.borderLeftStyle || style.borderStyle,
+      color: style.borderLeftColor || style.borderColor,
+      apply(width: string, line: string, color: string | undefined) {
+        css.borderLeftWidth = width;
+        css.borderLeftStyle = line as CSSProperties['borderLeftStyle'];
+        if (color) {
+          css.borderLeftColor = color;
+        }
+      },
+    },
+  ];
+  const borderActive = borderEdges.some((edge) => edge.width != null || edge.line || edge.color);
+  if (borderActive) {
+    for (const edge of borderEdges) {
+      const color = cssText(edge.color, options);
+      const active = edge.width != null || Boolean(edge.line) || Boolean(color);
+      if (!active) {
+        edge.apply('0px', 'solid', undefined);
+        continue;
+      }
+      edge.apply(`${edge.width ?? 1}px`, cssText(edge.line, options) || 'solid', color);
     }
   } else if (background) {
     css.border = 'none';
@@ -319,10 +363,11 @@ export function dynamicStyleCss(style: WidgetStyle | undefined, options?: Widget
       const bound = widgetCss(filtered as unknown as WidgetStyle, { ...options, animate: false }) ?? {};
       delete bound.width;
       delete bound.height;
-      delete bound.borderTopWidth;
-      delete bound.borderRightWidth;
-      delete bound.borderBottomWidth;
-      delete bound.borderLeftWidth;
+      for (const key of Object.keys(bound)) {
+        if (key.startsWith('border') && !(key in filtered)) {
+          delete bound[key as keyof CSSProperties];
+        }
+      }
       Object.assign(css, bound);
     }
   }
@@ -376,6 +421,45 @@ function iconLayoutStyle(widget: PageWidget): WidgetStyle | undefined {
   };
 }
 
+function tableLineDeclaration(edge: 'bottom' | 'right', line: TableLine | undefined): string | undefined {
+  if (!line) {
+    return undefined;
+  }
+  const width = line.width != null && line.width > 0 ? line.width : line.style || line.color ? 1 : undefined;
+  if (width == null) {
+    return undefined;
+  }
+  const style = line.style || 'solid';
+  const color = line.color && !isCopyBinding(line.color) && !/[;{}]/.test(line.color) ? line.color : undefined;
+  if (color) {
+    return `border-${edge}: ${width}px ${style} ${color}`;
+  }
+  return `border-${edge}-width: ${width}px; border-${edge}-style: ${style}`;
+}
+
+/** 表头底边、行间、列间写到表格类上，画在单元格盒内，盖住单元格背景。 */
+function tableLineRules(cls: string, lines: { header?: TableLine; row?: TableLine; column?: TableLine } | undefined): string[] {
+  if (!lines) {
+    return [];
+  }
+  const rules: string[] = [];
+  const header = tableLineDeclaration('bottom', lines.header);
+  if (header) {
+    rules.push(`.${cls} > .lowcode-table-head > [data-widget-type="th"] { ${header}; }`);
+  }
+  const row = tableLineDeclaration('bottom', lines.row);
+  if (row) {
+    rules.push(`.${cls} > [data-widget-type="tr"]:not(:last-child) > * { ${row}; }`);
+  }
+  const column = tableLineDeclaration('right', lines.column);
+  if (column) {
+    rules.push(
+      `.${cls} > .lowcode-table-head > :not(:last-child), .${cls} > .lowcode-table-row > :not(:last-child) { ${column}; }`,
+    );
+  }
+  return rules;
+}
+
 export function pageCssText(widgets: PageWidget[]): string {
   const blocks: string[] = [];
 
@@ -400,7 +484,11 @@ export function pageCssText(widgets: PageWidget[]): string {
           );
         }
       }
-      push(`.${cls}`, iconLayoutStyle(widget), true);
+      const stretchTrack = widget.type === 'th' || widget.type === 'tr' || widget.type === 'td';
+      push(`.${cls}`, iconLayoutStyle(widget), !stretchTrack);
+      if (widget.type === 'table') {
+        blocks.push(...tableLineRules(cls, widget.lines));
+      }
       for (const state of widget.states ?? []) {
         push(`.${cls}[data-state~="${escapeStateId(state.id)}"]`, state.style, false);
       }
@@ -411,5 +499,13 @@ export function pageCssText(widgets: PageWidget[]): string {
   }
 
   walk(widgets);
+  blocks.push(
+    '.lowcode-table { scrollbar-width: none; }',
+    '.lowcode-table::-webkit-scrollbar { width: 0; height: 0; display: none; }',
+    '.lowcode-table-slot { display: flex; align-items: center; }',
+    '.lowcode-dynamic-copy { cursor: help; }',
+    '.lowcode-dynamic-copy-tip { position: fixed; z-index: 80; max-width: 360px; padding: 6px 8px; border-radius: 6px; background: rgba(21, 28, 34, 0.96); color: #fff; font: 12px/1.45 "Segoe UI", sans-serif; white-space: pre-wrap; word-break: break-all; pointer-events: none; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28); }',
+    '.lowcode-table-slot > :where(.lowcode-icon, .lowcode-text, .lowcode-image, .lowcode-button) { vertical-align: middle; }',
+  );
   return blocks.join('\n');
 }

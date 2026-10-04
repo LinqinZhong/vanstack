@@ -61,6 +61,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import type { ProjectDto, ProjectPageDto, ProjectPageVersionDto } from '@vanstack/shared';
 import {
+  DEFAULT_TABLE_HEADER_HEIGHT,
   EMPTY_PAGE_XML,
   compactPageI18n,
   compactWidgetStyle,
@@ -90,7 +91,7 @@ import { PageDataPanel } from '../../components/PageDataPanel';
 import { LanguageLibraryPanel } from '../../components/LanguageLibraryModal';
 import { isLowcodeMessage, LOWCODE_MESSAGE_SOURCE } from '../../utils/lowcode-protocol';
 import { PagePropertyInspector, WidgetPropertyInspector } from '../../components/InspectorPropertyGrid';
-import { WidgetStyleBubble, isBoxGroupAllowed, type BoxGroup } from '../../components/WidgetStyleBubble';
+import { WidgetStyleBubble, isBoxGroupAllowed, type BoxGroup, type TableBubbleModel, type TableCommand } from '../../components/WidgetStyleBubble';
 import { WidgetStateList } from '../../components/WidgetStateList';
 import {
   applyRadiusDrag,
@@ -166,6 +167,28 @@ import {
   type WidgetPatch,
 } from '../../utils/widgetTree';
 import {
+  addTableColumn,
+  addTableRow,
+  cellsOf,
+  columnCellIds,
+  columnIndexOf,
+  findOwningTable,
+  headerCellIds,
+  tableChromeState,
+  moveTableColumn,
+  moveTableRow,
+  patchTableCells,
+  patchTableCellStyles,
+  removeTableColumn,
+  removeTableRow,
+  rowCellIds,
+  setTableColumnWidth,
+  setTableHeaderHeight,
+  setTableRowHeight,
+  type TableParts,
+  type TableRange,
+} from '../../utils/tableEdit';
+import {
   collectStateTree,
   createWidgetState,
   deleteWidgetState,
@@ -199,6 +222,8 @@ export function ProjectEditorPage() {
   const [previewLocale, setPreviewLocale] = useState<string | null>(null);
   const [leftNav, setLeftNav] = useState<'develop' | 'i18n' | 'assets' | 'icons'>('develop');
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
+  const [tableRange, setTableRange] = useState<TableRange | null>(null);
+  const [tableEditId, setTableEditId] = useState<string | null>(null);
   const [viewingOwnerId, setViewingOwnerId] = useState<string | null>(null);
   const [viewingState, setViewingState] = useState<string | null>(null);
   const [viewingByOwner, setViewingByOwner] = useState<ViewingByOwner>({});
@@ -235,7 +260,10 @@ export function ProjectEditorPage() {
   const zoomingRef = useRef(false);
   const zoomLabelRef = useRef<HTMLElement>(null);
   const [mode, setMode] = useState<CanvasMode>('edit');
+  const [canvasSettling, setCanvasSettling] = useState(false);
   const modeRef = useRef<CanvasMode>('edit');
+  const canvasSettlingRef = useRef(false);
+  const settleGenRef = useRef(0);
   const [versionsOpen, setVersionsOpen] = useState(true);
   const dragRef = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number } | null>(null);
   const spacingDragRef = useRef<{
@@ -277,6 +305,16 @@ export function ProjectEditorPage() {
   const futureRef = useRef<HistoryEntry[]>([]);
   const coalesceKeyRef = useRef<string | null>(null);
   const selectWidgetRef = useRef<(id: string | null) => void>(() => undefined);
+  const tableRangeRef = useRef<TableRange | null>(null);
+  const tableEditIdRef = useRef<string | null>(null);
+  const tableEditViewRef = useRef<ViewTransform | null>(null);
+  const tableContentPinRef = useRef({ x: 0, y: 0 });
+  const enterTableEditRef = useRef<() => void>(() => undefined);
+  const exitTableEditRef = useRef<() => boolean>(() => false);
+  const selectTableRangeRef = useRef<(message: { tableId: string; target: 'column' | 'row' | 'header'; index?: number; rowId?: string }) => void>(() => undefined);
+  const runTableCommandRef = useRef<(command: TableCommand) => void>(() => undefined);
+  const freezeTableRef = useRef<(target: 'header' | 'footer') => void>(() => undefined);
+  const resizeTableRef = useRef<(message: { tableId: string; target: 'column' | 'row' | 'header'; index?: number; rowId?: string; value: number; phase: 'move' | 'up' }) => void>(() => undefined);
   const selectNextSiblingRef = useRef<() => boolean>(() => false);
   const handleWidgetEnterRef = useRef<
     (event: { key: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey?: boolean; repeat?: boolean }) => boolean
@@ -380,6 +418,7 @@ export function ProjectEditorPage() {
   pageDataRef.current = pageData;
   pageI18nRef.current = pageI18n;
   selectedWidgetIdRef.current = selectedWidgetId;
+  tableEditIdRef.current = tableEditId;
   viewingOwnerIdRef.current = viewingOwnerId;
   viewingStateRef.current = viewingState;
   viewingByOwnerRef.current = viewingByOwner;
@@ -416,7 +455,7 @@ export function ProjectEditorPage() {
       y: snapDevicePixel(next.y),
     };
     viewRef.current = snapped;
-    paintCanvasView(iframeRef.current, phoneFrameRef.current, snapped, modeRef.current !== 'preview');
+    paintCanvasView(iframeRef.current, phoneFrameRef.current, snapped, modeRef.current !== 'preview', tableContentPinRef.current);
     if (fromUser) {
       userAdjustedRef.current = true;
     }
@@ -583,6 +622,7 @@ export function ProjectEditorPage() {
       phoneFrameRef.current,
       viewRef.current,
       mode !== 'preview',
+      tableContentPinRef.current,
     );
   }, [mode]);
 
@@ -590,7 +630,7 @@ export function ProjectEditorPage() {
     if (panningRef.current || zoomingRef.current) {
       return;
     }
-    paintCanvasView(iframeRef.current, phoneFrameRef.current, view, modeRef.current !== 'preview');
+    paintCanvasView(iframeRef.current, phoneFrameRef.current, view, modeRef.current !== 'preview', tableContentPinRef.current);
   }, [view]);
 
   const fitCanvas = useCallback(
@@ -704,30 +744,81 @@ export function ProjectEditorPage() {
               canEditPositionInsets(findViewed(selectedWidgetId)?.style))
             ? openBoxGroup
             : null,
+        tableEditing:
+          mode !== 'preview' &&
+          tableEditId != null &&
+          findOwningTable(widgetsRef.current, selectedWidgetId)?.table.id === tableEditId,
+        tableChrome:
+          mode !== 'preview' &&
+          !readOnlyRef.current &&
+          tableEditId != null &&
+          findOwningTable(widgetsRef.current, selectedWidgetId)?.table.id === tableEditId
+            ? tableChromeState(widgetsRef.current, selectedWidgetId, tableRangeRef.current)
+            : null,
+        ...(canvasSettlingRef.current ? { settle: settleGenRef.current } : {}),
       },
       window.location.origin,
     );
-  }, [mode, previewLocale, pageI18n, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, versionLocked]);
+  }, [mode, previewLocale, pageI18n, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, versionLocked, tableRange, tableEditId]);
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
       if (event.origin !== window.location.origin || !isLowcodeMessage(event.data)) {
         return;
       }
+      if (event.data.type === 'canvas-settled') {
+        if (event.data.settle === settleGenRef.current) {
+          canvasSettlingRef.current = false;
+          setCanvasSettling(false);
+        }
+        return;
+      }
       if (event.data.type === 'ready') {
         readyRef.current = true;
         sendPreview();
-        paintCanvasView(iframeRef.current, phoneFrameRef.current, viewRef.current, modeRef.current !== 'preview');
+        paintCanvasView(iframeRef.current, phoneFrameRef.current, viewRef.current, modeRef.current !== 'preview', tableContentPinRef.current);
         return;
       }
       if (event.data.type === 'select') {
-        if (event.data.widgetId == null && dismissStyleToolbarRef.current()) {
-          return;
+        if (event.data.widgetId == null) {
+          if (tableEditIdRef.current) {
+            return;
+          }
+          if (dismissStyleToolbarRef.current()) {
+            return;
+          }
         }
         selectWidgetRef.current(event.data.widgetId);
         return;
       }
+      if (event.data.type === 'table-select') {
+        selectTableRangeRef.current(event.data);
+        return;
+      }
+      if (event.data.type === 'table-mode') {
+        if (event.data.action === 'exit') {
+          exitTableEditRef.current();
+        } else {
+          enterTableEditRef.current();
+        }
+        return;
+      }
+      if (event.data.type === 'table-command') {
+        runTableCommandRef.current(event.data.command);
+        return;
+      }
+      if (event.data.type === 'table-freeze') {
+        freezeTableRef.current(event.data.target);
+        return;
+      }
+      if (event.data.type === 'table-resize') {
+        resizeTableRef.current(event.data);
+        return;
+      }
       if (event.data.type === 'dismiss-toolbar') {
+        if (tableEditIdRef.current) {
+          return;
+        }
         if (!dismissStyleToolbarRef.current()) {
           selectWidgetRef.current(null);
         }
@@ -751,6 +842,7 @@ export function ProjectEditorPage() {
       }
       if (event.data.type === 'keydown' || event.data.type === 'keyup') {
         if (event.data.type === 'keydown' && event.data.key === 'Escape' && !event.data.ctrlKey && !event.data.metaKey) {
+          exitTableEditRef.current();
           commitSpacingEditRef.current('cancel');
           return;
         }
@@ -801,11 +893,26 @@ export function ProjectEditorPage() {
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [focusWidgetInView, scheduleZoom, sendPreview]);
+  }, [focusWidgetInView, scheduleZoom, sendPreview, enterTableEditRef, exitTableEditRef]);
 
   useEffect(() => {
     sendPreview();
   }, [sendPreview, view.scale, xml]);
+
+  useEffect(() => {
+    if (!canvasSettling) {
+      return;
+    }
+    const token = settleGenRef.current;
+    const timer = window.setTimeout(() => {
+      if (token !== settleGenRef.current) {
+        return;
+      }
+      canvasSettlingRef.current = false;
+      setCanvasSettling(false);
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [canvasSettling, mode]);
 
   useEffect(() => {
     if (!selectedWidgetId) {
@@ -955,7 +1062,7 @@ export function ProjectEditorPage() {
     if (!userAdjustedRef.current) {
       fitCanvas(false);
     } else {
-      paintCanvasView(iframeRef.current, phoneFrameRef.current, viewRef.current, modeRef.current !== 'preview');
+      paintCanvasView(iframeRef.current, phoneFrameRef.current, viewRef.current, modeRef.current !== 'preview', tableContentPinRef.current);
     }
   }, [leftNav, loading, missing, fitCanvas]);
 
@@ -1023,16 +1130,24 @@ export function ProjectEditorPage() {
       }
       const spacingOpen = isBoxDragGroup(openBoxGroupRef.current);
       if (
-        spacingOpen &&
         !event.ctrlKey &&
         !event.metaKey &&
         !event.altKey &&
-        event.key === 'Escape'
+        event.key === 'Escape' &&
+        !isEditableKeyboardTarget(event.target)
       ) {
-        event.preventDefault();
-        event.stopPropagation();
-        commitSpacingEditRef.current('cancel');
-        return;
+        if (exitTableEditRef.current()) {
+          event.preventDefault();
+          event.stopPropagation();
+          commitSpacingEditRef.current('cancel');
+          return;
+        }
+        if (spacingOpen) {
+          event.preventDefault();
+          event.stopPropagation();
+          commitSpacingEditRef.current('cancel');
+          return;
+        }
       }
       if (!isEditableKeyboardTarget(event.target) && handleSpacingNudgeRef.current(event, 'down')) {
         event.preventDefault();
@@ -1239,7 +1354,7 @@ export function ProjectEditorPage() {
       window.removeEventListener('pointercancel', stopColorPickerDrag);
       window.removeEventListener('blur', onBlur);
     };
-  }, []);
+  }, [enterTableEditRef, exitTableEditRef]);
 
   function onCanvasPanPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 1) {
@@ -1278,6 +1393,9 @@ export function ProjectEditorPage() {
       return;
     }
     if (target !== event.currentTarget) {
+      return;
+    }
+    if (tableEditIdRef.current) {
       return;
     }
     setSelectedWidgetId(null);
@@ -1530,15 +1648,263 @@ export function ProjectEditorPage() {
     setWidgets(widgetsRef.current);
   }
 
+  function clearTableRange() {
+    if (tableRangeRef.current) {
+      tableRangeRef.current = null;
+      setTableRange(null);
+    }
+  }
+
   function selectWidget(id: string | null) {
     if (id !== selectedWidgetIdRef.current) {
       endCoalesce();
     }
+    let owning = findOwningTable(widgetsRef.current, id);
+    let selected = findWidget(widgetsRef.current, id);
+    if (
+      id &&
+      tableEditIdRef.current &&
+      selected?.type === 'table' &&
+      selected.id === tableEditIdRef.current
+    ) {
+      const headerId = owning?.headers[0]?.id;
+      if (headerId) {
+        id = headerId;
+        selected = findWidget(widgetsRef.current, id);
+        owning = findOwningTable(widgetsRef.current, id);
+      }
+    }
+    if (tableEditIdRef.current && owning?.table.id !== tableEditIdRef.current) {
+      restoreTableEditView();
+      tableEditIdRef.current = null;
+      setTableEditId(null);
+    }
+    if (owning && selected && selected.id !== owning.table.id && tableEditIdRef.current !== owning.table.id) {
+      rememberTableEditView();
+      tableEditIdRef.current = owning.table.id;
+      setTableEditId(owning.table.id);
+      centerTableInView(owning.table.id);
+    }
+    clearTableRange();
     selectedWidgetIdRef.current = id;
     setSelectedWidgetId(id);
     setExpandedKeys((prev) => nextExpandedKeys(prev, widgetsRef.current, widgetsRef.current, id));
   }
   selectWidgetRef.current = selectWidget;
+
+  function exitTableEdit() {
+    const editingId = tableEditIdRef.current;
+    if (!editingId) {
+      return false;
+    }
+    tableEditIdRef.current = null;
+    setTableEditId(null);
+    selectWidgetRef.current(editingId);
+    restoreTableEditView();
+    return true;
+  }
+
+  function selectTableRange(message: { tableId: string; target: 'column' | 'row' | 'header'; index?: number; rowId?: string }) {
+    if (modeRef.current !== 'edit' || readOnlyRef.current) {
+      return;
+    }
+    const parts = findOwningTable(widgetsRef.current, message.tableId);
+    if (!parts) {
+      return;
+    }
+    let range: TableRange | null = null;
+    if (message.target === 'column' && message.index != null && parts.headers[message.index]) {
+      range = { kind: 'column', tableId: parts.table.id, index: message.index };
+    } else if (message.target === 'row' && message.rowId && parts.rows.some((row) => row.id === message.rowId)) {
+      range = { kind: 'row', tableId: parts.table.id, rowId: message.rowId };
+    } else if (message.target === 'header' && parts.headers.length > 0) {
+      range = { kind: 'header', tableId: parts.table.id };
+    }
+    if (!range) {
+      return;
+    }
+    if (selectedWidgetIdRef.current !== parts.table.id) {
+      endCoalesce();
+    }
+    const group = openBoxGroupRef.current;
+    const rangeType = range.kind === 'row' ? 'td' : 'th';
+    if (group && group !== 'loop' && !isBoxGroupAllowed(rangeType, group)) {
+      setOpenBoxGroup(null);
+    }
+    const focusId =
+      range.kind === 'row'
+        ? range.rowId
+        : range.kind === 'column'
+          ? parts.headers[range.index]?.id
+          : parts.headers[0]?.id;
+    tableRangeRef.current = range;
+    setTableRange(range);
+    if (focusId) {
+      selectedWidgetIdRef.current = focusId;
+      setSelectedWidgetId(focusId);
+      setExpandedKeys((prev) => nextExpandedKeys(prev, widgetsRef.current, widgetsRef.current, focusId));
+    }
+  }
+  selectTableRangeRef.current = selectTableRange;
+
+  function applyTableResize(message: {
+    tableId: string;
+    target: 'column' | 'row' | 'header';
+    index?: number;
+    rowId?: string;
+    value: number;
+    nextValue?: number;
+    nextRowId?: string;
+    phase: 'move' | 'up';
+  }) {
+    if (readOnlyRef.current || modeRef.current !== 'edit') {
+      return;
+    }
+    const parts = findOwningTable(widgetsRef.current, message.tableId);
+    if (!parts) {
+      return;
+    }
+    let next = widgetsRef.current;
+    if (message.target === 'column' && message.index != null) {
+      const header = parts.headers[message.index];
+      if (header) {
+        next = setTableColumnWidth(next, header.id, message.value);
+      }
+      const neighbor = message.nextValue != null ? parts.headers[message.index + 1] : undefined;
+      if (neighbor && message.nextValue != null) {
+        next = setTableColumnWidth(next, neighbor.id, message.nextValue);
+      }
+    } else if (message.target === 'row' && message.rowId) {
+      next = setTableRowHeight(next, message.rowId, message.value);
+      if (message.nextRowId && message.nextValue != null) {
+        next = setTableRowHeight(next, message.nextRowId, message.nextValue);
+      }
+    } else if (message.target === 'header') {
+      next = setTableHeaderHeight(next, parts.table.id, message.value);
+      if (message.nextRowId && message.nextValue != null) {
+        next = setTableRowHeight(next, message.nextRowId, message.nextValue);
+      }
+    }
+    const key = `table-resize:${parts.table.id}:${message.target}:${message.index ?? message.rowId ?? 'header'}`;
+    if (next !== widgetsRef.current) {
+      commitWidgets(next, selectedWidgetIdRef.current, key);
+    }
+    if (message.phase === 'up') {
+      coalesceKeyRef.current = null;
+    }
+  }
+  resizeTableRef.current = applyTableResize;
+
+  function activeTableParts(): TableParts | null {
+    if (tableRangeRef.current) {
+      return findOwningTable(widgetsRef.current, tableRangeRef.current.tableId);
+    }
+    return findOwningTable(widgetsRef.current, selectedWidgetIdRef.current);
+  }
+
+  function activeColumnIndex(parts: TableParts): number | null {
+    const range = tableRangeRef.current;
+    if (range?.tableId === parts.table.id && range.kind === 'column') {
+      return range.index;
+    }
+    const selectedId = selectedWidgetIdRef.current;
+    if (!selectedId || range) {
+      return null;
+    }
+    const index = columnIndexOf(parts, selectedId);
+    return index >= 0 ? index : null;
+  }
+
+  function activeRowId(parts: TableParts): string | null {
+    const range = tableRangeRef.current;
+    if (range?.tableId === parts.table.id && range.kind === 'row') {
+      return range.rowId;
+    }
+    if (range) {
+      return null;
+    }
+    const selected = findWidget(widgetsRef.current, selectedWidgetIdRef.current);
+    if (!selected) {
+      return null;
+    }
+    if (selected.type === 'tr' && parts.rows.some((row) => row.id === selected.id)) {
+      return selected.id;
+    }
+    if (selected.type === 'td') {
+      const parent = findParentWidget(widgetsRef.current, selected.id);
+      if (parent?.type === 'tr' && parts.rows.some((row) => row.id === parent.id)) {
+        return parent.id;
+      }
+    }
+    return null;
+  }
+
+  function runTableCommand(command: TableCommand) {
+    if (readOnlyRef.current) {
+      return;
+    }
+    const parts = activeTableParts();
+    if (!parts) {
+      return;
+    }
+    const columnIndex = activeColumnIndex(parts);
+    const rowId = activeRowId(parts);
+    let next = widgetsRef.current;
+    if (command === 'add-column') {
+      next = addTableColumn(widgetsRef.current, parts.table.id, columnIndex);
+    } else if (command === 'remove-column') {
+      const index = columnIndex ?? parts.headers.length - 1;
+      next = removeTableColumn(widgetsRef.current, parts.table.id, index);
+    } else if (command === 'move-column-left' && columnIndex != null) {
+      next = moveTableColumn(widgetsRef.current, parts.table.id, columnIndex, -1);
+      if (next !== widgetsRef.current && tableRangeRef.current?.kind === 'column') {
+        const moved = { ...tableRangeRef.current, index: columnIndex - 1 };
+        tableRangeRef.current = moved;
+        setTableRange(moved);
+      }
+    } else if (command === 'move-column-right' && columnIndex != null) {
+      next = moveTableColumn(widgetsRef.current, parts.table.id, columnIndex, 1);
+      if (next !== widgetsRef.current && tableRangeRef.current?.kind === 'column') {
+        const moved = { ...tableRangeRef.current, index: columnIndex + 1 };
+        tableRangeRef.current = moved;
+        setTableRange(moved);
+      }
+    } else if (command === 'add-row') {
+      next = addTableRow(widgetsRef.current, parts.table.id, rowId);
+    } else if (command === 'remove-row') {
+      if (tableRangeRef.current?.kind === 'header' || tableRangeRef.current?.kind === 'column') {
+        next = widgetsRef.current;
+      } else if (rowId) {
+        next = removeTableRow(widgetsRef.current, parts.table.id, rowId);
+      } else if (parts.rows.length > 0) {
+        next = removeTableRow(widgetsRef.current, parts.table.id, parts.rows[parts.rows.length - 1].id);
+      }
+    } else if (command === 'move-row-up' && rowId) {
+      next = moveTableRow(widgetsRef.current, parts.table.id, rowId, -1);
+    } else if (command === 'move-row-down' && rowId) {
+      next = moveTableRow(widgetsRef.current, parts.table.id, rowId, 1);
+    }
+    if (next !== widgetsRef.current) {
+      commitWidgets(next, selectedWidgetIdRef.current);
+    }
+  }
+  runTableCommandRef.current = runTableCommand;
+
+  function freezeTableEdge(target: 'header' | 'footer') {
+    if (readOnlyRef.current) {
+      return;
+    }
+    const parts = activeTableParts();
+    if (!parts) {
+      return;
+    }
+    if (target === 'header') {
+      updateWidget(parts.table.id, { freezeHeader: !parts.table.freezeHeader }, `edit:${parts.table.id}:freeze-header`);
+      return;
+    }
+    updateWidget(parts.table.id, { freezeFooter: !parts.table.freezeFooter }, `edit:${parts.table.id}:freeze-footer`);
+  }
+  freezeTableRef.current = freezeTableEdge;
 
   function selectRelatedWidget(nextId: string | null) {
     if (modeRef.current !== 'edit' || centerTabRef.current !== 'layout' || !nextId) {
@@ -1576,6 +1942,78 @@ export function ProjectEditorPage() {
     return true;
   }
 
+  function rememberTableEditView() {
+    if (tableEditViewRef.current) {
+      return;
+    }
+    const current = viewRef.current;
+    tableEditViewRef.current = { scale: current.scale, x: current.x, y: current.y };
+  }
+
+  function restoreTableEditView() {
+    const previous = tableEditViewRef.current;
+    tableEditViewRef.current = null;
+    tableContentPinRef.current = { x: 0, y: 0 };
+    if (previous) {
+      applyView(previous);
+    }
+  }
+
+  function centerTableInView(tableId: string) {
+    const doc = iframeRef.current?.contentDocument;
+    const table = doc?.querySelector(`[data-widget-id="${CSS.escape(tableId)}"]`);
+    const page = doc?.querySelector('.lowcode-page');
+    const row =
+      table instanceof HTMLElement
+        ? (table.querySelector<HTMLElement>(':scope > .lowcode-table-head') ??
+          table.querySelector<HTMLElement>(':scope > [data-widget-type="tr"]') ??
+          table)
+        : null;
+    if (!(page instanceof HTMLElement) || !(row instanceof HTMLElement)) {
+      return;
+    }
+    const pageRect = page.getBoundingClientRect();
+    const rect = row.getBoundingClientRect();
+    if (pageRect.width <= 0 || pageRect.height <= 0 || rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+    const layoutX = ((rect.left - pageRect.left) / pageRect.width) * SCREEN_WIDTH;
+    const layoutY = ((rect.top - pageRect.top) / pageRect.height) * SCREEN_HEIGHT;
+    const layoutW = (rect.width / pageRect.width) * SCREEN_WIDTH;
+    const layoutH = (rect.height / pageRect.height) * SCREEN_HEIGHT;
+    const current = viewRef.current;
+    const scale = current.scale;
+    const frameX = current.x + tableContentPinRef.current.x;
+    const frameY = current.y + tableContentPinRef.current.y;
+    const rowCenterX = layoutX + layoutW / 2;
+    const rowCenterY = layoutY + layoutH / 2;
+    const next = {
+      scale,
+      x: frameX + (SCREEN_WIDTH / 2 - rowCenterX) * scale,
+      y: frameY + (SCREEN_HEIGHT * 0.2 - rowCenterY) * scale,
+    };
+    tableContentPinRef.current = { x: frameX - next.x, y: frameY - next.y };
+    applyView(next);
+  }
+
+  function enterTableEdit() {
+    const selected = findWidget(widgetsRef.current, selectedWidgetIdRef.current);
+    if (!selected || selected.type !== 'table' || modeRef.current !== 'edit' || readOnlyRef.current) {
+      return;
+    }
+    if (tableEditIdRef.current === selected.id) {
+      return;
+    }
+    rememberTableEditView();
+    tableEditIdRef.current = selected.id;
+    setTableEditId(selected.id);
+    const headerId = findOwningTable(widgetsRef.current, selected.id)?.headers[0]?.id;
+    if (headerId) {
+      selectWidget(headerId);
+    }
+    centerTableInView(selected.id);
+  }
+
   function handleWidgetEnter(event: {
     key: string;
     ctrlKey: boolean;
@@ -1603,6 +2041,13 @@ export function ProjectEditorPage() {
     if (!selectedWidgetIdRef.current) {
       return false;
     }
+    const selected = findWidget(widgetsRef.current, selectedWidgetIdRef.current);
+    if (selected?.type === 'table' && tableEditIdRef.current !== selected.id) {
+      enterTapAtRef.current = 0;
+      clearEnterConfirmTimer();
+      enterTableEdit();
+      return true;
+    }
     const now = Date.now();
     if (enterTapAtRef.current && now - enterTapAtRef.current <= ENTER_DOUBLE_MS) {
       enterTapAtRef.current = 0;
@@ -1620,6 +2065,8 @@ export function ProjectEditorPage() {
     return true;
   }
   handleWidgetEnterRef.current = handleWidgetEnter;
+  enterTableEditRef.current = enterTableEdit;
+  exitTableEditRef.current = exitTableEdit;
 
   useEffect(() => {
     if (!selectedWidgetId) {
@@ -1812,12 +2259,31 @@ export function ProjectEditorPage() {
     void flushProjectLangs();
   }
 
+  function widgetInsertAnchor(): string | null {
+    const range = tableRangeRef.current;
+    if (!range) {
+      return selectedWidgetIdRef.current;
+    }
+    const parts = findOwningTable(widgetsRef.current, range.tableId);
+    if (!parts || range.tableId !== parts.table.id) {
+      return selectedWidgetIdRef.current;
+    }
+    if (range.kind === 'column') {
+      return parts.headers[range.index]?.id ?? parts.table.id;
+    }
+    if (range.kind === 'header') {
+      return parts.headers[0]?.id ?? parts.table.id;
+    }
+    const row = parts.rows.find((item) => item.id === range.rowId);
+    return (row ? cellsOf(row)[0]?.id : undefined) ?? row?.id ?? parts.table.id;
+  }
+
   function addWidget(type: PageWidget['type']) {
     if (readOnlyRef.current) {
       return;
     }
     const widget = createWidget(type, { id: nextWidgetId(), t, nextId: nextWidgetId });
-    const nextWidgets = addWidgetToTree(widgetsRef.current, selectedWidgetIdRef.current, widget);
+    const nextWidgets = addWidgetToTree(widgetsRef.current, widgetInsertAnchor(), widget);
     const added = findWidget(nextWidgets, widget.id);
     commitWidgets(nextWidgets, added ? widget.id : selectedWidgetIdRef.current);
   }
@@ -2049,10 +2515,24 @@ export function ProjectEditorPage() {
   }
   dismissStyleToolbarRef.current = dismissStyleToolbar;
 
+  function styleTargetWidget() {
+    const range = tableRangeRef.current;
+    const owning = range ? findOwningTable(widgetsRef.current, range.tableId) : null;
+    if (range && owning) {
+      if (range.kind === 'column') {
+        return owning.headers[range.index] ?? null;
+      }
+      if (range.kind === 'header') {
+        return owning.headers[0] ?? null;
+      }
+      return owning.rows.find((row) => row.id === range.rowId)?.children.find((child) => child.type === 'td') ?? null;
+    }
+    return findViewed(selectedWidgetIdRef.current);
+  }
+
   function handleOpenBoxGroupChange(group: BoxGroup | null) {
     if (group) {
-      const widgetId = selectedWidgetIdRef.current;
-      const widget = findViewed(widgetId);
+      const widget = styleTargetWidget();
       if (!widget || !isBoxGroupAllowed(widget.type, group)) {
         return;
       }
@@ -2063,7 +2543,7 @@ export function ProjectEditorPage() {
     const nextSpacing = isBoxDragGroup(group);
     const wasSpacing = isBoxDragGroup(openBoxGroupRef.current);
     if (nextSpacing) {
-      const widgetId = selectedWidgetIdRef.current;
+      const widgetId = styleTargetWidget()?.id;
       if (widgetId && !readOnlyRef.current) {
         beginSpacingSession(widgetId);
       }
@@ -2649,12 +3129,9 @@ export function ProjectEditorPage() {
         return;
       }
       const kind = openBoxGroupRef.current;
-      const widgetId = selectedWidgetIdRef.current;
-      if (readOnlyRef.current || !isBoxDragGroup(kind) || !widgetId) {
-        return;
-      }
-      const widget = findViewed(widgetId);
-      if (!widget || !isBoxGroupAllowed(widget.type, kind)) {
+      const widget = styleTargetWidget();
+      const widgetId = widget?.id;
+      if (readOnlyRef.current || !isBoxDragGroup(kind) || !widget || !widgetId || !isBoxGroupAllowed(widget.type, kind)) {
         return;
       }
       if (kind === 'rotate') {
@@ -2862,6 +3339,7 @@ export function ProjectEditorPage() {
     pageStyleRef.current = previous.pageStyle;
     pageDataRef.current = previous.pageData;
     selectedWidgetIdRef.current = previous.selectedWidgetId;
+    clearTableRange();
     setWidgets(previous.widgets);
     setPageStyle(previous.pageStyle);
     setPageData(previous.pageData);
@@ -2889,6 +3367,7 @@ export function ProjectEditorPage() {
     pageStyleRef.current = next.pageStyle;
     pageDataRef.current = next.pageData;
     selectedWidgetIdRef.current = next.selectedWidgetId;
+    clearTableRange();
     setWidgets(next.widgets);
     setPageStyle(next.pageStyle);
     setPageData(next.pageData);
@@ -2906,7 +3385,7 @@ export function ProjectEditorPage() {
       if (readOnlyRef.current || !selectedWidgetIdRef.current) {
         return;
       }
-      const widget = findViewed(selectedWidgetIdRef.current);
+      const widget = styleTargetWidget();
       if (!widget || !isBoxGroupAllowed(widget.type, shortcut)) {
         return;
       }
@@ -3177,6 +3656,71 @@ export function ProjectEditorPage() {
     ? stateOwnKeys(selectedWidget, stateLayersForWidget(widgets, selectedWidget.id, viewingByOwner))
     : null;
   const selectedCanvasLabel = selectedWidget ? widgetCanvasLabel(selectedWidget, t) : null;
+  const owningTable = findOwningTable(widgets, tableRange?.tableId ?? selectedWidgetId);
+  const activeRange = tableRange && owningTable && tableRange.tableId === owningTable.table.id ? tableRange : null;
+  const rangeWidget = activeRange
+    ? activeRange.kind === 'column'
+      ? (owningTable?.headers[activeRange.index] ?? null)
+      : activeRange.kind === 'header'
+        ? (owningTable?.headers[0] ?? null)
+        : (owningTable?.rows.find((row) => row.id === activeRange.rowId)?.children.find((child) => child.type === 'td') ?? null)
+    : null;
+  const bubbleWidget = rangeWidget ?? selectedDisplayWidget;
+  const showHeaderHeight =
+    Boolean(owningTable) &&
+    (activeRange?.kind === 'header' ||
+      (!activeRange && (selectedWidget?.type === 'th' || selectedWidget?.type === 'table')));
+  const tableHeaderHeight = showHeaderHeight ? (owningTable?.table.headerHeight ?? DEFAULT_TABLE_HEADER_HEIGHT) : null;
+  const tableStyleIds = owningTable && activeRange
+    ? activeRange.kind === 'column'
+      ? columnCellIds(owningTable, activeRange.index)
+      : activeRange.kind === 'row'
+        ? rowCellIds(owningTable, activeRange.rowId)
+        : headerCellIds(owningTable)
+    : [];
+  const tableBubble: TableBubbleModel | undefined = owningTable
+    ? {
+        headerHeight: tableHeaderHeight,
+        onHeaderHeight:
+          tableHeaderHeight != null
+            ? (value) => {
+                const next = setTableHeaderHeight(widgetsRef.current, owningTable.table.id, value);
+                if (next !== widgetsRef.current) {
+                  commitWidgets(next, selectedWidgetIdRef.current, `table-header-height:${owningTable.table.id}`);
+                }
+              }
+            : undefined,
+        hideCopy: Boolean(rangeWidget),
+        align: bubbleWidget && (bubbleWidget.type === 'th' || bubbleWidget.type === 'td') ? bubbleWidget.align : undefined,
+        valign: bubbleWidget && (bubbleWidget.type === 'th' || bubbleWidget.type === 'td') ? bubbleWidget.valign : undefined,
+        onAlign:
+          bubbleWidget && (bubbleWidget.type === 'th' || bubbleWidget.type === 'td')
+            ? (align) => {
+                if (rangeWidget) {
+                  const next = patchTableCells(widgetsRef.current, tableStyleIds, { align });
+                  if (next !== widgetsRef.current) {
+                    commitWidgets(next, selectedWidgetIdRef.current, `table-align:${owningTable.table.id}`);
+                  }
+                  return;
+                }
+                updateWidget(bubbleWidget.id, { align }, `edit:${bubbleWidget.id}:align`);
+              }
+            : undefined,
+        onValign:
+          bubbleWidget && (bubbleWidget.type === 'th' || bubbleWidget.type === 'td')
+            ? (valign) => {
+                if (rangeWidget) {
+                  const next = patchTableCells(widgetsRef.current, tableStyleIds, { valign });
+                  if (next !== widgetsRef.current) {
+                    commitWidgets(next, selectedWidgetIdRef.current, `table-valign:${owningTable.table.id}`);
+                  }
+                  return;
+                }
+                updateWidget(bubbleWidget.id, { valign }, `edit:${bubbleWidget.id}:valign`);
+              }
+            : undefined,
+      }
+    : undefined;
   const widgetTreeData = toWidgetTreeData(widgets, (widget) => widgetTreeLabel(widget, t));
   const canDragWidgetToData = centerTab === 'data' && !readOnly;
   const modifier = modifierShortcutLabel();
@@ -3549,12 +4093,18 @@ export function ProjectEditorPage() {
                       'canvas-stage',
                       panning || panningRef.current ? 'is-panning' : '',
                       previewing ? 'is-preview' : '',
+                      canvasSettling ? 'is-settling' : '',
                     ]
                       .filter(Boolean)
                       .join(' ')}
                     onPointerDown={onCanvasPointerDown}
                     onMouseDown={onCanvasMouseDown}
                   >
+                    {canvasSettling ? (
+                      <div className="canvas-settle" aria-busy="true">
+                        <Spin />
+                      </div>
+                    ) : null}
                     <div ref={phoneScreenRef} className="phone-screen">
                       <iframe
                         ref={iframeRef}
@@ -3571,7 +4121,12 @@ export function ProjectEditorPage() {
                         }}
                       />
                     </div>
-                    <div ref={phoneFrameRef} className="phone-page-frame" />
+                    <div
+                      ref={phoneFrameRef}
+                      className={['phone-page-frame', !previewing && tableEditId ? 'is-table-editing' : '']
+                        .filter(Boolean)
+                        .join(' ')}
+                    />
                     {showStyleChrome && selectedCanvasLabel ? (
                       <div className="canvas-selection-label" title={selectedCanvasLabel}>
                         {selectedCanvasLabel}
@@ -3590,48 +4145,70 @@ export function ProjectEditorPage() {
                           event.stopPropagation();
                         }}
                       >
-                        {selectedDisplayWidget ? (
+                        {bubbleWidget ? (
                           <WidgetStyleBubble
-                            widget={selectedDisplayWidget}
-                            style={selectedDisplayWidget.style}
-                            ownKeys={selectedOwnKeys ?? undefined}
+                            widget={bubbleWidget}
+                            style={bubbleWidget.style}
+                            ownKeys={rangeWidget ? undefined : (selectedOwnKeys ?? undefined)}
                             i18nCatalog={pageI18n}
                             projectId={project.id}
                             variables={pageData}
                             disabled={readOnly}
                             openGroup={openBoxGroup}
                             onOpenGroupChange={handleOpenBoxGroupChange}
+                            table={tableBubble}
+                            onTableLines={
+                              bubbleWidget.type === 'table'
+                                ? (lines) =>
+                                    updateWidget(bubbleWidget.id, { lines }, `edit:${bubbleWidget.id}:lines`)
+                                : undefined
+                            }
+                            onStyleDelta={
+                              rangeWidget
+                                ? (delta) => {
+                                    const next = patchTableCellStyles(widgetsRef.current, tableStyleIds, delta);
+                                    if (next !== widgetsRef.current) {
+                                      const rangeKey = activeRange
+                                        ? `${activeRange.kind}:${activeRange.tableId}:${'index' in activeRange ? activeRange.index : 'rowId' in activeRange ? activeRange.rowId : 'header'}`
+                                        : 'range';
+                                      commitWidgets(next, selectedWidgetIdRef.current, `edit:table-style:${rangeKey}`);
+                                    }
+                                  }
+                                : undefined
+                            }
                             onChange={(nextStyle) =>
                               updateWidget(
-                                selectedDisplayWidget.id,
+                                bubbleWidget.id,
                                 { style: nextStyle },
-                                `edit:${selectedDisplayWidget.id}:style`,
+                                `edit:${bubbleWidget.id}:style`,
                               )
                             }
                             onSrcChange={
-                              selectedDisplayWidget.type === 'image' || selectedDisplayWidget.type === 'icon'
+                              bubbleWidget.type === 'image' || bubbleWidget.type === 'icon'
                                 ? (src) =>
-                                  updateWidget(selectedDisplayWidget.id, { src }, `edit:${selectedDisplayWidget.id}:src`)
+                                  updateWidget(bubbleWidget.id, { src }, `edit:${bubbleWidget.id}:src`)
                                 : undefined
                             }
                             onTextChange={
-                              selectedDisplayWidget.type === 'text' || selectedDisplayWidget.type === 'button'
+                              bubbleWidget.type === 'text' ||
+                              bubbleWidget.type === 'button' ||
+                              ((bubbleWidget.type === 'th' || bubbleWidget.type === 'td') && !rangeWidget)
                                 ? (text) =>
                                   updateWidget(
-                                    selectedDisplayWidget.id,
-                                    selectedDisplayWidget.type === 'text' ? { value: text } : { text },
-                                    `edit:${selectedDisplayWidget.id}:${selectedDisplayWidget.type === 'text' ? 'value' : 'text'}`,
+                                    bubbleWidget.id,
+                                    bubbleWidget.type === 'button' ? { text } : { value: text },
+                                    `edit:${bubbleWidget.id}:${bubbleWidget.type === 'button' ? 'text' : 'value'}`,
                                   )
                                 : undefined
                             }
                             onLoopChange={(loop) =>
-                              updateWidget(selectedDisplayWidget.id, { loop }, `loop:${selectedDisplayWidget.id}`)
+                              updateWidget(bubbleWidget.id, { loop }, `loop:${bubbleWidget.id}`)
                             }
                             onStateFnChange={(stateFn, hoverStateId) =>
                               updateWidget(
-                                selectedDisplayWidget.id,
+                                bubbleWidget.id,
                                 { stateFn, hoverStateId },
-                                `stateFn:${selectedDisplayWidget.id}`,
+                                `stateFn:${bubbleWidget.id}`,
                               )
                             }
                             onOpenInspector={() => setInspectorOpen(true)}
@@ -3766,13 +4343,33 @@ export function ProjectEditorPage() {
                       {Math.round(view.scale * 100)}%
                     </Typography.Text>
                     <Button size="small" icon={<ZoomInOutlined />} onClick={() => zoomBy(ZOOM_STEP)} />
-                    <Button size="small" icon={<ExpandOutlined />} onClick={() => fitCanvas(false)}>
+                    <Button
+                      size="small"
+                      icon={<ExpandOutlined />}
+                      onClick={() => {
+                        const tableId = tableEditIdRef.current;
+                        if (tableId) {
+                          centerTableInView(tableId);
+                          return;
+                        }
+                        fitCanvas(false);
+                      }}
+                    >
                       {t('lowcode.canvasReset')}
                     </Button>
                     <Segmented
                       size="small"
                       value={mode}
-                      onChange={(value) => setMode(value as CanvasMode)}
+                      onChange={(value) => {
+                        const next = value as CanvasMode;
+                        if (next === modeRef.current) {
+                          return;
+                        }
+                        settleGenRef.current += 1;
+                        canvasSettlingRef.current = true;
+                        setCanvasSettling(true);
+                        setMode(next);
+                      }}
                       options={[
                         { label: t('lowcode.modeEdit'), value: 'edit' },
                         { label: t('lowcode.modePreview'), value: 'preview' },

@@ -5,6 +5,10 @@ import { iconHelper } from './icon';
 import { imageHelper } from './image';
 import { swiperHelper } from './swiper';
 import { swiperItemHelper } from './swiper-item';
+import { tableCellHelper } from './td';
+import { tableHeaderHelper } from './th';
+import { tableHelper } from './table';
+import { tableRowHelper } from './tr';
 import { textHelper } from './text';
 import type { WidgetAccepts, WidgetCloneContext, WidgetCreateContext, WidgetHelperInterface, WidgetPatch, WidgetTranslate } from './types';
 
@@ -18,9 +22,13 @@ export const widgetHelpers = {
   flex: flexHelper,
   swiper: swiperHelper,
   'swiper-item': swiperItemHelper,
+  table: tableHelper,
+  th: tableHeaderHelper,
+  tr: tableRowHelper,
+  td: tableCellHelper,
 } satisfies { [K in PageWidget['type']]: WidgetHelperInterface<Extract<PageWidget, { type: K }>> };
 
-export const ADDABLE_WIDGET_TYPES = ['text', 'button', 'flex', 'swiper', 'swiper-item', 'image', 'icon'] as const satisfies readonly PageWidget['type'][];
+export const ADDABLE_WIDGET_TYPES = ['text', 'button', 'flex', 'swiper', 'table', 'swiper-item', 'image', 'icon'] as const satisfies readonly PageWidget['type'][];
 
 export function acceptsChild(accepts: WidgetAccepts, childType: PageWidget['type']): boolean {
   if (accepts === 'none') {
@@ -29,7 +37,13 @@ export function acceptsChild(accepts: WidgetAccepts, childType: PageWidget['type
   if (accepts === 'swiper-item') {
     return childType === 'swiper-item';
   }
-  return childType !== 'swiper-item';
+  if (accepts === 'table-section') {
+    return childType === 'th' || childType === 'tr';
+  }
+  if (accepts === 'table-cell') {
+    return childType === 'td';
+  }
+  return childType !== 'swiper-item' && childType !== 'th' && childType !== 'tr' && childType !== 'td';
 }
 
 function helperFor(type: PageWidget['type']): WidgetHelperInterface<PageWidget> {

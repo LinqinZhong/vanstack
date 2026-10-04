@@ -15,11 +15,13 @@ const roots = new WeakMap<Element, Root>();
 export type RenderPageXmlResult = { ok: true } | { ok: false; error: string };
 export type RenderPageXmlOptions = {
   editing?: boolean;
+  tableLayout?: boolean;
   locale?: string;
   catalog?: PageI18n | PageLangSnapshot;
   viewingOwnerId?: string | null;
   viewingState?: string | null;
   viewingStates?: Array<{ ownerId: string; state: string | null }> | null;
+  dynamicTextLabel?: string;
 };
 
 function resolveRenderCatalog(catalog: RenderPageXmlOptions['catalog']): PageI18n | undefined {
@@ -63,9 +65,11 @@ export function renderPageXml(
     const tree = createElement(LowcodePage, {
       xml,
       editing,
+      tableLayout: Boolean(options?.tableLayout),
       locale: options?.locale,
       catalog: resolveRenderCatalog(options?.catalog),
       viewing: resolveViewing(options),
+      dynamicTextLabel: options?.dynamicTextLabel,
     });
     flushSync(() => {
       root.render(tree);

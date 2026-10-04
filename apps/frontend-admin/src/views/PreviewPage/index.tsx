@@ -1,16 +1,19 @@
 import './styles.less';
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { renderPageXml } from '@vanstack/lowcode-runtime';
 import type { PageI18n } from '@vanstack/xml';
-import { isLowcodeMessage } from '../../utils/lowcode-protocol';
+import { isLowcodeMessage, type TableChromeState } from '../../utils/lowcode-protocol';
 import { isBoxGroupShortcut, isTextStyleShortcut, matchWidgetShortcut } from '../../utils/widgetShortcuts';
 import { previewVisualScale, setSpacingActiveEdge, setSpacingDragCursor, setSpacingHeldEdges, setSpacingMirror, setSpacingSnap, setRotateHeldAxes, spacingActionFromTarget, spacingEdgeFromTarget, rotateAxisFromTarget, rotateLayoutClientCenter, syncSpacingGuides, syncSpacingMask, widgetLayoutSize } from '../../utils/spacingGuides';
 import type { BoxDragKind, SpacingEdge } from '../../utils/spacingDrag';
 import { isBoxDragKind, isSpacingNudgeKey, isSpacingValueKey, SPACING_EDGES } from '../../utils/spacingDrag';
 import { pointerAngleDeg, type RotateAxis } from '../../utils/rotateDrag';
-import { applyEditorChromeScale, applyLiveWidgetCss, applyViewport, applyWidgetState, FOCUS_DBLCLICK_MS, focusModifier, paintPreviewCamera, paintWidgetChrome, parentWidgetId, postCanvasPointer, postToParent, postWidgetHover, setSelectFaded, widgetIdFromTarget } from './helpers';
+import { applyEditorChromeScale, applyLiveWidgetCss, applyViewport, applyWidgetState, FOCUS_DBLCLICK_MS, focusModifier, paintPreviewCamera, paintWidgetChrome, parentWidgetId, postCanvasPointer, postToParent, postWidgetHover, setSelectFaded } from './helpers';
+import { applyLiveTableTrack, readTableTrackPair, syncTableChrome, syncTableReveal, type TableChromeLabels } from './tableChrome';
 
 export function PreviewPage() {
+  const { t } = useTranslation();
   const mountRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<HTMLDivElement>(null);
@@ -21,6 +24,7 @@ export function PreviewPage() {
   const viewingOwnerIdRef = useRef<string | null>(null);
   const viewingStateRef = useRef<string | null>(null);
   const viewingStatesRef = useRef('');
+  const tableLayoutRef = useRef(false);
   const spacingDragRef = useRef<BoxDragKind | 'border' | null>(null);
   const rasterScaleRef = useRef(1);
   const viewScaleRef = useRef(1);
@@ -36,8 +40,40 @@ export function PreviewPage() {
   const climbTimerRef = useRef(0);
   const selectClickAtRef = useRef(0);
   const chromeTargetRef = useRef<EventTarget | null>(null);
+  const tableChromeRef = useRef<TableChromeState | null>(null);
+  const tableDragKeyRef = useRef<string | null>(null);
+  const tableEditingRef = useRef(false);
+  const chromeLabelsRef = useRef<TableChromeLabels>({
+    moveLeft: '',
+    moveRight: '',
+    moveUp: '',
+    moveDown: '',
+    addColumn: '',
+    removeColumn: '',
+    addRow: '',
+    removeRow: '',
+    freezeHeader: '',
+    freezeFooter: '',
+    editTable: '',
+    exitTable: '',
+  });
+  chromeLabelsRef.current = {
+    moveLeft: t('lowcode.tableMoveColumnLeft'),
+    moveRight: t('lowcode.tableMoveColumnRight'),
+    moveUp: t('lowcode.tableMoveRowUp'),
+    moveDown: t('lowcode.tableMoveRowDown'),
+    addColumn: t('lowcode.tableAddColumn'),
+    removeColumn: t('lowcode.tableRemoveColumn'),
+    addRow: t('lowcode.tableAddRow'),
+    removeRow: t('lowcode.tableRemoveRow'),
+    freezeHeader: t('lowcode.tableFreezeHeader'),
+    freezeFooter: t('lowcode.tableFreezeFooter'),
+    editTable: t('lowcode.tableEdit'),
+    exitTable: t('lowcode.tableExitEdit'),
+  };
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(true);
+  const [hostTableEditing, setHostTableEditing] = useState(false);
 
   /** readSelectedLayoutSize：当前选中控件的布局宽高（布局坐标）。 */
   function readSelectedLayoutSize() {
@@ -76,11 +112,69 @@ export function PreviewPage() {
     postToParent({ type: 'widget-box', widgetId, width: size.width, height: size.height });
   }
 
+  function refreshTableChrome() {
+    syncTableReveal(hostRef.current, mountRef.current, editingRef.current, tableEditingRef.current);
+    syncTableChrome(
+      hostRef.current,
+      mountRef.current,
+      tableChromeRef.current,
+      viewScaleRef.current,
+      editingRef.current,
+      tableDragKeyRef.current,
+      chromeLabelsRef.current,
+    );
+  }
+
   useEffect(() => {
     editingRef.current = editing;
   }, [editing]);
 
   useEffect(() => {
+    let settleJob = 0;
+    /** 模式切换后等页面尺寸连续两帧不变，再通知父页揭开画布。 */
+    function scheduleCanvasSettle(token: number) {
+      settleJob += 1;
+      const job = settleJob;
+      const started = performance.now();
+      const root = mountRef.current;
+      const images = root ? [...root.querySelectorAll('img')].filter((img) => !img.complete) : [];
+      let imagesReady = images.length === 0;
+      if (!imagesReady) {
+        let left = images.length;
+        const markImage = () => {
+          left -= 1;
+          if (left <= 0) {
+            imagesReady = true;
+          }
+        };
+        for (const img of images) {
+          img.addEventListener('load', markImage, { once: true });
+          img.addEventListener('error', markImage, { once: true });
+        }
+      }
+      let last = '';
+      let stable = 0;
+      const tick = () => {
+        if (job !== settleJob) {
+          return;
+        }
+        const page = mountRef.current?.querySelector<HTMLElement>('.lowcode-page');
+        const mark = page ? `${page.offsetWidth}:${page.offsetHeight}:${page.scrollWidth}:${page.scrollHeight}` : '';
+        if (imagesReady && mark === last) {
+          stable += 1;
+        } else {
+          last = mark;
+          stable = 0;
+        }
+        if ((imagesReady && stable >= 2) || performance.now() - started > 800) {
+          postToParent({ type: 'canvas-settled', settle: token });
+          return;
+        }
+        window.requestAnimationFrame(tick);
+      };
+      window.requestAnimationFrame(tick);
+    }
+
     function onMessage(event: MessageEvent) {
       if (event.origin !== window.location.origin || !isLowcodeMessage(event.data)) {
         return;
@@ -137,6 +231,7 @@ export function PreviewPage() {
             editingRef.current,
             spacingDragRef.current,
           );
+          refreshTableChrome();
           postSelectedLayoutSize();
         }
         return;
@@ -162,6 +257,10 @@ export function PreviewPage() {
         viewingState,
         viewingStates,
         spacingDrag,
+        tableLayout,
+        tableChrome,
+        tableEditing,
+        settle,
       } = event.data;
       const nextEditing = mode !== 'preview';
       const nextLocale = locale || undefined;
@@ -171,15 +270,22 @@ export function PreviewPage() {
       const nextViewingOwner = viewingOwnerId ?? null;
       const nextViewingState = viewingState ?? null;
       const nextViewingStates = JSON.stringify(viewingStates ?? null);
+      const nextTableLayout = Boolean(tableLayout) && nextEditing;
       const shouldRender =
         xml !== xmlRef.current ||
         nextEditing !== editingRef.current ||
+        nextTableLayout !== tableLayoutRef.current ||
         nextLocale !== localeRef.current ||
         nextCatalogKey !== catalogRef.current ||
         nextViewingOwner !== viewingOwnerIdRef.current ||
         nextViewingState !== viewingStateRef.current ||
         nextViewingStates !== viewingStatesRef.current;
       editingRef.current = nextEditing;
+      const nextTableEditing = nextEditing && Boolean(tableEditing);
+      tableEditingRef.current = nextTableEditing;
+      setHostTableEditing(nextTableEditing);
+      tableChromeRef.current = nextEditing ? (tableChrome ?? null) : null;
+      tableLayoutRef.current = nextTableLayout;
       localeRef.current = nextLocale;
       catalogRef.current = nextCatalogKey;
       viewingOwnerIdRef.current = nextViewingOwner;
@@ -224,11 +330,13 @@ export function PreviewPage() {
         xmlRef.current = xml;
         const result = renderPageXml(mountRef.current, xml, {
           editing: nextEditing,
+          tableLayout: nextTableLayout,
           locale: nextLocale,
           catalog: nextCatalog,
           viewingOwnerId: nextViewingOwner,
           viewingState: nextViewingState,
           viewingStates: viewingStates ?? null,
+          dynamicTextLabel: t('lowcode.dynamicText'),
         });
         setError(result.ok ? null : result.error);
       }
@@ -245,6 +353,7 @@ export function PreviewPage() {
         nextEditing,
         spacingDragRef.current,
       );
+      refreshTableChrome();
       syncSpacingGuides(
         hostRef.current,
         mountRef.current,
@@ -258,6 +367,9 @@ export function PreviewPage() {
       postSelectedLayoutSize();
       if (!nextEditing) {
         postWidgetHover(null);
+      }
+      if (typeof settle === 'number') {
+        scheduleCanvasSettle(settle);
       }
     }
 
@@ -401,16 +513,18 @@ export function PreviewPage() {
       }
       hoverFrame = window.requestAnimationFrame(() => {
         hoverFrame = 0;
-        chromeTargetRef.current = target;
-        reportHover(target);
+        const hit = canvasHit(target);
+        chromeTargetRef.current = hit ?? target;
+        reportHover(hit ?? target);
         paintWidgetChrome(
           hostRef.current,
           mountRef.current,
-          target,
+          hit ?? target,
           viewScaleRef.current,
           editingRef.current,
           spacingDragRef.current,
         );
+        refreshTableChrome();
       });
     }
 
@@ -433,6 +547,7 @@ export function PreviewPage() {
         editingRef.current,
         spacingDragRef.current,
       );
+      refreshTableChrome();
     }
 
     /** clearClimbTimer：取消 Ctrl 单击上钻的延时。 */
@@ -441,6 +556,44 @@ export function PreviewPage() {
         window.clearTimeout(climbTimerRef.current);
         climbTimerRef.current = 0;
       }
+    }
+
+    /** climbSelection：再次点击时上选父级。到最外层后再点一次，回到这次点击的最里层。表格编辑中到行后同样回到最里层。 */
+    function climbSelection(fromId: string, innermostId: string): string {
+      const parentId = parentWidgetId(mountRef.current, fromId);
+      if (!parentId) {
+        return innermostId;
+      }
+      if (!tableEditingRef.current) {
+        return parentId;
+      }
+      const from = mountRef.current?.querySelector<HTMLElement>(`[data-widget-id="${CSS.escape(fromId)}"]`);
+      const parent = mountRef.current?.querySelector<HTMLElement>(`[data-widget-id="${CSS.escape(parentId)}"]`);
+      if (
+        (from?.dataset.widgetType === 'tr' || from?.dataset.widgetType === 'th') &&
+        parent?.dataset.widgetType === 'table'
+      ) {
+        return innermostId;
+      }
+      return parentId;
+    }
+
+    /** canvasHit：未进入表格编辑时，表格内部的悬停和点击都算在表格上。 */
+    function canvasHit(target: EventTarget | null) {
+      if (!(target instanceof Element)) {
+        return null;
+      }
+      const node = target.closest('[data-widget-id]');
+      if (!(node instanceof HTMLElement)) {
+        return null;
+      }
+      if (!tableEditingRef.current) {
+        const table = node.closest('.lowcode-table');
+        if (table instanceof HTMLElement) {
+          return table;
+        }
+      }
+      return node;
     }
 
     /** postSelect：通知父页选中变更，并刷新悬停框。 */
@@ -463,6 +616,7 @@ export function PreviewPage() {
             editingRef.current,
             spacingDragRef.current,
           );
+          refreshTableChrome();
           return;
         }
       }
@@ -470,9 +624,100 @@ export function PreviewPage() {
       postWidgetHover(null);
     }
 
+    function tableSelectFromTarget(target: EventTarget | null) {
+      if (!(target instanceof Element)) {
+        return null;
+      }
+      const node = target.closest<HTMLElement>('[data-table-select]');
+      if (!node?.dataset.tableId) {
+        return null;
+      }
+      const kind = node.dataset.tableSelect;
+      if (kind !== 'column' && kind !== 'row' && kind !== 'header') {
+        return null;
+      }
+      return {
+        tableId: node.dataset.tableId,
+        target: kind,
+        index: node.dataset.tableIndex != null ? Number(node.dataset.tableIndex) : undefined,
+        rowId: node.dataset.tableRow,
+      };
+    }
+
+    function tableResizeFromTarget(target: EventTarget | null): {
+      tableId: string;
+      target: 'column' | 'row' | 'header';
+      index: number | undefined;
+      rowId: string | undefined;
+      value: number;
+    } | null {
+      if (!(target instanceof Element)) {
+        return null;
+      }
+      const node = target.closest<HTMLElement>('[data-table-resize]');
+      if (!node?.dataset.tableId) {
+        return null;
+      }
+      const kind = node.dataset.tableResize;
+      if (kind !== 'column' && kind !== 'row' && kind !== 'header') {
+        return null;
+      }
+      const value = Number(node.dataset.tableValue);
+      if (!Number.isFinite(value)) {
+        return null;
+      }
+      return {
+        tableId: node.dataset.tableId,
+        target: kind,
+        index: node.dataset.tableIndex != null ? Number(node.dataset.tableIndex) : undefined,
+        rowId: node.dataset.tableRow,
+        value,
+      };
+    }
+
     /** onClick：单击选中；同锚点再点上钻父级（Ctrl 时延时，避免挡双击）。 */
     function onClick(event: MouseEvent) {
       if (!editingRef.current || event.button !== 0) {
+        return;
+      }
+      const modeNode = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-table-mode]') : null;
+      const tableMode = modeNode?.dataset.tableMode;
+      if (tableMode === 'enter' || tableMode === 'exit') {
+        event.preventDefault();
+        event.stopPropagation();
+        postToParent({ type: 'table-mode', action: tableMode });
+        return;
+      }
+      const commandNode = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-table-command]') : null;
+      const command = commandNode?.dataset.tableCommand;
+      if (
+        command === 'add-column' ||
+        command === 'remove-column' ||
+        command === 'move-column-left' ||
+        command === 'move-column-right' ||
+        command === 'add-row' ||
+        command === 'remove-row' ||
+        command === 'move-row-up' ||
+        command === 'move-row-down'
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        postToParent({ type: 'table-command', command });
+        return;
+      }
+      const freezeNode = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-table-freeze]') : null;
+      const freeze = freezeNode?.dataset.tableFreeze;
+      if (freeze === 'header' || freeze === 'footer') {
+        event.preventDefault();
+        event.stopPropagation();
+        postToParent({ type: 'table-freeze', target: freeze });
+        return;
+      }
+      const tablePick = tableSelectFromTarget(event.target);
+      if (tablePick) {
+        event.preventDefault();
+        event.stopPropagation();
+        postToParent({ type: 'table-select', ...tablePick });
         return;
       }
       if (suppressClick) {
@@ -486,7 +731,8 @@ export function PreviewPage() {
         return;
       }
       selectClickAtRef.current = event.timeStamp;
-      const hitId = widgetIdFromTarget(event.target);
+      const hit = canvasHit(event.target);
+      const hitId = hit?.dataset.widgetId ?? null;
       const overlayOpen = Boolean(spacingDragRef.current);
       const onOverlayHandle = Boolean(
         spacingEdgeFromTarget(event.target) || rotateAxisFromTarget(event.target),
@@ -500,7 +746,12 @@ export function PreviewPage() {
       if (!hitId) {
         clearClimbTimer();
         climbAnchorIdRef.current = null;
-        postToParent({ type: 'dismiss-toolbar' });
+        if (!tableEditingRef.current) {
+          postToParent({ type: 'dismiss-toolbar' });
+        }
+        return;
+      }
+      if (tableEditingRef.current && hit?.dataset.widgetType === 'table') {
         return;
       }
       if (hitId !== climbAnchorIdRef.current) {
@@ -510,10 +761,7 @@ export function PreviewPage() {
         return;
       }
       const current = lastPostedSelectRef.current ?? null;
-      const next =
-        !current || current === hitId
-          ? (parentWidgetId(mountRef.current, hitId) ?? hitId)
-          : (parentWidgetId(mountRef.current, current) ?? hitId);
+      const next = climbSelection(!current || current === hitId ? hitId : current, hitId);
       clearClimbTimer();
       if (focusModifier(event)) {
         climbTimerRef.current = window.setTimeout(() => {
@@ -534,12 +782,9 @@ export function PreviewPage() {
         return;
       }
       clearClimbTimer();
-      const widgetId = widgetIdFromTarget(event.target);
-      if (!widgetId || !(event.target instanceof Element)) {
-        return;
-      }
-      const widget = event.target.closest('[data-widget-id]');
-      if (!(widget instanceof HTMLElement)) {
+      const widget = canvasHit(event.target);
+      const widgetId = widget?.dataset.widgetId ?? null;
+      if (!widgetId || !widget) {
         return;
       }
       event.preventDefault();
@@ -554,7 +799,7 @@ export function PreviewPage() {
       });
     }
 
-    /** onWheel：滚轮缩放，回传父页。 */
+    /** onWheel：滚轮缩放，回传父页。编辑时表格不滚动。 */
     function onWheel(event: WheelEvent) {
       if (!editingRef.current) {
         return;
@@ -669,6 +914,99 @@ export function PreviewPage() {
 
     /** onPointerDown：中键平移，或开始间距/旋转手柄拖拽。 */
     function onPointerDown(event: PointerEvent) {
+      const tableResize = tableResizeFromTarget(event.target);
+      if (editingRef.current && event.button === 0 && tableResize) {
+        event.preventDefault();
+        event.stopPropagation();
+        suppressClick = true;
+        const dragKey =
+          tableResize.target === 'header'
+            ? 'header:header'
+            : tableResize.target === 'column'
+              ? `column:${tableResize.index ?? ''}`
+              : `row:${tableResize.rowId ?? ''}`;
+        tableDragKeyRef.current = dragKey;
+        refreshTableChrome();
+        const previousCursor = document.documentElement.style.cursor;
+        document.documentElement.style.cursor = tableResize.target === 'column' ? 'col-resize' : 'row-resize';
+        const pointerId = event.pointerId;
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const host = hostRef.current;
+        const pair = readTableTrackPair(
+          mountRef.current,
+          tableResize.tableId,
+          tableResize.target,
+          tableResize.index,
+          tableResize.rowId,
+        );
+        let latest = pair?.start ?? tableResize.value;
+        let latestNext: number | undefined;
+        let dragFrame = 0;
+        const paintTrack = (clientX: number, clientY: number) => {
+          const scale = host ? previewVisualScale(host, viewScaleRef.current || 1) : viewScaleRef.current || 1;
+          const delta = tableResize.target === 'column' ? (clientX - startX) / scale : (clientY - startY) / scale;
+          const requested = Math.max(24, Math.round((pair?.start ?? tableResize.value) + delta));
+          const applied = applyLiveTableTrack(
+            mountRef.current,
+            tableResize.tableId,
+            tableResize.target,
+            tableResize.index,
+            tableResize.rowId,
+            requested,
+            pair,
+          );
+          if (applied) {
+            latest = applied.value;
+            latestNext = applied.nextValue;
+          }
+          refreshTableChrome();
+        };
+        const onMove = (moveEvent: PointerEvent) => {
+          if (moveEvent.pointerId !== pointerId) {
+            return;
+          }
+          if (dragFrame) {
+            window.cancelAnimationFrame(dragFrame);
+          }
+          const clientX = moveEvent.clientX;
+          const clientY = moveEvent.clientY;
+          dragFrame = window.requestAnimationFrame(() => {
+            dragFrame = 0;
+            paintTrack(clientX, clientY);
+          });
+        };
+        const onUp = (upEvent: PointerEvent) => {
+          if (upEvent.pointerId !== pointerId) {
+            return;
+          }
+          window.removeEventListener('pointermove', onMove, true);
+          window.removeEventListener('pointerup', onUp, true);
+          window.removeEventListener('pointercancel', onUp, true);
+          if (dragFrame) {
+            window.cancelAnimationFrame(dragFrame);
+            dragFrame = 0;
+          }
+          paintTrack(upEvent.clientX, upEvent.clientY);
+          tableDragKeyRef.current = null;
+          document.documentElement.style.cursor = previousCursor;
+          refreshTableChrome();
+          postToParent({
+            type: 'table-resize',
+            tableId: tableResize.tableId,
+            target: tableResize.target,
+            index: tableResize.index,
+            rowId: tableResize.rowId,
+            value: latest,
+            ...(latestNext != null ? { nextValue: latestNext, ...(pair?.nextRowId ? { nextRowId: pair.nextRowId } : {}) } : {}),
+            phase: 'up',
+          });
+        };
+        window.addEventListener('pointermove', onMove, true);
+        window.addEventListener('pointerup', onUp, true);
+        window.addEventListener('pointercancel', onUp, true);
+        return;
+      }
       if (event.button === 1) {
         event.preventDefault();
         panning = true;
@@ -814,6 +1152,19 @@ export function PreviewPage() {
           event.preventDefault();
         }
         applyMirror(true);
+      }
+      if (
+        editingRef.current &&
+        tableEditingRef.current &&
+        event.key === 'Escape' &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        postKey('keydown', event);
+        return;
       }
       if (
         spacingDragRef.current &&
@@ -967,6 +1318,7 @@ export function PreviewPage() {
         className={[
           'preview-host',
           editing ? 'is-editing' : '',
+          hostTableEditing ? 'is-table-editing' : '',
           hostRef.current?.classList.contains('is-select-faded') ? 'is-select-faded' : '',
         ]
           .filter(Boolean)

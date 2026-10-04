@@ -1,13 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { OssStorage } from './oss.types';
 
 @Injectable()
-export class OssService implements OnModuleInit {
+export class OssService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly storage: OssStorage) {}
 
   async onModuleInit() {
     await this.storage.ensureReady();
+  }
+
+  async onModuleDestroy() {
+    await this.storage.close();
   }
 
   async putObject(key: string, body: Buffer, contentType: string) {

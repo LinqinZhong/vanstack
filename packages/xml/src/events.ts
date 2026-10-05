@@ -13,6 +13,7 @@ export const WIDGET_KINDS = [
   'th',
   'tr',
   'td',
+  'component',
 ] as const;
 
 export type WidgetKind = (typeof WIDGET_KINDS)[number];

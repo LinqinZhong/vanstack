@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -5,7 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import type {
   ProjectAssetFileDto,
   ProjectAssetGroupDto,
@@ -16,27 +17,41 @@ import type {
   ProjectLangDto,
   ProjectLangEntryDto,
   ProjectLangGroupDto,
+  ProjectComponentDto,
   ProjectPageDto,
+  MethodCodeDto,
   ProjectPageVersionDto,
+  ProjectPageVersionMetaDto,
   WidgetEventScriptDto,
   RuntimeLangDto,
   RuntimeProjectDto,
 } from '@vanstack/shared';
-import { EMPTY_PAGE_XML, isI18nKey, isWidgetEventId, parseEventSource, parsePageXml, XmlParseError } from '@vanstack/xml';
-import { DataSource, In, QueryFailedError, Repository } from 'typeorm';
+import {
+  documentEventIds,
+  documentMethodIds,
+  EMPTY_PAGE_DOCUMENT,
+  isI18nKey,
+  isPageMethodId,
+  isWidgetEventId,
+  normalizePageDocument,
+  parseEventSource,
+  XmlParseError,
+  type PageXmlDocument,
+} from '@vanstack/xml';
 import { OssService } from '../oss/oss.service';
-import { ProjectLangValue } from './entities/project-lang-value.entity';
-import { ProjectLang } from './entities/project-lang.entity';
-import { ProjectPageVersion } from './entities/project-page-version.entity';
-import { ProjectPage } from './entities/project-page.entity';
-import { Project } from './entities/project.entity';
+import {
+  LowcodeMongo,
+  type ComponentRecord,
+  type ComponentVersionRecord,
+  type PageVersionRecord,
+  type LangRecord,
+  type ProjectLangValueRecord,
+  type ProjectPageRecord,
+  type ProjectRecord,
+} from './lowcode-mongo';
 
 function isUniqueViolation(error: unknown): boolean {
-  if (!(error instanceof QueryFailedError)) {
-    return false;
-  }
-  const code = (error as QueryFailedError & { driverError?: { code?: string } }).driverError?.code;
-  return code === 'ER_DUP_ENTRY' || code === 'SQLITE_CONSTRAINT' || code === '23505';
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { code: unknown }).code === 11000;
 }
 
 function toIso(value: Date): string {
@@ -72,17 +87,13 @@ export class LowcodeService {
   private readonly logger = new Logger(LowcodeService.name);
 
   constructor(
-    @InjectRepository(Project) private readonly projects: Repository<Project>,
-    @InjectRepository(ProjectPage) private readonly pages: Repository<ProjectPage>,
-    @InjectRepository(ProjectPageVersion) private readonly versions: Repository<ProjectPageVersion>,
-    @InjectRepository(ProjectLang) private readonly langs: Repository<ProjectLang>,
-    @InjectRepository(ProjectLangValue) private readonly langValues: Repository<ProjectLangValue>,
-    private readonly dataSource: DataSource,
     private readonly oss: OssService,
+    private readonly mongo: LowcodeMongo,
+    private readonly config: ConfigService,
   ) {}
 
   async listProjects(): Promise<ProjectDto[]> {
-    const rows = await this.projects.find({ order: { createdAt: 'DESC' } });
+    const rows = await this.mongo.listProjects();
     return rows.map((row) => this.toProjectDto(row));
   }
 
@@ -94,27 +105,17 @@ export class LowcodeService {
     if (!/^[a-z][a-z0-9-]{0,63}$/.test(projectKey)) {
       throw new NotFoundException();
     }
-    const project = await this.projects.findOne({ where: { key: projectKey } });
+    const project = await this.mongo.getProjectByKey(projectKey);
     if (!project) {
       throw new NotFoundException();
     }
-    const pages = await this.pages.find({
-      where: { projectId: project.id },
-      order: { createdAt: 'ASC' },
-    });
-    const langRows = await this.langs.find({
-      where: { projectId: project.id },
-      order: { sortOrder: 'ASC' },
-    });
-    const currentIds = pages
-      .map((page) => page.currentVersionId)
-      .filter((id): id is string => Boolean(id));
-    const currentVersions =
-      currentIds.length > 0 ? await this.versions.find({ where: { id: In(currentIds) } }) : [];
-    const versionById = new Map(currentVersions.map((version) => [version.id, version]));
+    const pages = this.sortedPages(project);
+    const langRows = [...((await this.mongo.getLang(project._id))?.langs ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
+    const versions = await this.mongo.listProjectVersions(project._id);
+    const versionById = new Map(versions.map((version) => [version._id, version]));
     const runtimePages = [];
     for (const page of pages) {
-      if (!page.currentVersionId || !page.xmlKey) {
+      if (!page.currentVersionId || !versionById.has(page.currentVersionId)) {
         continue;
       }
       const version = versionById.get(page.currentVersionId);
@@ -131,7 +132,7 @@ export class LowcodeService {
       runtimePages.push({
         name: page.name,
         key: page.key,
-        xmlUrl: this.oss.getPublicUrl(page.xmlKey),
+        documentUrl: this.runtimeDocumentUrl(project.key, page.key),
         langs,
       });
     }
@@ -142,14 +143,39 @@ export class LowcodeService {
     };
   }
 
+  async getRuntimePage(projectKey: string, pageKey: string): Promise<PageXmlDocument> {
+    if (!/^[a-z][a-z0-9-]{0,63}$/.test(projectKey) || !/^[a-z][a-z0-9-]{0,63}$/.test(pageKey)) {
+      throw new NotFoundException();
+    }
+    const project = await this.mongo.getProjectByKey(projectKey);
+    if (!project) {
+      throw new NotFoundException();
+    }
+    const page = project.pages.find((item) => item.key === pageKey);
+    if (!page?.currentVersionId) {
+      throw new NotFoundException();
+    }
+    const version = await this.mongo.getPage(page.currentVersionId);
+    if (!version || version.pageId !== page.id) {
+      throw new NotFoundException();
+    }
+    return this.contentOf(version);
+  }
+
   async createProject(input: { name: string; key: string; description?: string }): Promise<ProjectDto> {
-    const project = this.projects.create({
+    const now = new Date();
+    const project: ProjectRecord = {
+      _id: randomUUID(),
       name: input.name.trim(),
       key: input.key,
       description: input.description?.trim() ?? '',
-    });
+      createdAt: now,
+      updatedAt: now,
+      pages: [],
+    };
     try {
-      return this.toProjectDto(await this.projects.save(project));
+      await this.mongo.insertProject(project);
+      return this.toProjectDto(project);
     } catch (error) {
       this.rethrowUnique(error);
     }
@@ -160,6 +186,7 @@ export class LowcodeService {
     input: { name?: string; key?: string; description?: string },
   ): Promise<ProjectDto> {
     const project = await this.requireProject(id);
+    const previousKey = project.key;
     if (input.name != null) {
       project.name = input.name.trim();
     }
@@ -169,68 +196,66 @@ export class LowcodeService {
     if (input.description != null) {
       project.description = input.description.trim();
     }
+    project.updatedAt = new Date();
     try {
-      return this.toProjectDto(await this.projects.save(project));
+      await this.mongo.saveProject(project);
     } catch (error) {
       this.rethrowUnique(error);
     }
+    if (project.key !== previousKey) {
+      await this.mongo.renameLangProject(project._id, project.key);
+      const versions = await this.mongo.listProjectVersions(project._id);
+      for (const version of versions) {
+        await this.mongo.putPage({ ...this.versionBody(version), projectKey: project.key });
+      }
+    }
+    return this.toProjectDto(project);
   }
 
   async deleteProject(id: string): Promise<void> {
-    const project = await this.projects.findOne({
-      where: { id },
-      relations: { pages: { versions: true } },
+    const project = await this.requireProject(id);
+    const versions = await this.mongo.listProjectVersions(project._id);
+    const langKeys = ((await this.mongo.getLang(project._id))?.langs ?? []).map((row) => row.key);
+    const pageById = new Map(project.pages.map((page) => [page.id, page]));
+    const keys = versions.flatMap((version) => {
+      const page = pageById.get(version.pageId);
+      if (!page) {
+        return [];
+      }
+      return langKeys.map((langKey) => this.langObjectKey(project.key, page.key, version.versionNo, langKey));
     });
-    if (!project) {
-      throw new NotFoundException();
-    }
-    const langKeys = (await this.langs.find({ where: { projectId: project.id } })).map((row) => row.key);
-    const keys = (project.pages ?? []).flatMap((page) => [
-      page.xmlKey,
-      ...(page.versions ?? []).flatMap((version) => [
-        version.xmlKey,
-        ...langKeys.map((langKey) => this.langObjectKey(project.key, page.key, version.versionNo, langKey)),
-      ]),
-    ]).filter(Boolean);
-    await this.projects.remove(project);
+    await this.mongo.deleteByProject(project._id);
     const assetKeys = (await this.oss.listObjects(this.assetRoot(project.key))).map((item) => item.key);
     await this.deleteOssKeys([...new Set([...keys, ...assetKeys])]);
   }
 
   async getLangs(projectId: string): Promise<ProjectLangCatalogDto> {
     await this.requireProject(projectId);
-    return this.readLangCatalog(projectId);
+    return this.catalogOf(await this.mongo.getLang(projectId));
   }
 
   async putLangs(projectId: string, input: { langs: unknown[]; groups: unknown[] }): Promise<ProjectLangCatalogDto> {
-    await this.requireProject(projectId);
+    const project = await this.requireProject(projectId);
     const catalog = this.parseLangCatalog(input);
-    const langRows = catalog.langs.map((lang, index) =>
-      this.langs.create({
-        projectId,
-        key: lang.key,
-        name: lang.name,
-        dir: lang.dir,
-        sortOrder: index,
-      }),
-    );
-    const valueRows: ProjectLangValue[] = [];
+    const langs = catalog.langs.map((lang, index) => ({
+      key: lang.key,
+      name: lang.name,
+      dir: lang.dir,
+      sortOrder: index,
+    }));
+    const valueRows: ProjectLangValueRecord[] = [];
     for (const [groupIndex, group] of catalog.groups.entries()) {
-      const filled = group.entries.flatMap((entry, entryIndex) => {
-        const cells = Object.entries(entry.values)
+      const filled = group.entries.flatMap((entry, entryIndex) =>
+        Object.entries(entry.values)
           .filter(([, text]) => text)
-          .map(([langKey, value]) =>
-            this.langValues.create({
-              projectId,
-              groupKey: group.key,
-              entryKey: entry.key,
-              langKey,
-              value,
-              sortOrder: groupIndex * 10000 + entryIndex,
-            }),
-          );
-        return cells;
-      });
+          .map(([langKey, value]) => ({
+            groupKey: group.key,
+            entryKey: entry.key,
+            langKey,
+            value,
+            sortOrder: groupIndex * 10000 + entryIndex,
+          })),
+      );
       if (filled.length > 0) {
         valueRows.push(...filled);
         continue;
@@ -238,44 +263,34 @@ export class LowcodeService {
       if (catalog.langs.length === 0) {
         continue;
       }
-      const entryKey = group.entries[0]?.key ?? nextPlaceholderEntryKey([]);
-      valueRows.push(
-        this.langValues.create({
-          projectId,
-          groupKey: group.key,
-          entryKey,
-          langKey: catalog.langs[0].key,
-          value: '',
-          sortOrder: groupIndex * 10000,
-        }),
-      );
+      valueRows.push({
+        groupKey: group.key,
+        entryKey: group.entries[0]?.key ?? nextPlaceholderEntryKey([]),
+        langKey: catalog.langs[0].key,
+        value: '',
+        sortOrder: groupIndex * 10000,
+      });
     }
-    await this.dataSource.transaction(async (em) => {
-      await em.delete(ProjectLangValue, { projectId });
-      await em.delete(ProjectLang, { projectId });
-      if (langRows.length > 0) {
-        await em.save(ProjectLang, langRows);
-      }
-      if (valueRows.length > 0) {
-        await em.save(ProjectLangValue, valueRows);
-      }
-    });
-    return this.readLangCatalog(projectId);
+    const record: LangRecord = {
+      _id: project._id,
+      projectKey: project.key,
+      langs,
+      langValues: valueRows,
+      updatedAt: new Date(),
+    };
+    await this.mongo.saveLang(record);
+    await this.syncCurrentLangSnapshots(project);
+    return this.catalogOf(record);
   }
 
   async listPages(projectId: string): Promise<ProjectPageDto[]> {
-    await this.requireProject(projectId);
-    const rows = await this.pages.find({
-      where: { projectId },
-      order: { createdAt: 'ASC' },
-    });
-    return rows.map((row) => this.toPageDto(row));
+    const project = await this.requireProject(projectId);
+    return this.sortedPages(project).map((row) => this.toPageDto(project._id, row));
   }
 
   async getPage(projectId: string, pageId: string): Promise<ProjectPageDto> {
-    const page = await this.requirePage(projectId, pageId);
-    const xml = page.xmlKey ? await this.readXml(page.xmlKey) : EMPTY_PAGE_XML;
-    return this.toPageDto(page, xml);
+    const { project, page } = await this.requirePage(projectId, pageId);
+    return this.toPageDto(project._id, page);
   }
 
   async createPage(
@@ -283,36 +298,45 @@ export class LowcodeService {
     input: { name: string; key: string; description?: string },
   ): Promise<ProjectPageDto> {
     const project = await this.requireProject(projectId);
-    const xml = EMPTY_PAGE_XML;
-    this.assertPageXml(xml);
-    const xmlKey = this.xmlObjectKey(project.key, input.key, 1);
-    const stored = await this.oss.putObject(xmlKey, Buffer.from(xml, 'utf8'), 'application/xml');
-
+    if (project.pages.some((page) => page.key === input.key)) {
+      throw new ConflictException('key already exists');
+    }
+    const document = this.normalizeDocument(EMPTY_PAGE_DOCUMENT);
+    const now = new Date();
+    const page: ProjectPageRecord = {
+      id: randomUUID(),
+      name: input.name.trim(),
+      key: input.key,
+      description: input.description?.trim() ?? '',
+      currentVersionId: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const version: PageVersionRecord = {
+      _id: randomUUID(),
+      projectId: project._id,
+      projectKey: project.key,
+      pageId: page.id,
+      pageKey: page.key,
+      versionNo: 1,
+      description: '',
+      createdAt: now,
+      updatedAt: now,
+      ...this.contentOf(document),
+    };
+    project.pages.push(page);
+    project.updatedAt = now;
     try {
-      const page = await this.pages.save(
-        this.pages.create({
-          projectId: project.id,
-          name: input.name.trim(),
-          key: input.key,
-          description: input.description?.trim() ?? '',
-          currentVersionId: null,
-          xmlKey: '',
-          xmlUrl: '',
-        }),
-      );
-      await this.versions.save(
-        this.versions.create({
-          pageId: page.id,
-          versionNo: 1,
-          status: 'draft',
-          description: '',
-          xmlKey: stored.key,
-          xmlUrl: stored.url,
-        }),
-      );
-      return this.toPageDto(page);
+      await this.mongo.saveProject(project);
+      page.currentVersionId = version._id;
+      await this.mongo.putPage(this.versionBody(version));
+      await this.mongo.saveProject(project);
+      await this.writeLangSnapshots(project, page, version);
+      return this.toPageDto(project._id, page);
     } catch (error) {
-      await this.oss.deleteObject(stored.key).catch(() => undefined);
+      project.pages = project.pages.filter((item) => item.id !== page.id);
+      await this.mongo.saveProject(project).catch(() => undefined);
+      await this.mongo.deletePage(version._id).catch(() => undefined);
       this.rethrowUnique(error);
     }
   }
@@ -322,153 +346,380 @@ export class LowcodeService {
     pageId: string,
     input: { name?: string; key?: string; description?: string },
   ): Promise<ProjectPageDto> {
-    const page = await this.requirePage(projectId, pageId);
+    const { project, page } = await this.requirePage(projectId, pageId);
+    const previousKey = page.key;
     if (input.name != null) {
       page.name = input.name.trim();
     }
     if (input.key != null) {
+      if (project.pages.some((item) => item.id !== page.id && item.key === input.key)) {
+        throw new ConflictException('key already exists');
+      }
       page.key = input.key;
     }
     if (input.description != null) {
       page.description = input.description.trim();
     }
-    try {
-      return this.toPageDto(await this.pages.save(page));
-    } catch (error) {
-      this.rethrowUnique(error);
+    const now = new Date();
+    page.updatedAt = now;
+    project.updatedAt = now;
+    await this.mongo.saveProject(project);
+    if (page.key !== previousKey) {
+      const versions = await this.mongo.listPageVersions(page.id);
+      for (const version of versions) {
+        await this.mongo.putPage({ ...this.versionBody(version), pageKey: page.key });
+      }
     }
+    return this.toPageDto(project._id, page);
   }
 
   async deletePage(projectId: string, pageId: string): Promise<void> {
-    const page = await this.pages.findOne({
-      where: { id: pageId, projectId },
-      relations: { versions: true },
-    });
-    if (!page) {
-      throw new NotFoundException();
+    const { project, page } = await this.requirePage(projectId, pageId);
+    const versions = await this.mongo.listPageVersions(page.id);
+    for (const version of versions) {
+      await this.syncMethodUses(projectId, this.contentOf(version), EMPTY_PAGE_DOCUMENT);
     }
-    const project = await this.requireProject(projectId);
-    const langKeys = (await this.langs.find({ where: { projectId } })).map((row) => row.key);
-    const keys = [
-      page.xmlKey,
-      ...(page.versions ?? []).flatMap((version) => [
-        version.xmlKey,
-        ...langKeys.map((langKey) => this.langObjectKey(project.key, page.key, version.versionNo, langKey)),
-      ]),
-    ].filter(Boolean);
-    await this.pages.remove(page);
+    await this.mongo.deletePagesByPage(page.id);
+    const langKeys = ((await this.mongo.getLang(project._id))?.langs ?? []).map((lang) => lang.key);
+    const keys = versions.flatMap((version) =>
+      langKeys.map((langKey) => this.langObjectKey(project.key, page.key, version.versionNo, langKey)),
+    );
+    project.pages = project.pages.filter((item) => item.id !== page.id);
+    project.updatedAt = new Date();
+    await this.mongo.saveProject(project);
     await this.deleteOssKeys([...new Set(keys)]);
   }
 
   async listVersions(projectId: string, pageId: string): Promise<ProjectPageVersionDto[]> {
-    const page = await this.requirePage(projectId, pageId);
-    const rows = await this.versions.find({
-      where: { pageId },
-      order: { versionNo: 'ASC' },
-    });
-    const result: ProjectPageVersionDto[] = [];
-    for (const row of rows) {
-      result.push(this.toVersionDto(row, page.currentVersionId, await this.readXml(row.xmlKey)));
-    }
-    return result;
+    await this.requirePage(projectId, pageId);
+    const rows = await this.mongo.listPageVersions(pageId);
+    return rows.map((row) => this.toVersionDto(row));
+  }
+
+  async listVersionMeta(projectId: string, pageId: string): Promise<ProjectPageVersionMetaDto[]> {
+    await this.requirePage(projectId, pageId);
+    const rows = await this.mongo.listPageVersionStamps(pageId);
+    return rows.map((row) => this.toVersionMeta(row));
   }
 
   async getVersion(projectId: string, pageId: string, versionId: string): Promise<ProjectPageVersionDto> {
-    const page = await this.requirePage(projectId, pageId);
     const version = await this.requireVersion(projectId, pageId, versionId);
-    return this.toVersionDto(version, page.currentVersionId, await this.readXml(version.xmlKey));
+    return this.toVersionDto(version);
   }
 
   async createVersion(
     projectId: string,
     pageId: string,
-    input: { xml: string; description?: string },
+    input: { document: object; description?: string },
   ): Promise<ProjectPageVersionDto> {
-    const page = await this.requirePage(projectId, pageId);
-    const project = await this.requireProject(projectId);
-    this.assertPageXml(input.xml);
-    const max = await this.versions
-      .createQueryBuilder('version')
-      .select('MAX(version.versionNo)', 'max')
-      .where('version.pageId = :pageId', { pageId: page.id })
-      .getRawOne<{ max: number | string | null }>();
-    const versionNo = Number(max?.max ?? 0) + 1;
-    const xmlKey = this.xmlObjectKey(project.key, page.key, versionNo);
-    const stored = await this.oss.putObject(xmlKey, Buffer.from(input.xml, 'utf8'), 'application/xml');
+    const { project, page } = await this.requirePage(projectId, pageId);
+    const document = this.normalizeDocument(input.document);
+    const existing = await this.mongo.listPageVersions(page.id);
+    const versionNo = existing.reduce((max, version) => Math.max(max, version.versionNo), 0) + 1;
+    const now = new Date();
+    let saved: PageVersionRecord | undefined;
     try {
-      const version = await this.versions.save(
-        this.versions.create({
-          pageId: page.id,
-          versionNo,
-          status: 'draft',
-          description: input.description?.trim() ?? '',
-          xmlKey: stored.key,
-          xmlUrl: stored.url,
-        }),
-      );
-      return this.toVersionDto(version, page.currentVersionId, input.xml);
+      saved = await this.mongo.putPage({
+        _id: randomUUID(),
+        projectId: project._id,
+        projectKey: project.key,
+        pageId: page.id,
+        pageKey: page.key,
+        versionNo,
+        description: input.description?.trim() ?? '',
+        createdAt: now,
+        ...this.contentOf(document),
+      });
     } catch (error) {
-      await this.oss.deleteObject(stored.key).catch(() => undefined);
+      if (saved) {
+        await this.mongo.deletePage(saved._id).catch(() => undefined);
+      }
       this.rethrowUnique(error);
     }
+    await this.syncMethodUses(projectId, EMPTY_PAGE_DOCUMENT, document);
+    if (!page.currentVersionId) {
+      page.currentVersionId = saved._id;
+      page.updatedAt = now;
+      project.updatedAt = now;
+      await this.mongo.saveProject(project);
+      await this.writeLangSnapshots(project, page, saved);
+    }
+    return this.toVersionDto(saved);
   }
 
   async updateVersion(
     projectId: string,
     pageId: string,
     versionId: string,
-    input: { xml?: string; description?: string },
+    input: { document?: object; description?: string },
   ): Promise<ProjectPageVersionDto> {
-    const page = await this.requirePage(projectId, pageId);
+    const { project, page } = await this.requirePage(projectId, pageId);
     const version = await this.requireVersion(projectId, pageId, versionId);
-    if (version.status !== 'draft') {
-      throw new ConflictException('Published versions cannot be edited');
-    }
     if (input.description != null) {
       version.description = input.description.trim();
     }
-    let xml = await this.readXml(version.xmlKey);
-    if (input.xml != null) {
-      this.assertPageXml(input.xml);
-      const stored = await this.oss.putObject(
-        version.xmlKey,
-        Buffer.from(input.xml, 'utf8'),
-        'application/xml',
-      );
-      version.xmlKey = stored.key;
-      version.xmlUrl = stored.url;
-      xml = input.xml;
+    if (input.document != null) {
+      const next = this.normalizeDocument(input.document);
+      const previous = this.contentOf(version);
+      version.widgets = next.widgets;
+      if (next.style) {
+        version.style = next.style;
+      } else {
+        delete version.style;
+      }
+      if (next.data && next.data.length > 0) {
+        version.data = next.data;
+      } else {
+        delete version.data;
+      }
+      if (next.events) {
+        version.events = next.events;
+      } else {
+        delete version.events;
+      }
+      if (next.methods && next.methods.length > 0) {
+        version.methods = next.methods;
+      } else {
+        delete version.methods;
+      }
+      if (next.props && next.props.length > 0) {
+        version.props = next.props;
+      } else {
+        delete version.props;
+      }
+      if (next.emits && next.emits.length > 0) {
+        version.emits = next.emits;
+      } else {
+        delete version.emits;
+      }
+      await this.syncMethodUses(projectId, previous, next);
     }
-    await this.versions.save(version);
-    return this.toVersionDto(version, page.currentVersionId, xml);
-  }
-
-  async publishVersion(projectId: string, pageId: string, versionId: string): Promise<ProjectPageVersionDto> {
-    const project = await this.requireProject(projectId);
-    const page = await this.requirePage(projectId, pageId);
-    const version = await this.requireVersion(projectId, pageId, versionId);
-    if (version.status === 'draft') {
-      version.status = 'published';
-      await this.versions.save(version);
+    const saved = await this.mongo.putPage(this.versionBody(version));
+    if (!page.currentVersionId || page.currentVersionId === version._id) {
+      page.currentVersionId = version._id;
+      const now = new Date();
+      page.updatedAt = now;
+      project.updatedAt = now;
+      await this.mongo.saveProject(project);
+      await this.writeLangSnapshots(project, page, saved);
     }
-    await this.writeLangSnapshots(project, page, version);
-    return this.toVersionDto(version, page.currentVersionId, await this.readXml(version.xmlKey));
+    return this.toVersionDto(saved);
   }
 
   async deleteVersion(projectId: string, pageId: string, versionId: string): Promise<void> {
-    const page = await this.requirePage(projectId, pageId);
+    const { project, page } = await this.requirePage(projectId, pageId);
     const version = await this.requireVersion(projectId, pageId, versionId);
-    if (page.currentVersionId === version.id) {
-      throw new ConflictException('Cannot delete the version in use');
-    }
-    const project = await this.requireProject(projectId);
-    const xmlKey = version.xmlKey;
-    const langKeys = (await this.langs.find({ where: { projectId } })).map((row) => row.key);
-    const langObjects = langKeys.map((langKey) =>
-      this.langObjectKey(project.key, page.key, version.versionNo, langKey),
+    const wasCurrent = page.currentVersionId === version._id;
+    const langObjects = ((await this.mongo.getLang(project._id))?.langs ?? []).map((lang) =>
+      this.langObjectKey(project.key, page.key, version.versionNo, lang.key),
     );
-    await this.versions.remove(version);
-    await this.deleteOssKeys([xmlKey, ...langObjects]);
+    await this.mongo.deletePage(versionId);
+    if (wasCurrent) {
+      const rest = (await this.mongo.listPageVersions(page.id)).sort((a, b) => b.versionNo - a.versionNo);
+      page.currentVersionId = rest[0]?._id ?? null;
+      page.updatedAt = new Date();
+      project.updatedAt = new Date();
+      await this.mongo.saveProject(project);
+    }
+    await this.syncMethodUses(projectId, this.contentOf(version), EMPTY_PAGE_DOCUMENT);
+    await this.deleteOssKeys(langObjects);
+  }
+
+  async listComponents(projectId: string): Promise<ProjectComponentDto[]> {
+    const project = await this.requireProject(projectId);
+    const rows = await this.mongo.listComponents(project._id);
+    return rows.map((row) => this.toComponentDto(row));
+  }
+
+  async getComponent(projectId: string, componentId: string): Promise<ProjectComponentDto> {
+    const component = await this.requireComponent(projectId, componentId);
+    return this.toComponentDto(component);
+  }
+
+  async createComponent(
+    projectId: string,
+    input: { name: string; key: string; description?: string },
+  ): Promise<ProjectComponentDto> {
+    const project = await this.requireProject(projectId);
+    const existing = await this.mongo.listComponents(project._id);
+    if (existing.some((item) => item.key === input.key)) {
+      throw new ConflictException('key already exists');
+    }
+    const document = this.normalizeDocument(EMPTY_PAGE_DOCUMENT);
+    const now = new Date();
+    const component: ComponentRecord = {
+      _id: randomUUID(),
+      projectId: project._id,
+      projectKey: project.key,
+      name: input.name.trim(),
+      key: input.key,
+      description: input.description?.trim() ?? '',
+      currentVersionId: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const version: ComponentVersionRecord = {
+      _id: randomUUID(),
+      projectId: project._id,
+      projectKey: project.key,
+      componentId: component._id,
+      componentKey: component.key,
+      versionNo: 1,
+      description: '',
+      createdAt: now,
+      updatedAt: now,
+      ...this.contentOf(document),
+    };
+    try {
+      component.currentVersionId = version._id;
+      await this.mongo.saveComponent(component);
+      await this.mongo.putComponentVersion(this.componentVersionBody(version));
+      return this.toComponentDto(component);
+    } catch (error) {
+      await this.mongo.deleteComponent(component._id).catch(() => undefined);
+      await this.mongo.deleteComponentVersion(version._id).catch(() => undefined);
+      this.rethrowUnique(error);
+    }
+  }
+
+  async updateComponent(
+    projectId: string,
+    componentId: string,
+    input: { name?: string; key?: string; description?: string },
+  ): Promise<ProjectComponentDto> {
+    const component = await this.requireComponent(projectId, componentId);
+    const previousKey = component.key;
+    if (input.name != null) {
+      component.name = input.name.trim();
+    }
+    if (input.key != null) {
+      const existing = await this.mongo.listComponents(component.projectId);
+      if (existing.some((item) => item._id !== component._id && item.key === input.key)) {
+        throw new ConflictException('key already exists');
+      }
+      component.key = input.key;
+    }
+    if (input.description != null) {
+      component.description = input.description.trim();
+    }
+    component.updatedAt = new Date();
+    await this.mongo.saveComponent(component);
+    if (component.key !== previousKey) {
+      const versions = await this.mongo.listComponentVersions(component._id);
+      for (const version of versions) {
+        await this.mongo.putComponentVersion({ ...this.componentVersionBody(version), componentKey: component.key });
+      }
+    }
+    return this.toComponentDto(component);
+  }
+
+  async deleteComponent(projectId: string, componentId: string): Promise<void> {
+    const component = await this.requireComponent(projectId, componentId);
+    const versions = await this.mongo.listComponentVersions(component._id);
+    for (const version of versions) {
+      await this.syncMethodUses(projectId, this.contentOf(version), EMPTY_PAGE_DOCUMENT);
+    }
+    await this.mongo.deleteComponentVersions(component._id);
+    await this.mongo.deleteComponent(component._id);
+  }
+
+  async listComponentVersions(projectId: string, componentId: string): Promise<ProjectPageVersionDto[]> {
+    await this.requireComponent(projectId, componentId);
+    const rows = await this.mongo.listComponentVersions(componentId);
+    return rows.map((row) => this.toComponentVersionDto(row));
+  }
+
+  async listComponentVersionMeta(projectId: string, componentId: string): Promise<ProjectPageVersionMetaDto[]> {
+    await this.requireComponent(projectId, componentId);
+    const rows = await this.mongo.listComponentVersionStamps(componentId);
+    return rows.map((row) => this.toVersionMeta(row, componentId));
+  }
+
+  async getComponentVersion(
+    projectId: string,
+    componentId: string,
+    versionId: string,
+  ): Promise<ProjectPageVersionDto> {
+    const version = await this.requireComponentVersion(projectId, componentId, versionId);
+    return this.toComponentVersionDto(version);
+  }
+
+  async createComponentVersion(
+    projectId: string,
+    componentId: string,
+    input: { document: object; description?: string },
+  ): Promise<ProjectPageVersionDto> {
+    const component = await this.requireComponent(projectId, componentId);
+    const document = this.normalizeDocument(input.document);
+    const existing = await this.mongo.listComponentVersions(component._id);
+    const versionNo = existing.reduce((max, version) => Math.max(max, version.versionNo), 0) + 1;
+    const now = new Date();
+    let saved: ComponentVersionRecord | undefined;
+    try {
+      saved = await this.mongo.putComponentVersion({
+        _id: randomUUID(),
+        projectId: component.projectId,
+        projectKey: component.projectKey,
+        componentId: component._id,
+        componentKey: component.key,
+        versionNo,
+        description: input.description?.trim() ?? '',
+        createdAt: now,
+        ...this.contentOf(document),
+      });
+    } catch (error) {
+      if (saved) {
+        await this.mongo.deleteComponentVersion(saved._id).catch(() => undefined);
+      }
+      this.rethrowUnique(error);
+    }
+    await this.syncMethodUses(projectId, EMPTY_PAGE_DOCUMENT, document);
+    if (!component.currentVersionId) {
+      component.currentVersionId = saved._id;
+      component.updatedAt = now;
+      await this.mongo.saveComponent(component);
+    }
+    return this.toComponentVersionDto(saved);
+  }
+
+  async updateComponentVersion(
+    projectId: string,
+    componentId: string,
+    versionId: string,
+    input: { document?: object; description?: string },
+  ): Promise<ProjectPageVersionDto> {
+    const component = await this.requireComponent(projectId, componentId);
+    const version = await this.requireComponentVersion(projectId, componentId, versionId);
+    if (input.description != null) {
+      version.description = input.description.trim();
+    }
+    if (input.document != null) {
+      const next = this.normalizeDocument(input.document);
+      const previous = this.contentOf(version);
+      this.applyDocument(version, next);
+      await this.syncMethodUses(projectId, previous, next);
+    }
+    const saved = await this.mongo.putComponentVersion(this.componentVersionBody(version));
+    if (!component.currentVersionId || component.currentVersionId === version._id) {
+      component.currentVersionId = version._id;
+      component.updatedAt = new Date();
+      await this.mongo.saveComponent(component);
+    }
+    return this.toComponentVersionDto(saved);
+  }
+
+  async deleteComponentVersion(projectId: string, componentId: string, versionId: string): Promise<void> {
+    const component = await this.requireComponent(projectId, componentId);
+    const version = await this.requireComponentVersion(projectId, componentId, versionId);
+    const wasCurrent = component.currentVersionId === version._id;
+    await this.mongo.deleteComponentVersion(versionId);
+    if (wasCurrent) {
+      const rest = (await this.mongo.listComponentVersions(component._id)).sort((a, b) => b.versionNo - a.versionNo);
+      component.currentVersionId = rest[0]?._id ?? null;
+      component.updatedAt = new Date();
+      await this.mongo.saveComponent(component);
+    }
+    await this.syncMethodUses(projectId, this.contentOf(version), EMPTY_PAGE_DOCUMENT);
   }
 
   async listAssetGroups(projectId: string): Promise<ProjectAssetGroupDto[]> {
@@ -682,14 +933,37 @@ export class LowcodeService {
     await this.oss.deleteObject(this.iconGroupPrefix(project.key, group) + name);
   }
 
-  async getWidgetEvent(projectId: string, eventId: string): Promise<WidgetEventScriptDto> {
-    const project = await this.requireProject(projectId);
-    this.assertEventId(eventId);
-    const object = await this.oss.getObject(this.eventObjectKey(project.key, eventId));
-    if (!object) {
+  async getMethodCode(projectId: string, methodId: string): Promise<MethodCodeDto> {
+    await this.requireProject(projectId);
+    this.assertMethodId(methodId);
+    const current = await this.mongo.getFunction(projectId, methodId);
+    if (typeof current?.code !== 'string') {
       throw new NotFoundException();
     }
-    return { id: eventId, source: object.body.toString('utf8') };
+    return { id: methodId, code: current.code, forked: false };
+  }
+
+  async putMethodCode(projectId: string, methodId: string, code: string): Promise<MethodCodeDto> {
+    const project = await this.requireProject(projectId);
+    this.assertMethodId(methodId);
+    const current = await this.mongo.getFunction(projectId, methodId);
+    if ((current?.uses ?? 0) > 1) {
+      const nextId = randomUUID();
+      await this.mongo.putFunctionCode(projectId, project.key, nextId, code);
+      return { id: nextId, code, forked: true };
+    }
+    await this.mongo.putFunctionCode(projectId, project.key, methodId, code);
+    return { id: methodId, code, forked: false };
+  }
+
+  async getWidgetEvent(projectId: string, eventId: string): Promise<WidgetEventScriptDto> {
+    await this.requireProject(projectId);
+    this.assertEventId(eventId);
+    const current = await this.mongo.getEvent(projectId, eventId);
+    if (!current) {
+      throw new NotFoundException();
+    }
+    return { id: eventId, source: current.source, forked: false };
   }
 
   async putWidgetEvent(projectId: string, eventId: string, source: string): Promise<WidgetEventScriptDto> {
@@ -698,39 +972,29 @@ export class LowcodeService {
     if (!parseEventSource(source)) {
       throw new BadRequestException('Invalid event script');
     }
-    await this.oss.putObject(this.eventObjectKey(project.key, eventId), Buffer.from(source, 'utf8'), 'text/typescript');
-    return { id: eventId, source };
+    const current = await this.mongo.getEvent(projectId, eventId);
+    if ((current?.uses ?? 0) > 1) {
+      const nextId = randomUUID();
+      await this.mongo.putEvent(projectId, project.key, nextId, source);
+      return { id: nextId, source, forked: true };
+    }
+    await this.mongo.putEvent(projectId, project.key, eventId, source);
+    return { id: eventId, source, forked: false };
   }
 
   async deleteWidgetEvent(projectId: string, eventId: string): Promise<void> {
-    const project = await this.requireProject(projectId);
+    await this.requireProject(projectId);
     this.assertEventId(eventId);
-    await this.oss.deleteObject(this.eventObjectKey(project.key, eventId));
-  }
-
-  async activateVersion(projectId: string, pageId: string, versionId: string): Promise<ProjectPageDto> {
-    const page = await this.requirePage(projectId, pageId);
-    const version = await this.requireVersion(projectId, pageId, versionId);
-    if (version.status !== 'published') {
-      throw new ConflictException('Only published versions can be used');
+    const current = await this.mongo.getEvent(projectId, eventId);
+    if (!current || (current.uses ?? 0) > 0) {
+      return;
     }
-    page.currentVersionId = version.id;
-    page.xmlKey = version.xmlKey;
-    page.xmlUrl = version.xmlUrl;
-    await this.pages.save(page);
-    const xml = await this.readXml(page.xmlKey);
-    return this.toPageDto(page, xml);
+    await this.mongo.deleteEvent(projectId, eventId);
   }
 
-  private async readLangCatalog(projectId: string): Promise<ProjectLangCatalogDto> {
-    const langRows = await this.langs.find({
-      where: { projectId },
-      order: { sortOrder: 'ASC' },
-    });
-    const valueRows = await this.langValues.find({
-      where: { projectId },
-      order: { sortOrder: 'ASC' },
-    });
+  private catalogOf(record: LangRecord | null): ProjectLangCatalogDto {
+    const langRows = [...(record?.langs ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
+    const valueRows = [...(record?.langValues ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
     const langs: ProjectLangDto[] = langRows.map((row) => ({
       key: row.key,
       name: row.name,
@@ -838,8 +1102,20 @@ export class LowcodeService {
     return { langs, groups };
   }
 
-  private async writeLangSnapshots(project: Project, page: ProjectPage, version: ProjectPageVersion) {
-    const catalog = await this.readLangCatalog(project.id);
+  private async syncCurrentLangSnapshots(project: ProjectRecord) {
+    for (const page of project.pages) {
+      if (!page.currentVersionId) {
+        continue;
+      }
+      const version = await this.mongo.getPage(page.currentVersionId);
+      if (version && version.pageId === page.id) {
+        await this.writeLangSnapshots(project, page, version);
+      }
+    }
+  }
+
+  private async writeLangSnapshots(project: ProjectRecord, page: ProjectPageRecord, version: PageVersionRecord) {
+    const catalog = this.catalogOf(await this.mongo.getLang(project._id));
     if (catalog.langs.length === 0) {
       return;
     }
@@ -871,38 +1147,133 @@ export class LowcodeService {
     return `lowcode/${projectKey}/lang/${pageKey}-v${versionNo}-${langKey}.json`;
   }
 
-  private async requireProject(id: string): Promise<Project> {
-    const project = await this.projects.findOne({ where: { id } });
+  private async requireProject(id: string): Promise<ProjectRecord> {
+    const project = await this.mongo.getProject(id);
     if (!project) {
       throw new NotFoundException();
     }
+    project.pages ??= [];
     return project;
   }
 
-  private async requirePage(projectId: string, pageId: string): Promise<ProjectPage> {
-    const page = await this.pages.findOne({ where: { id: pageId, projectId } });
+  private async requirePage(
+    projectId: string,
+    pageId: string,
+  ): Promise<{ project: ProjectRecord; page: ProjectPageRecord }> {
+    const project = await this.requireProject(projectId);
+    const page = project.pages.find((item) => item.id === pageId);
     if (!page) {
       throw new NotFoundException();
     }
-    return page;
+    return { project, page };
   }
 
-  private async requireVersion(
+  private async requireComponent(projectId: string, componentId: string): Promise<ComponentRecord> {
+    await this.requireProject(projectId);
+    const component = await this.mongo.getComponent(componentId);
+    if (!component || component.projectId !== projectId) {
+      throw new NotFoundException('Component not found');
+    }
+    return component;
+  }
+
+  private async requireComponentVersion(
     projectId: string,
-    pageId: string,
+    componentId: string,
     versionId: string,
-  ): Promise<ProjectPageVersion> {
+  ): Promise<ComponentVersionRecord> {
+    await this.requireComponent(projectId, componentId);
+    const version = await this.mongo.getComponentVersion(versionId);
+    if (!version || version.projectId !== projectId || version.componentId !== componentId) {
+      throw new NotFoundException('Component version not found');
+    }
+    return version;
+  }
+
+  private async requireVersion(projectId: string, pageId: string, versionId: string): Promise<PageVersionRecord> {
     await this.requirePage(projectId, pageId);
-    const version = await this.versions.findOne({ where: { id: versionId, pageId } });
-    if (!version) {
+    const version = await this.mongo.getPage(versionId);
+    if (!version || version.pageId !== pageId || version.projectId !== projectId) {
       throw new NotFoundException();
     }
     return version;
   }
 
-  private assertPageXml(xml: string) {
+  private sortedPages(project: ProjectRecord): ProjectPageRecord[] {
+    return [...project.pages].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  }
+
+  private versionBody(version: PageVersionRecord): Omit<PageVersionRecord, 'updatedAt'> {
+    return {
+      _id: version._id,
+      projectId: version.projectId,
+      projectKey: version.projectKey,
+      pageId: version.pageId,
+      pageKey: version.pageKey,
+      versionNo: version.versionNo,
+      description: version.description,
+      createdAt: version.createdAt,
+      widgets: version.widgets,
+      ...(version.style ? { style: version.style } : {}),
+      ...(version.data && version.data.length > 0 ? { data: version.data } : {}),
+      ...(version.events ? { events: version.events } : {}),
+      ...(version.methods && version.methods.length > 0 ? { methods: version.methods } : {}),
+      ...(version.props && version.props.length > 0 ? { props: version.props } : {}),
+      ...(version.emits && version.emits.length > 0 ? { emits: version.emits } : {}),
+    };
+  }
+
+  private componentVersionBody(version: ComponentVersionRecord): Omit<ComponentVersionRecord, 'updatedAt'> {
+    return {
+      _id: version._id,
+      projectId: version.projectId,
+      projectKey: version.projectKey,
+      componentId: version.componentId,
+      componentKey: version.componentKey,
+      versionNo: version.versionNo,
+      description: version.description,
+      createdAt: version.createdAt,
+      ...this.contentOf(version),
+    };
+  }
+
+  private applyDocument(version: PageXmlDocument, next: PageXmlDocument) {
+    version.widgets = next.widgets;
+    if (next.style) {
+      version.style = next.style;
+    } else {
+      delete version.style;
+    }
+    if (next.data && next.data.length > 0) {
+      version.data = next.data;
+    } else {
+      delete version.data;
+    }
+    if (next.events) {
+      version.events = next.events;
+    } else {
+      delete version.events;
+    }
+    if (next.methods && next.methods.length > 0) {
+      version.methods = next.methods;
+    } else {
+      delete version.methods;
+    }
+    if (next.props && next.props.length > 0) {
+      version.props = next.props;
+    } else {
+      delete version.props;
+    }
+    if (next.emits && next.emits.length > 0) {
+      version.emits = next.emits;
+    } else {
+      delete version.emits;
+    }
+  }
+
+  private normalizeDocument(input: unknown): PageXmlDocument {
     try {
-      parsePageXml(xml);
+      return normalizePageDocument(input);
     } catch (error) {
       if (error instanceof XmlParseError) {
         throw new BadRequestException(error.message);
@@ -911,18 +1282,62 @@ export class LowcodeService {
     }
   }
 
+  private contentOf(record: PageXmlDocument): PageXmlDocument {
+    return {
+      widgets: record.widgets,
+      ...(record.style ? { style: record.style } : {}),
+      ...(record.data && record.data.length > 0 ? { data: record.data } : {}),
+      ...(record.events ? { events: record.events } : {}),
+      ...(record.methods && record.methods.length > 0 ? { methods: record.methods } : {}),
+      ...(record.props && record.props.length > 0 ? { props: record.props } : {}),
+      ...(record.emits && record.emits.length > 0 ? { emits: record.emits } : {}),
+    };
+  }
+
+  private runtimeDocumentUrl(projectKey: string, pageKey: string): string {
+    const base = this.config.get<string>('APP_PUBLIC_URL', 'http://localhost:3000').replace(/\/$/, '');
+    return `${base}/api/runtime/projects/${encodeURIComponent(projectKey)}/pages/${encodeURIComponent(pageKey)}`;
+  }
+
   private assertEventId(eventId: string) {
     if (!isWidgetEventId(eventId)) {
       throw new BadRequestException('Invalid event id');
     }
   }
 
-  private eventObjectKey(projectKey: string, eventId: string) {
-    return `lowcode/${projectKey}/events/${eventId}.ts`;
+  private assertMethodId(methodId: string) {
+    if (!isPageMethodId(methodId)) {
+      throw new BadRequestException('Invalid method id');
+    }
   }
 
-  private xmlObjectKey(projectKey: string, pageKey: string, versionNo: number) {
-    return `lowcode/${projectKey}/${pageKey}/v${versionNo}.xml`;
+  /** 页面版本文档里方法、事件 id 的增减，就是这个版本对共享代码的引用增减。 */
+  private async syncMethodUses(projectId: string, previousPage: PageXmlDocument, nextPage: PageXmlDocument) {
+    await this.syncUses(documentMethodIds(previousPage), documentMethodIds(nextPage), (id, delta) =>
+      this.mongo.addFunctionUses(projectId, id, delta),
+    );
+    await this.syncUses(documentEventIds(previousPage), documentEventIds(nextPage), (id, delta) =>
+      this.mongo.addEventUses(projectId, id, delta),
+    );
+  }
+
+  private async syncUses(
+    previousIds: string[],
+    nextIds: string[],
+    apply: (id: string, delta: number) => Promise<number>,
+  ) {
+    const previous = new Set(previousIds);
+    const next = new Set(nextIds);
+    for (const id of previous) {
+      if (!next.has(id)) {
+        await apply(id, -1);
+      }
+    }
+    for (const id of next) {
+      if (!previous.has(id)) {
+        await apply(id, 1);
+      }
+    }
   }
 
   private assetRoot(projectKey: string) {
@@ -1003,14 +1418,6 @@ export class LowcodeService {
     return `${raw}${originalExt}`;
   }
 
-  private async readXml(key: string): Promise<string> {
-    const object = await this.oss.getObject(key);
-    if (!object) {
-      return EMPTY_PAGE_XML;
-    }
-    return object.body.toString('utf8');
-  }
-
   private async deleteOssKeys(keys: string[]) {
     for (const key of keys) {
       try {
@@ -1028,9 +1435,9 @@ export class LowcodeService {
     throw error;
   }
 
-  private toProjectDto(project: Project): ProjectDto {
+  private toProjectDto(project: ProjectRecord): ProjectDto {
     return {
-      id: project.id,
+      id: project._id,
       name: project.name,
       key: project.key,
       description: project.description,
@@ -1039,38 +1446,68 @@ export class LowcodeService {
     };
   }
 
-  private toPageDto(page: ProjectPage, xml?: string): ProjectPageDto {
+  private toPageDto(projectId: string, page: ProjectPageRecord): ProjectPageDto {
     return {
       id: page.id,
-      projectId: page.projectId,
+      projectId,
       name: page.name,
       key: page.key,
       description: page.description,
       currentVersionId: page.currentVersionId,
-      xmlKey: page.xmlKey,
-      xmlUrl: page.xmlKey ? this.oss.getPublicUrl(page.xmlKey) : page.xmlUrl,
-      xml,
       createdAt: toIso(page.createdAt),
       updatedAt: toIso(page.updatedAt),
     };
   }
 
-  private toVersionDto(
-    version: ProjectPageVersion,
-    currentVersionId: string | null,
-    xml?: string,
-  ): ProjectPageVersionDto {
+  private toComponentDto(component: ComponentRecord): ProjectComponentDto {
     return {
-      id: version.id,
+      id: component._id,
+      projectId: component.projectId,
+      name: component.name,
+      key: component.key,
+      description: component.description,
+      currentVersionId: component.currentVersionId,
+      createdAt: toIso(component.createdAt),
+      updatedAt: toIso(component.updatedAt),
+    };
+  }
+
+  private toComponentVersionDto(version: ComponentVersionRecord): ProjectPageVersionDto {
+    return {
+      id: version._id,
+      pageId: version.componentId,
+      versionNo: version.versionNo,
+      description: version.description ?? '',
+      document: this.contentOf(version),
+      createdAt: toIso(version.createdAt ?? version.updatedAt),
+      updatedAt: toIso(version.updatedAt),
+      lastModified: toIso(version.updatedAt),
+    };
+  }
+
+  private toVersionDto(version: PageVersionRecord): ProjectPageVersionDto {
+    return {
+      id: version._id,
       pageId: version.pageId,
       versionNo: version.versionNo,
-      status: version.id === currentVersionId && version.status === 'published' ? 'in_use' : version.status,
-      description: version.description,
-      xmlKey: version.xmlKey,
-      xmlUrl: version.xmlKey ? this.oss.getPublicUrl(version.xmlKey) : version.xmlUrl,
-      xml,
-      createdAt: toIso(version.createdAt),
+      description: version.description ?? '',
+      document: this.contentOf(version),
+      createdAt: toIso(version.createdAt ?? version.updatedAt),
       updatedAt: toIso(version.updatedAt),
+      lastModified: toIso(version.updatedAt),
+    };
+  }
+
+  private toVersionMeta(
+    version: { _id: string; versionNo: number; description?: string; updatedAt: Date; pageId?: string; componentId?: string },
+    pageId = version.pageId ?? version.componentId ?? '',
+  ): ProjectPageVersionMetaDto {
+    return {
+      id: version._id,
+      pageId,
+      versionNo: version.versionNo,
+      description: version.description ?? '',
+      lastModified: toIso(version.updatedAt),
     };
   }
 }

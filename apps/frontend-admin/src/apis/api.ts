@@ -15,13 +15,17 @@ import type {
   ProjectIconFileDto,
   ProjectIconGroupDto,
   ProjectLangCatalogDto,
+  ProjectComponentDto,
   ProjectPageDto,
   ProjectPageVersionDto,
+  ProjectPageVersionMetaDto,
   UpdateProjectAssetGroupInput,
   UpdateProjectIconGroupInput,
   UpdateProjectInput,
   UpdateProjectPageInput,
   UpdateProjectPageVersionInput,
+  MethodCodeDto,
+  PutMethodCodeInput,
   PutWidgetEventInput,
   WidgetEventScriptDto,
 } from '@vanstack/shared';
@@ -90,6 +94,10 @@ export const api = {
     request<void>(`/projects/${projectId}/pages/${pageId}`, { method: 'DELETE' }),
   listVersions: (projectId: string, pageId: string) =>
     request<ProjectPageVersionDto[]>(`/projects/${projectId}/pages/${pageId}/versions`),
+  listVersionMeta: (projectId: string, pageId: string) =>
+    request<ProjectPageVersionMetaDto[]>(`/projects/${projectId}/pages/${pageId}/versions/meta`),
+  getVersion: (projectId: string, pageId: string, versionId: string) =>
+    request<ProjectPageVersionDto>(`/projects/${projectId}/pages/${pageId}/versions/${versionId}`),
   createVersion: (projectId: string, pageId: string, body: CreateProjectPageVersionInput) =>
     request<ProjectPageVersionDto>(`/projects/${projectId}/pages/${pageId}/versions`, json('POST', body)),
   updateVersion: (
@@ -128,16 +136,62 @@ export const api = {
   },
   deleteVersion: (projectId: string, pageId: string, versionId: string) =>
     request<void>(`/projects/${projectId}/pages/${pageId}/versions/${versionId}`, { method: 'DELETE' }),
-  publishVersion: (projectId: string, pageId: string, versionId: string) =>
+  listComponents: (projectId: string) => request<ProjectComponentDto[]>(`/projects/${projectId}/components`),
+  createComponent: (projectId: string, body: CreateProjectPageInput) =>
+    request<ProjectComponentDto>(`/projects/${projectId}/components`, json('POST', body)),
+  getComponent: (projectId: string, componentId: string) =>
+    request<ProjectComponentDto>(`/projects/${projectId}/components/${componentId}`),
+  updateComponent: (projectId: string, componentId: string, body: UpdateProjectPageInput) =>
+    request<ProjectComponentDto>(`/projects/${projectId}/components/${componentId}`, json('PATCH', body)),
+  deleteComponent: (projectId: string, componentId: string) =>
+    request<void>(`/projects/${projectId}/components/${componentId}`, { method: 'DELETE' }),
+  listComponentVersions: (projectId: string, componentId: string) =>
+    request<ProjectPageVersionDto[]>(`/projects/${projectId}/components/${componentId}/versions`),
+  listComponentVersionMeta: (projectId: string, componentId: string) =>
+    request<ProjectPageVersionMetaDto[]>(`/projects/${projectId}/components/${componentId}/versions/meta`),
+  getComponentVersion: (projectId: string, componentId: string, versionId: string) =>
+    request<ProjectPageVersionDto>(`/projects/${projectId}/components/${componentId}/versions/${versionId}`),
+  createComponentVersion: (projectId: string, componentId: string, body: CreateProjectPageVersionInput) =>
     request<ProjectPageVersionDto>(
-      `/projects/${projectId}/pages/${pageId}/versions/${versionId}/publish`,
-      json('POST', {}),
+      `/projects/${projectId}/components/${componentId}/versions`,
+      json('POST', body),
     ),
-  activateVersion: (projectId: string, pageId: string, versionId: string) =>
-    request<ProjectPageDto>(
-      `/projects/${projectId}/pages/${pageId}/activate-version`,
-      json('POST', { versionId }),
+  updateComponentVersion: (
+    projectId: string,
+    componentId: string,
+    versionId: string,
+    body: UpdateProjectPageVersionInput,
+  ) =>
+    request<ProjectPageVersionDto>(
+      `/projects/${projectId}/components/${componentId}/versions/${versionId}`,
+      json('PATCH', body),
     ),
+  updateComponentVersionKeepalive: (
+    projectId: string,
+    componentId: string,
+    versionId: string,
+    body: UpdateProjectPageVersionInput,
+  ) => {
+    const headers = new Headers({ 'Content-Type': 'application/json' });
+    headers.set('x-lang', lang());
+    headers.set('Accept-Language', lang());
+    const token = getAccessToken();
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+    try {
+      void fetch(`${apiBase()}/projects/${projectId}/components/${componentId}/versions/${versionId}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify(body),
+        keepalive: true,
+      });
+    } catch {
+      return;
+    }
+  },
+  deleteComponentVersion: (projectId: string, componentId: string, versionId: string) =>
+    request<void>(`/projects/${projectId}/components/${componentId}/versions/${versionId}`, { method: 'DELETE' }),
   listAssetGroups: (projectId: string) =>
     request<ProjectAssetGroupDto[]>(`/projects/${projectId}/assets/groups`),
   createAssetGroup: (projectId: string, body: CreateProjectAssetGroupInput) =>
@@ -200,6 +254,10 @@ export const api = {
       `/projects/${projectId}/icons/groups/${encodeURIComponent(group)}/files/${encodeURIComponent(name)}`,
       { method: 'DELETE' },
     ),
+  getMethodCode: (projectId: string, methodId: string) =>
+    request<MethodCodeDto>(`/projects/${projectId}/methods/${methodId}`),
+  putMethodCode: (projectId: string, methodId: string, body: PutMethodCodeInput) =>
+    request<MethodCodeDto>(`/projects/${projectId}/methods/${methodId}`, json('PUT', body)),
   getWidgetEvent: (projectId: string, eventId: string) =>
     request<WidgetEventScriptDto>(`/projects/${projectId}/events/${eventId}`),
   putWidgetEvent: (projectId: string, eventId: string, body: PutWidgetEventInput) =>

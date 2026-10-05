@@ -22,8 +22,11 @@ import type {
   ProjectIconFileDto,
   ProjectIconGroupDto,
   ProjectLangCatalogDto,
+  ProjectComponentDto,
   ProjectPageDto,
+  MethodCodeDto,
   ProjectPageVersionDto,
+  ProjectPageVersionMetaDto,
   WidgetEventScriptDto,
 } from '@vanstack/shared';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
@@ -31,9 +34,10 @@ import { CreateAssetGroupDto, UpdateAssetGroupDto, UploadAssetFileDto } from './
 import { CreateIconGroupDto, UpdateIconGroupDto, UploadIconFileDto } from './dto/icon.dto';
 import { PutProjectLangsDto } from './dto/lang.dto';
 import { PutWidgetEventDto } from './dto/event.dto';
+import { PutMethodCodeDto } from './dto/method.dto';
 import { CreateProjectPageDto, UpdateProjectPageDto } from './dto/page.dto';
 import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
-import { ActivatePageVersionDto, CreatePageVersionDto, UpdatePageVersionDto } from './dto/version.dto';
+import { CreatePageVersionDto, UpdatePageVersionDto } from './dto/version.dto';
 import { LowcodeService } from './lowcode.service';
 
 @Controller('projects')
@@ -130,6 +134,14 @@ export class LowcodeController {
     return this.lowcode.listVersions(id, pageId);
   }
 
+  @Get(':id/pages/:pageId/versions/meta')
+  listVersionMeta(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+  ): Promise<ProjectPageVersionMetaDto[]> {
+    return this.lowcode.listVersionMeta(id, pageId);
+  }
+
   @Post(':id/pages/:pageId/versions')
   createVersion(
     @Param('id', ParseUUIDPipe) id: string,
@@ -158,15 +170,6 @@ export class LowcodeController {
     return this.lowcode.updateVersion(id, pageId, versionId, dto);
   }
 
-  @Post(':id/pages/:pageId/versions/:versionId/publish')
-  publishVersion(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('pageId', ParseUUIDPipe) pageId: string,
-    @Param('versionId', ParseUUIDPipe) versionId: string,
-  ): Promise<ProjectPageVersionDto> {
-    return this.lowcode.publishVersion(id, pageId, versionId);
-  }
-
   @Delete(':id/pages/:pageId/versions/:versionId')
   @HttpCode(204)
   deleteVersion(
@@ -177,13 +180,97 @@ export class LowcodeController {
     return this.lowcode.deleteVersion(id, pageId, versionId);
   }
 
-  @Post(':id/pages/:pageId/activate-version')
-  activateVersion(
+  @Get(':id/components')
+  listComponents(@Param('id', ParseUUIDPipe) id: string): Promise<ProjectComponentDto[]> {
+    return this.lowcode.listComponents(id);
+  }
+
+  @Post(':id/components')
+  createComponent(
     @Param('id', ParseUUIDPipe) id: string,
-    @Param('pageId', ParseUUIDPipe) pageId: string,
-    @Body() dto: ActivatePageVersionDto,
-  ): Promise<ProjectPageDto> {
-    return this.lowcode.activateVersion(id, pageId, dto.versionId);
+    @Body() dto: CreateProjectPageDto,
+  ): Promise<ProjectComponentDto> {
+    return this.lowcode.createComponent(id, dto);
+  }
+
+  @Get(':id/components/:componentId')
+  getComponent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('componentId', ParseUUIDPipe) componentId: string,
+  ): Promise<ProjectComponentDto> {
+    return this.lowcode.getComponent(id, componentId);
+  }
+
+  @Patch(':id/components/:componentId')
+  updateComponent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('componentId', ParseUUIDPipe) componentId: string,
+    @Body() dto: UpdateProjectPageDto,
+  ): Promise<ProjectComponentDto> {
+    return this.lowcode.updateComponent(id, componentId, dto);
+  }
+
+  @Delete(':id/components/:componentId')
+  @HttpCode(204)
+  deleteComponent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('componentId', ParseUUIDPipe) componentId: string,
+  ): Promise<void> {
+    return this.lowcode.deleteComponent(id, componentId);
+  }
+
+  @Get(':id/components/:componentId/versions')
+  listComponentVersions(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('componentId', ParseUUIDPipe) componentId: string,
+  ): Promise<ProjectPageVersionDto[]> {
+    return this.lowcode.listComponentVersions(id, componentId);
+  }
+
+  @Get(':id/components/:componentId/versions/meta')
+  listComponentVersionMeta(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('componentId', ParseUUIDPipe) componentId: string,
+  ): Promise<ProjectPageVersionMetaDto[]> {
+    return this.lowcode.listComponentVersionMeta(id, componentId);
+  }
+
+  @Get(':id/components/:componentId/versions/:versionId')
+  getComponentVersion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('componentId', ParseUUIDPipe) componentId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<ProjectPageVersionDto> {
+    return this.lowcode.getComponentVersion(id, componentId, versionId);
+  }
+
+  @Post(':id/components/:componentId/versions')
+  createComponentVersion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('componentId', ParseUUIDPipe) componentId: string,
+    @Body() dto: CreatePageVersionDto,
+  ): Promise<ProjectPageVersionDto> {
+    return this.lowcode.createComponentVersion(id, componentId, dto);
+  }
+
+  @Patch(':id/components/:componentId/versions/:versionId')
+  updateComponentVersion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('componentId', ParseUUIDPipe) componentId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+    @Body() dto: UpdatePageVersionDto,
+  ): Promise<ProjectPageVersionDto> {
+    return this.lowcode.updateComponentVersion(id, componentId, versionId, dto);
+  }
+
+  @Delete(':id/components/:componentId/versions/:versionId')
+  @HttpCode(204)
+  deleteComponentVersion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('componentId', ParseUUIDPipe) componentId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<void> {
+    return this.lowcode.deleteComponentVersion(id, componentId, versionId);
   }
 
   @Get(':id/assets/groups')
@@ -320,6 +407,23 @@ export class LowcodeController {
     @Param('name') name: string,
   ): Promise<void> {
     return this.lowcode.deleteIconFile(id, group, name);
+  }
+
+  @Get(':id/methods/:methodId')
+  getMethodCode(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('methodId', ParseUUIDPipe) methodId: string,
+  ): Promise<MethodCodeDto> {
+    return this.lowcode.getMethodCode(id, methodId);
+  }
+
+  @Put(':id/methods/:methodId')
+  putMethodCode(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('methodId', ParseUUIDPipe) methodId: string,
+    @Body() dto: PutMethodCodeDto,
+  ): Promise<MethodCodeDto> {
+    return this.lowcode.putMethodCode(id, methodId, dto.code);
   }
 
   @Get(':id/events/:eventId')

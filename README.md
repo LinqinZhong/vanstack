@@ -62,11 +62,11 @@ pnpm start:desktop
 
 - **I18n**：前端 `zh` / `en` 切换；后端通过 `x-lang` 或 `Accept-Language` 返回对应文案。
 - **TypeORM**：默认 SQLite（`apps/backend/data/vanstack.sqlite`），也可使用 MySQL / PostgreSQL。
-- **对象存储**：页面 XML、语言快照、素材和图标写入 MongoDB（`OSS_DRIVER=mongo`，库名 `vanstack`）。也可改回本地目录（`local`）或 MinIO / S3（`s3`）。
+- **对象存储**：语言快照、素材和图标写入 MinIO / S3（`OSS_DRIVER=s3`），也可改成本地目录（`local`）。
 
 ## MongoDB
 
-页面内容默认存在本机 MongoDB：`mongodb://localhost:27017`，数据库 `vanstack`。
+工程目录、页面版本、函数、事件和语言库存在本机 MongoDB：`mongodb://localhost:27017`，数据库 `vanstack`，集合为 `project`、`page.version`、`function`、`event`、`lang`。MySQL 只保留登录账号。文件不进 Mongo。
 
 ## PostgreSQL + MinIO
 

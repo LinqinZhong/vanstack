@@ -2,6 +2,7 @@ import { cloneElement, type ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
 import { widgetRuntimeBindings, withDomEvents } from '../events';
 import { renderButton } from './button';
+import { renderComponent } from './component';
 import { renderCheckbox } from './checkbox';
 import { renderSwitch } from './switch';
 import { renderFlex } from './flex';
@@ -40,6 +41,8 @@ function renderWidget(widget: PageWidget, ctx: WidgetRenderContext): ReactElemen
       return renderIcon(widget, ctx);
     case 'text':
       return renderText(widget, ctx);
+    case 'component':
+      return renderComponent(widget, ctx);
     case 'input':
       return renderInput(widget, ctx);
     case 'checkbox':

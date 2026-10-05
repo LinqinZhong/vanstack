@@ -1,11 +1,11 @@
 import { RightOutlined } from '@ant-design/icons';
-import { Button, Card, Empty, List, Popconfirm, Radio, Space, Tag } from 'antd';
+import { Button, Card, Empty, List, Popconfirm, Radio } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ProjectPageVersionDto } from '@vanstack/shared';
 
 /**
- * 右侧版本列表。单选切换正在编辑的版本；草稿可发布，已发布可设为使用中。
- * 使用中的版本不能删除。折叠只收起侧栏，不改变当前选中项。
+ * 右侧版本列表。单选切换正在编辑的版本，任何版本都可以改。
+ * 折叠只收起侧栏，不改变当前选中项。
  * 没有选中页面时 createDisabled 为真，不能新建版本。
  */
 type VersionListPanelProps = {
@@ -15,8 +15,6 @@ type VersionListPanelProps = {
   onCollapse: () => void;
   onCreate: () => void;
   onSelect: (version: ProjectPageVersionDto) => void;
-  onPublish: (version: ProjectPageVersionDto) => void;
-  onActivate: (version: ProjectPageVersionDto) => void;
   onDelete: (version: ProjectPageVersionDto) => void;
 };
 
@@ -27,8 +25,6 @@ export function VersionListPanel({
   onCollapse,
   onCreate,
   onSelect,
-  onPublish,
-  onActivate,
   onDelete,
 }: VersionListPanelProps) {
   const { t } = useTranslation();
@@ -72,40 +68,13 @@ export function VersionListPanel({
               renderItem={(version) => (
                 <List.Item>
                   <div className="version-item">
-                    <Radio value={version.id}>
-                      <Space size={6}>
-                        <span>v{version.versionNo}</span>
-                        <Tag
-                          color={
-                            version.status === 'in_use'
-                              ? 'success'
-                              : version.status === 'published'
-                                ? 'blue'
-                                : 'default'
-                          }
-                        >
-                          {t(`lowcode.versionStatus.${version.status}`)}
-                        </Tag>
-                      </Space>
-                    </Radio>
+                    <Radio value={version.id}>v{version.versionNo}</Radio>
                     <div className="version-item-actions">
-                      {version.status === 'draft' ? (
-                        <Button type="link" onClick={() => void onPublish(version)}>
-                          {t('lowcode.publishVersion')}
+                      <Popconfirm title={t('lowcode.confirmDelete')} onConfirm={() => void onDelete(version)}>
+                        <Button type="link" danger>
+                          {t('lowcode.delete')}
                         </Button>
-                      ) : null}
-                      {version.status === 'published' ? (
-                        <Button type="link" onClick={() => void onActivate(version)}>
-                          {t('lowcode.useVersion')}
-                        </Button>
-                      ) : null}
-                      {version.status === 'in_use' ? null : (
-                        <Popconfirm title={t('lowcode.confirmDelete')} onConfirm={() => void onDelete(version)}>
-                          <Button type="link" danger>
-                            {t('lowcode.delete')}
-                          </Button>
-                        </Popconfirm>
-                      )}
+                      </Popconfirm>
                     </div>
                   </div>
                 </List.Item>

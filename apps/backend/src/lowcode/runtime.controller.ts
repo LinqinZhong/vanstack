@@ -8,6 +8,11 @@ import { LowcodeService } from './lowcode.service';
 export class RuntimeController {
   constructor(private readonly lowcode: LowcodeService) {}
 
+  @Get('projects/:projectKey/pages/:pageKey')
+  getRuntimePage(@Param('projectKey') projectKey: string, @Param('pageKey') pageKey: string) {
+    return this.lowcode.getRuntimePage(projectKey, pageKey);
+  }
+
   @Get('projects/:projectKey')
   getRuntimeProject(@Param('projectKey') projectKey: string): Promise<RuntimeProjectDto> {
     return this.lowcode.getRuntimeProject(projectKey);

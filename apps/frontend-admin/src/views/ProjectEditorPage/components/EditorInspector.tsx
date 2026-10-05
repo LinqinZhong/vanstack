@@ -1,6 +1,6 @@
 import { ConfigProvider, Modal, message } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { PageI18n, PageStyle, PageVariable, PageWidget } from '@vanstack/xml';
+import type { ComponentProp, PageI18n, PageStyle, PageVariable, PageWidget } from '@vanstack/xml';
 import { EditorHelpModal } from '../../../components/EditorHelpModal';
 import { PagePropertyInspector, WidgetPropertyInspector } from '../../../components/InspectorPropertyGrid';
 import { inspectorTheme } from '../../../components/inspectorTheme';
@@ -24,6 +24,8 @@ type EditorInspectorProps = {
   readOnly: boolean;
   pageI18n: PageI18n | undefined;
   variables: PageVariable[];
+  componentProps?: ComponentProp[];
+  bindableProps?: ComponentProp[];
   projectId: string;
   ownKeys: Set<string> | null | undefined;
   pageStyle: PageStyle | undefined;
@@ -44,6 +46,8 @@ export function EditorInspector({
   readOnly,
   pageI18n,
   variables,
+  componentProps,
+  bindableProps,
   projectId,
   ownKeys,
   pageStyle,
@@ -93,6 +97,8 @@ export function EditorInspector({
               i18nCatalog={pageI18n}
               projectId={projectId}
               variables={variables}
+              componentProps={componentProps}
+              bindableProps={bindableProps}
               ownKeys={ownKeys ?? undefined}
               onPatch={(patch, coalesceKey) => onPatch(widget.id, patch, coalesceKey)}
               onInvalidChange={onInvalidChange}

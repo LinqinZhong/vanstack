@@ -1,6 +1,5 @@
 import { Form, Modal, Select, Typography, message } from 'antd';
 import CodeMirror from '@uiw/react-codemirror';
-import { oneDark } from '@codemirror/theme-one-dark';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { compactStateFn, type PageVariable, type PageWidget, type WidgetStateDelta } from '@vanstack/xml';
@@ -127,7 +126,7 @@ export function WidgetStateFnModal({
             <CodeMirror
               value={draft}
               height="160px"
-              theme={oneDark}
+              theme="light"
               extensions={editorExtensions}
               editable={!disabled}
               basicSetup={{ lineNumbers: false, foldGutter: false, autocompletion: false }}

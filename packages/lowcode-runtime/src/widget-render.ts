@@ -1,6 +1,7 @@
 import { createElement, type ReactElement, type ReactNode } from 'react';
 import {
   describeCopyBinding,
+  isCopyBinding,
   isI18nCopyExpr,
   resolveCopyBinding,
   resolveI18nCopy,
@@ -8,6 +9,7 @@ import {
   type PageI18n,
   type PageVariable,
   type PageWidget,
+  type PageXmlDocument,
   type WidgetStateLayer,
 } from '@vanstack/xml';
 import type { WidgetCssOptions } from './css';
@@ -27,7 +29,15 @@ export type WidgetRenderContext = {
   bindingScope: BindingScope;
   instanceKey: string;
   hoverFor: (widget: PageWidget) => WidgetHoverHandlers | undefined;
-  render: (widget: PageWidget, options?: { summarizeCopy?: boolean }) => ReactElement;
+  render: (
+    widget: PageWidget,
+    options?: {
+      summarizeCopy?: boolean;
+      componentStack?: string[];
+      commitModelValue?: (name: string, value: string, done?: boolean) => void;
+      instantiate?: boolean;
+    },
+  ) => ReactElement;
   summarizeCopy?: boolean;
   dynamicTextLabel?: string;
   stateLayers?: WeakMap<object, WidgetStateLayer[]>;
@@ -35,7 +45,36 @@ export type WidgetRenderContext = {
   modelOverrides?: Readonly<Record<string, string>>;
   commitModelValue?: (name: string, value: string, done?: boolean) => void;
   loadWidgetEvent?: (id: string) => Promise<string | null>;
+  components?: Record<string, PageXmlDocument>;
+  componentStack?: string[];
+  /** 编辑其它组件时，内部实例使用组件自己的测试数据。 */
+  useComponentTestData?: boolean;
 };
+
+export function readPropText(value: unknown): string {
+  if (value == null) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function readPropFlag(value: unknown): boolean {
+  return value === true || value === '1' || value === 'true';
+}
+
+export function readPropList(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
 
 export function widgetCssOptions(ctx: WidgetRenderContext): WidgetCssOptions {
   return {
@@ -49,10 +88,10 @@ export function resolveWidgetCopy(raw: string, ctx: WidgetRenderContext): string
   if (isI18nCopyExpr(raw)) {
     return resolveI18nCopy(raw, ctx.catalog, ctx.locale);
   }
-  if (!ctx.evaluateBindings) {
-    return raw;
+  if (ctx.evaluateBindings || isCopyBinding(raw)) {
+    return resolveCopyBinding(raw, ctx.bindingScope);
   }
-  return resolveCopyBinding(raw, ctx.bindingScope);
+  return raw;
 }
 
 const DYNAMIC_TEXT = '动态文本';

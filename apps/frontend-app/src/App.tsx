@@ -1,17 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { type RuntimeProjectDto } from '@vanstack/shared';
-import { renderPageXml } from '@vanstack/lowcode-runtime';
-import { pageI18nFromSnapshot, pickPageLocale, type PageI18n } from '@vanstack/xml';
-import { loadLangJson, loadPageXml, pickRuntimeLang, pickRuntimePage, preloadPageLangs, preloadPageXml } from './runtime';
+import { renderPage } from '@vanstack/lowcode-runtime';
+import { pageI18nFromSnapshot, pickPageLocale, type PageI18n, type PageXmlDocument } from '@vanstack/xml';
+import { loadLangJson, loadPageDocument, pickRuntimeLang, pickRuntimePage, preloadPageDocument, preloadPageLangs } from './runtime';
 
-const DEMO_PAGE_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<page>
-  <flex id="f1" flex-direction="row" justify-content="space-between" gap="8">
-    <text id="t1" value="左" />
-    <button id="b1" text="右" />
-  </flex>
-</page>`;
+const DEMO_PAGE: PageXmlDocument = {
+  widgets: [
+    {
+      type: 'flex',
+      id: 'f1',
+      flex: { flexDirection: 'row', justifyContent: 'space-between', columnGap: 8, rowGap: 8 },
+      children: [
+        { type: 'text', id: 't1', value: '左' },
+        { type: 'button', id: 'b1', text: '右' },
+      ],
+    },
+  ],
+};
 
 function parsePath() {
   const [projectKey = '', pageKey = ''] = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/');
@@ -24,7 +30,7 @@ export default function App() {
   const mountRef = useRef<HTMLDivElement>(null);
   const [{ projectKey, pageKey }, setRoute] = useState(parsePath);
   const [project, setProject] = useState<RuntimeProjectDto | null>(null);
-  const [xml, setXml] = useState('');
+  const [pageDocument, setPageDocument] = useState<PageXmlDocument | null>(null);
   const [catalog, setCatalog] = useState<PageI18n | undefined>(undefined);
   const [status, setStatus] = useState<'idle' | 'loading' | 'missing' | 'empty' | 'ready'>(
     projectKey ? 'loading' : 'idle',
@@ -41,14 +47,14 @@ export default function App() {
   useEffect(() => {
     if (!projectKey) {
       setProject(null);
-      setXml(DEMO_PAGE_XML);
+      setPageDocument(DEMO_PAGE);
       setCatalog(undefined);
       setStatus('idle');
       return;
     }
     let cancelled = false;
     setStatus('loading');
-    setXml('');
+    setPageDocument(null);
     setCatalog(undefined);
     void fetch(`/api/runtime/projects/${encodeURIComponent(projectKey)}?lang=${encodeURIComponent(lang)}`, {
       headers: { Accept: 'application/json', 'x-lang': lang },
@@ -91,27 +97,27 @@ export default function App() {
     setStatus('loading');
     const langMeta = pickRuntimeLang(page.langs ?? [], lang);
     const loading = Promise.all([
-      loadPageXml(page.xmlUrl),
+      loadPageDocument(page.documentUrl),
       langMeta ? loadLangJson(langMeta.jsonUrl) : Promise.resolve(null),
     ]);
     for (const other of project.pages) {
-      if (other.xmlUrl !== page.xmlUrl) {
-        preloadPageXml(other.xmlUrl);
+      if (other.documentUrl !== page.documentUrl) {
+        preloadPageDocument(other.documentUrl);
       }
       preloadPageLangs(other);
     }
     void loading
-      .then(([nextXml, snapshot]) => {
+      .then(([nextDocument, snapshot]) => {
         if (cancelled) {
           return;
         }
-        setXml(nextXml);
+        setPageDocument(nextDocument);
         setCatalog(snapshot ? pageI18nFromSnapshot(snapshot) : undefined);
         setStatus('ready');
       })
       .catch(() => {
         if (!cancelled) {
-          setXml('');
+          setPageDocument(null);
           setCatalog(undefined);
           setStatus('missing');
         }
@@ -125,15 +131,15 @@ export default function App() {
     if (!mountRef.current) {
       return;
     }
-    if (!xml) {
+    if (!pageDocument) {
       mountRef.current.replaceChildren();
       return;
     }
-    renderPageXml(mountRef.current, xml, {
+    renderPage(mountRef.current, pageDocument, {
       locale: pickPageLocale(catalog, lang),
       catalog,
     });
-  }, [catalog, lang, xml]);
+  }, [catalog, lang, pageDocument]);
 
   return (
     <div className="h5-frame">

@@ -1,12 +1,12 @@
 import { Button, Input, Modal, Select, Typography, message } from 'antd';
 import CodeMirror from '@uiw/react-codemirror';
-import { oneDark } from '@codemirror/theme-one-dark';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   DEFAULT_LOOP_INDEX,
   DEFAULT_LOOP_ITEM,
   compactLoop,
+  type ComponentProp,
   type PageVariable,
   type PageWidget,
   type WidgetLoop,
@@ -36,12 +36,14 @@ function draftFromLoop(loop: WidgetLoop | undefined): LoopDraft {
 export function WidgetLoopPanel({
   widget,
   variables,
+  props = [],
   disabled,
   popupContainer,
   onChange,
 }: {
   widget: PageWidget;
   variables: PageVariable[];
+  props?: ComponentProp[];
   disabled?: boolean;
   popupContainer?: () => HTMLElement;
   onChange: (loop: WidgetLoop | undefined) => void;
@@ -56,6 +58,23 @@ export function WidgetLoopPanel({
     () => variables.filter((variable) => variable.type === 'arr'),
     [variables],
   );
+  const arrayProps = useMemo(() => props.filter((prop) => prop.type === 'arr'), [props]);
+  const sourceOptions = useMemo(() => {
+    const groups = [];
+    if (arrayVariables.length > 0) {
+      groups.push({
+        label: t('lowcode.dataSection'),
+        options: arrayVariables.map((variable) => ({ value: `data:${variable.name}`, label: variable.name })),
+      });
+    }
+    if (arrayProps.length > 0) {
+      groups.push({
+        label: t('lowcode.propsTitle'),
+        options: arrayProps.map((prop) => ({ value: `props:${prop.name}`, label: prop.name })),
+      });
+    }
+    return groups;
+  }, [arrayProps, arrayVariables, t]);
   const knownNames = useMemo(() => variables.map((variable) => variable.name), [variables]);
   const editorExtensions = useMemo(
     () => createPageDataEditorExtensions(knownNames, t('lowcode.dataUnknownRef')),
@@ -137,35 +156,50 @@ export function WidgetLoopPanel({
             size="small"
             className="widget-loop-from"
             disabled={disabled}
-            value={draft.from}
+            value={draft.from === 'literal' ? 'literal' : 'data'}
             popupMatchSelectWidth={false}
             getPopupContainer={popupContainer}
-            onChange={(from: WidgetLoopFrom) => commit({ ...draft, from, source: '' })}
+            onChange={(from: WidgetLoopFrom) => {
+              if (from === 'literal') {
+                commit({ ...draft, from, source: '' });
+                return;
+              }
+              if (draft.from === 'literal') {
+                commit({ ...draft, from: 'data', source: '' });
+              }
+            }}
             options={[
               { value: 'literal', label: t('lowcode.loopFromLiteral') },
               { value: 'data', label: t('lowcode.loopFromData') },
             ]}
           />
-          {draft.from === 'data' ? (
+          {draft.from === 'literal' ? (
+            <Button size="small" disabled={disabled} onClick={openLiteralEditor}>
+              {t('lowcode.loopEditLiteral')}
+            </Button>
+          ) : (
             <Select
               size="small"
               className="widget-loop-var"
               allowClear
               disabled={disabled}
-              value={draft.source || undefined}
+              value={draft.source ? `${draft.from}:${draft.source}` : undefined}
               placeholder={t('lowcode.loopSelectVariable')}
               popupMatchSelectWidth={false}
               getPopupContainer={popupContainer}
-              onChange={(source) => commit({ ...draft, source: source ?? '' })}
-              options={arrayVariables.map((variable) => ({
-                value: variable.name,
-                label: variable.name,
-              }))}
+              onChange={(source) => {
+                const picked = typeof source === 'string' ? source : '';
+                const splitAt = picked.indexOf(':');
+                const from = splitAt > 0 ? picked.slice(0, splitAt) : 'data';
+                const name = splitAt > 0 ? picked.slice(splitAt + 1) : '';
+                commit({
+                  ...draft,
+                  from: from === 'props' ? 'props' : 'data',
+                  source: name,
+                });
+              }}
+              options={sourceOptions}
             />
-          ) : (
-            <Button size="small" disabled={disabled} onClick={openLiteralEditor}>
-              {t('lowcode.loopEditLiteral')}
-            </Button>
           )}
         </div>
       </div>
@@ -214,7 +248,7 @@ export function WidgetLoopPanel({
           <CodeMirror
             value={literalDraft}
             height="180px"
-            theme={oneDark}
+            theme="light"
             extensions={editorExtensions}
             editable={!disabled}
             basicSetup={{ lineNumbers: false, foldGutter: false, autocompletion: false }}

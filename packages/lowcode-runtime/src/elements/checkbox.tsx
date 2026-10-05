@@ -3,6 +3,7 @@ import {
   bindingToString,
   checkboxBoundSelected,
   isCopyBinding,
+  propModelName,
   resolveCopyBinding,
   resolveCopyValue,
   type PageWidget,
@@ -27,7 +28,7 @@ function optionText(value: unknown): string {
 }
 import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
 import { chainEventProps, rememberWidgetValue, type WidgetRuntimeBindings } from '../events';
-import { resolveWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
+import { readPropList, resolveWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
 export function renderCheckbox(
   widget: Extract<PageWidget, { type: 'checkbox' }>,
@@ -47,7 +48,12 @@ function CheckboxField({
   eventHandlers?: WidgetRuntimeBindings['dom'];
 }) {
   const selectedName = widget.selected?.trim() ?? '';
-  const bound = selectedName ? checkboxBoundSelected(widget, ctx.pageData, ctx.modelOverrides) : null;
+  const propName = propModelName(selectedName);
+  const bound = propName
+    ? readPropList(ctx.bindingScope.props?.[propName])
+    : selectedName
+      ? checkboxBoundSelected(widget, ctx.pageData, ctx.modelOverrides)
+      : null;
   const optionValue =
     ctx.evaluateBindings && isCopyBinding(widget.value ?? '')
       ? resolveCopyValue(widget.value ?? '', ctx.bindingScope)

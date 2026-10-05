@@ -2,6 +2,7 @@ const STORAGE_KEY = 'vanstack.admin.editor.selection';
 
 type ProjectSelection = {
   pageId?: string;
+  componentId?: string;
   versions?: Record<string, string>;
 };
 
@@ -37,6 +38,29 @@ export function getRememberedPageId(projectId: string): string | null {
 
 export function getRememberedVersionId(projectId: string, pageId: string): string | null {
   return readStore()[projectId]?.versions?.[pageId] ?? null;
+}
+
+export function getRememberedComponentId(projectId: string): string | null {
+  return readStore()[projectId]?.componentId ?? null;
+}
+
+export function rememberComponentId(projectId: string, componentId: string) {
+  const store = readStore();
+  store[projectId] = { ...projectEntry(store, projectId), componentId };
+  writeStore(store);
+}
+
+export function forgetComponentSelection(projectId: string, componentId: string) {
+  const store = readStore();
+  const current = projectEntry(store, projectId);
+  const versions = { ...(current.versions ?? {}) };
+  delete versions[`component:${componentId}`];
+  const next: ProjectSelection = { ...current, versions };
+  if (current.componentId === componentId) {
+    delete next.componentId;
+  }
+  store[projectId] = next;
+  writeStore(store);
 }
 
 export function rememberPageId(projectId: string, pageId: string) {

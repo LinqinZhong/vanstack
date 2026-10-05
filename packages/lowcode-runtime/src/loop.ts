@@ -55,6 +55,9 @@ function resolveLoopItems(loop: WidgetLoop, scope: BindingScope): unknown[] {
   let value: unknown;
   if (loop.from === 'data') {
     value = Object.prototype.hasOwnProperty.call(scope.data, loop.source) ? scope.data[loop.source] : undefined;
+  } else if (loop.from === 'props') {
+    const props = scope.props ?? {};
+    value = Object.prototype.hasOwnProperty.call(props, loop.source) ? props[loop.source] : undefined;
   } else {
     try {
       value = evaluateBindingExpression(loop.source, scope);
@@ -94,6 +97,7 @@ export function expandLoopTree(
         const unique = uniqueKeyOf(item, loop.key, index);
         const nextScope: BindingScope = {
           data: scope.data,
+          props: scope.props,
           aliases: {
             ...scope.aliases,
             [loopItemName(loop)]: item,

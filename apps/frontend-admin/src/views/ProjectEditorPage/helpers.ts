@@ -4,7 +4,11 @@ import {
   compactSize,
   compactWidgetStyle,
   type BoxLength,
+  type ComponentEmit,
+  type ComponentProp,
+  type PageMethod,
   type PageStyle,
+  type PageTestData,
   type PageVariable,
   type PageWidget,
   type WidgetEvents,
@@ -30,9 +34,13 @@ export type HistoryEntry = {
   pageStyle?: PageStyle;
   pageData: PageVariable[];
   pageEvents?: WidgetEvents;
+  pageMethods: PageMethod[];
+  componentProps: ComponentProp[];
+  componentEmits: ComponentEmit[];
+  testData?: PageTestData;
   selectedWidgetId: string | null;
 };
-export type CenterTab = 'layout' | 'data' | 'events';
+export type CenterTab = 'layout' | 'data' | 'events' | 'methods';
 const FIT_PADDING_X = 32;
 const FIT_PADDING_TOP = 24;
 const FIT_PADDING_BOTTOM = 64;

@@ -1,5 +1,6 @@
 import type { PageWidget } from '@vanstack/xml';
 import { buttonHelper } from './button';
+import { componentHelper } from './component';
 import { checkboxHelper } from './checkbox';
 import { switchHelper } from './switch';
 import { flexHelper } from './flex';
@@ -25,6 +26,7 @@ export const widgetHelpers = {
   checkbox: checkboxHelper,
   switch: switchHelper,
   button: buttonHelper,
+  component: componentHelper,
   flex: flexHelper,
   swiper: swiperHelper,
   'swiper-item': swiperItemHelper,

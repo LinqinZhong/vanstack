@@ -2,6 +2,7 @@ import { isJsIdentifier, ownedStateIds, type PageWidget } from './page';
 
 export type BindingScope = {
   data: Record<string, unknown>;
+  props?: Record<string, unknown>;
   aliases?: Record<string, unknown>;
 };
 
@@ -37,11 +38,20 @@ export function bindingToString(value: unknown): string {
   }
 }
 
+const BINDING_PARAMS = new Set(['data', '$data', 'props', '$props']);
+
 export function evaluateBindingExpression(expr: string, scope: BindingScope): unknown {
   const aliases = scope.aliases ?? {};
-  const names = Object.keys(aliases).filter(isJsIdentifier);
+  const names = Object.keys(aliases).filter((name) => isJsIdentifier(name) && !BINDING_PARAMS.has(name));
   const values = names.map((name) => aliases[name]);
-  return new Function('data', ...names, `"use strict"; return (${expr});`)(scope.data, ...values);
+  const props = scope.props ?? {};
+  return new Function('data', '$data', 'props', '$props', ...names, `"use strict"; return (${expr});`)(
+    scope.data,
+    scope.data,
+    props,
+    props,
+    ...values,
+  );
 }
 
 function aliasValue(scope: BindingScope, dollarName: string, plainName: string): unknown {
@@ -57,8 +67,9 @@ export function evaluateStateFunction(body: string, scope: BindingScope): unknow
     '$data',
     '$item',
     '$index',
+    '$props',
     `"use strict";\n${body}`,
-  )(scope.data, aliasValue(scope, '$item', 'item'), aliasValue(scope, '$index', 'index'));
+  )(scope.data, aliasValue(scope, '$item', 'item'), aliasValue(scope, '$index', 'index'), scope.props ?? {});
 }
 
 export function resolveStateFnId(widget: PageWidget, scope?: BindingScope): string | null {
@@ -123,15 +134,16 @@ export function resolveCopyValue(raw: string, scope: BindingScope): unknown {
   const head = pathMatch[1];
   const parts = pathMatch[2] ? pathMatch[2].slice(1).split('.').filter(Boolean) : [];
   try {
-    if (head === 'data') {
+    if (head === 'data' || head === 'props') {
+      const root = head === 'props' ? (scope.props ?? {}) : scope.data;
       if (parts.length === 0) {
-        return scope.data;
+        return root;
       }
       const [name, ...rest] = parts;
-      if (!Object.prototype.hasOwnProperty.call(scope.data, name)) {
+      if (!Object.prototype.hasOwnProperty.call(root, name)) {
         return undefined;
       }
-      return readPath(scope.data[name], rest);
+      return readPath(root[name], rest);
     }
     const aliases = scope.aliases ?? {};
     if (!Object.prototype.hasOwnProperty.call(aliases, head)) {

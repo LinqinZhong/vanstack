@@ -3,6 +3,7 @@ import {
   buildPageDataScope,
   defaultPageDataValue,
   evaluateDataExpression,
+  isDataExpression,
   isJsIdentifier,
   readVariableValue,
   validateDataLiteral,
@@ -12,6 +13,7 @@ export {
   buildPageDataScope,
   defaultPageDataValue,
   evaluateDataExpression,
+  isDataExpression,
   isJsIdentifier,
   readVariableValue,
   validateDataLiteral,
@@ -67,6 +69,27 @@ export function parseReturnExpression(source: string): string | null {
   }
   const expr = match[1].trim().replace(/;+\s*$/, '');
   return expr || null;
+}
+
+/** 编辑器里是函数体。纯 `return 表达式` 仍只存表达式，带语句的整段函数体原样保存。 */
+export function dataEditorDraft(value: string, fallback: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return `return ${fallback}`;
+  }
+  return isDataExpression(trimmed) ? `return ${trimmed}` : trimmed;
+}
+
+export function dataEditorStored(draft: string): string | null {
+  const trimmed = draft.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const expr = parseReturnExpression(trimmed);
+  if (expr && isDataExpression(expr)) {
+    return expr;
+  }
+  return trimmed;
 }
 
 export function moveVariable(variables: PageVariable[], from: number, to: number): PageVariable[] {

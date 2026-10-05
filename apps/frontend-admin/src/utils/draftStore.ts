@@ -1,6 +1,6 @@
 const DB_NAME = 'vanstack-lowcode';
 const STORE_NAME = 'drafts';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 export const DRAFT_PUT_DEBOUNCE_MS = 200;
 
 type DraftRecord = {
@@ -36,6 +36,11 @@ function openDb(): Promise<IDBDatabase | null> {
           if (!db.objectStoreNames.contains(STORE_NAME)) {
             db.createObjectStore(STORE_NAME, { keyPath: 'key' });
           }
+          if (!db.objectStoreNames.contains('version-cache')) {
+            const cache = db.createObjectStore('version-cache', { keyPath: 'key' });
+            cache.createIndex('byOwner', ['projectId', 'ownerKey']);
+            cache.createIndex('byProject', 'projectId');
+          }
         };
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => {
@@ -51,15 +56,19 @@ function openDb(): Promise<IDBDatabase | null> {
   return dbPromise;
 }
 
-function runStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T | undefined> {
+export function runStoreOn<T>(
+  storeName: string,
+  mode: IDBTransactionMode,
+  run: (store: IDBObjectStore) => IDBRequest<T>,
+): Promise<T | undefined> {
   return openDb().then((db) => {
     if (!db) {
       return undefined;
     }
     return new Promise<T | undefined>((resolve) => {
       try {
-        const tx = db.transaction(STORE_NAME, mode);
-        const request = run(tx.objectStore(STORE_NAME));
+        const tx = db.transaction(storeName, mode);
+        const request = run(tx.objectStore(storeName));
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => resolve(undefined);
         tx.onabort = () => resolve(undefined);
@@ -68,6 +77,10 @@ function runStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => I
       }
     });
   });
+}
+
+function runStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T | undefined> {
+  return runStoreOn(STORE_NAME, mode, run);
 }
 
 export async function getDraft(projectId: string, pageId: string, versionId: string): Promise<string | null> {

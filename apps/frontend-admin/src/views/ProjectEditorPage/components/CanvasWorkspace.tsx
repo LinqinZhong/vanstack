@@ -1,10 +1,14 @@
-import { ExpandOutlined, GlobalOutlined, SettingOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons';
-import { Button, Card, ConfigProvider, Empty, Segmented, Select, Spin, Tooltip, Typography, theme } from 'antd';
-import { type Dispatch, type MouseEvent, type PointerEvent, type RefObject, type SetStateAction } from 'react';
+import { DeleteOutlined, EditOutlined, ExpandOutlined, GlobalOutlined, PlusOutlined, SettingOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons';
+import { Button, Card, ConfigProvider, Empty, Input, Modal, Segmented, Select, Spin, Switch, Tooltip, Typography, message, theme } from 'antd';
+import CodeMirror from '@uiw/react-codemirror';
+import { javascript } from '@codemirror/lang-javascript';
+import { useEffect, useState, type Dispatch, type MouseEvent, type PointerEvent, type RefObject, type SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { PageI18n, PageVariable, PageWidget, WidgetEvents } from '@vanstack/xml';
+import { applyTestValues, buildPropsRecord, evaluateDataExpression, resolvePageData, type ComponentEmit, type ComponentProp, type PageI18n, type PageMethod, type PageTestData, type PageVariable, type PageWidget, type WidgetEvents } from '@vanstack/xml';
 import { PAGE_EVENT_SPECS } from '@vanstack/xml';
+import { ComponentEmitsPanel, ComponentPropsPanel } from '../../../components/ComponentContractPanel';
 import { PageDataPanel } from '../../../components/PageDataPanel';
+import { PageMethodPanel } from '../../../components/PageMethodPanel';
 import { WidgetEventPanel } from '../../../components/WidgetEventPanel';
 import {
   WidgetStyleBubble,
@@ -25,8 +29,334 @@ import {
 } from '../../../utils/widgetStates';
 import { widgetCanvasLabel, ZOOM_STEP, type CanvasMode, type CenterTab, type ViewTransform } from '../helpers';
 
+function formatActual(type: string, value: unknown) {
+  if (type === 'bool') {
+    return value ? 'true' : 'false';
+  }
+  if (type === 'num') {
+    return typeof value === 'number' && Number.isFinite(value) ? String(value) : '0';
+  }
+  if (type === 'str' || type === 'widget') {
+    return typeof value === 'string' ? value : '';
+  }
+  return compactJson(value);
+}
+
+function compactJson(value: unknown) {
+  try {
+    return JSON.stringify(value) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function prettyJson(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function TestValueEditor({
+  type,
+  display,
+  disabled,
+  onCommit,
+}: {
+  type: string;
+  display: string;
+  disabled?: boolean;
+  onCommit: (text: string) => boolean;
+}) {
+  const [draft, setDraft] = useState(display);
+  const [focused, setFocused] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => {
+    if (!focused) {
+      setDraft(display);
+      setDirty(false);
+    }
+  }, [display, focused]);
+
+  if (type === 'bool') {
+    return (
+      <Switch
+        size="small"
+        disabled={disabled}
+        checked={display === 'true'}
+        onChange={(checked) => {
+          onCommit(checked ? 'true' : 'false');
+        }}
+      />
+    );
+  }
+
+  const shared = {
+    className: 'preview-scope-field',
+    disabled,
+    value: draft,
+    onFocus: () => setFocused(true),
+    onChange: (event: { target: { value: string } }) => {
+      setDirty(true);
+      setDraft(event.target.value);
+    },
+    onBlur: () => {
+      setFocused(false);
+      if (!dirty) {
+        setDraft(display);
+        return;
+      }
+      if (!onCommit(draft)) {
+        setDraft(display);
+      }
+      setDirty(false);
+    },
+  };
+  return <Input {...shared} size="small" />;
+}
+
+type ScopeRow = {
+  name: string;
+  type: string;
+  typeLabel: string;
+  display: string;
+  value: unknown;
+  readOnly?: boolean;
+};
+
+type ScopeEditor = {
+  name: string;
+  type: string;
+  kind: 'value' | 'item' | 'add';
+  index?: number;
+  draft: string;
+  items: unknown[];
+};
+
+function PreviewScopeSection({
+  title,
+  empty,
+  rows,
+  dataScope,
+  propScope,
+  onCommit,
+}: {
+  title: string;
+  empty: string;
+  rows: ScopeRow[];
+  dataScope: Record<string, unknown>;
+  propScope: Record<string, unknown>;
+  onCommit: (name: string, type: string, text: string) => boolean;
+}) {
+  const { t } = useTranslation();
+  const [editor, setEditor] = useState<ScopeEditor | null>(null);
+  const [openArrays, setOpenArrays] = useState<Record<string, boolean>>({});
+
+  function openValue(row: ScopeRow) {
+    const source = row.type === 'arr' || row.type === 'obj' ? prettyJson(row.value) : row.display;
+    setEditor({ name: row.name, type: row.type, kind: 'value', draft: source, items: [] });
+  }
+
+  function commitItems(name: string, items: unknown[]) {
+    let text = '';
+    try {
+      text = JSON.stringify(items) ?? '';
+    } catch {
+      message.error(t('lowcode.dataInvalidLiteral'));
+      return false;
+    }
+    return text ? onCommit(name, 'arr', text) : false;
+  }
+
+  function confirmEditor() {
+    if (!editor) {
+      return;
+    }
+    if (editor.kind === 'value') {
+      if (onCommit(editor.name, editor.type, editor.draft)) {
+        setEditor(null);
+      }
+      return;
+    }
+    let value: unknown;
+    try {
+      value = evaluateDataExpression(editor.draft, dataScope, propScope);
+    } catch {
+      message.error(t('lowcode.dataInvalidLiteral'));
+      return;
+    }
+    const next = editor.kind === 'add'
+      ? [...editor.items, value]
+      : editor.items.map((item, index) => (index === editor.index ? value : item));
+    if (commitItems(editor.name, next)) {
+      setEditor(null);
+    }
+  }
+
+  return (
+    <section className="preview-scope-section">
+      <div className="preview-scope-section-title">{title}</div>
+      {rows.length === 0 ? (
+        <div className="preview-scope-empty">{empty}</div>
+      ) : (
+        <ul className="preview-scope-list">
+          {rows.map((row) => {
+            const items = row.type === 'arr' && Array.isArray(row.value) ? row.value : [];
+            const canFold = items.length > 5;
+            const folded = canFold && !openArrays[row.name];
+            const shown = folded ? items.slice(0, 3) : items;
+            return (
+              <li key={row.name} className="preview-scope-row">
+                <div className="preview-scope-name">
+                  <span>{row.name}</span>
+                  <span className="preview-scope-type">{row.typeLabel}</span>
+                  {row.type === 'arr' && !row.readOnly ? (
+                    <Button
+                      size="small"
+                      type="text"
+                      className="preview-scope-name-action"
+                      icon={<EditOutlined />}
+                      aria-label={t('lowcode.edit')}
+                      title={t('lowcode.edit')}
+                      onClick={() => openValue(row)}
+                    />
+                  ) : null}
+                </div>
+                {row.type === 'obj' ? (
+                  <div className="preview-scope-literal">
+                    <span className="preview-scope-literal-text" title={row.display}>
+                      {row.display}
+                    </span>
+                    {row.readOnly ? null : (
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={<EditOutlined />}
+                        aria-label={t('lowcode.edit')}
+                        title={t('lowcode.edit')}
+                        onClick={() => openValue(row)}
+                      />
+                    )}
+                  </div>
+                ) : row.type === 'arr' ? (
+                  <div className="preview-scope-items">
+                    {shown.map((item, index) => {
+                      const text = compactJson(item);
+                      return (
+                        <div key={`${row.name}:${index}`} className="preview-scope-item">
+                          <span className="preview-scope-literal-text" title={text}>
+                            {text}
+                          </span>
+                          {row.readOnly ? null : (
+                            <>
+                              <Button
+                                size="small"
+                                type="text"
+                                icon={<EditOutlined />}
+                                aria-label={t('lowcode.edit')}
+                                title={t('lowcode.edit')}
+                                onClick={() =>
+                                  setEditor({
+                                    name: row.name,
+                                    type: 'arr',
+                                    kind: 'item',
+                                    index,
+                                    draft: prettyJson(item),
+                                    items,
+                                  })
+                                }
+                              />
+                              <Button
+                                size="small"
+                                type="text"
+                                danger
+                                icon={<DeleteOutlined />}
+                                aria-label={t('lowcode.delete')}
+                                title={t('lowcode.delete')}
+                                onClick={() => commitItems(row.name, items.filter((_, i) => i !== index))}
+                              />
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {canFold ? (
+                      <Button
+                        size="small"
+                        type="text"
+                        className="preview-scope-fold"
+                        onClick={() => setOpenArrays((current) => ({ ...current, [row.name]: folded }))}
+                      >
+                        {folded
+                          ? t('lowcode.previewExpandItems', { count: items.length - 3 })
+                          : t('lowcode.previewCollapseItems')}
+                      </Button>
+                    ) : null}
+                    {row.readOnly ? null : (
+                      <Button
+                        size="small"
+                        type="text"
+                        className="preview-scope-add"
+                        icon={<PlusOutlined />}
+                        aria-label={t('lowcode.previewAddItem')}
+                        title={t('lowcode.previewAddItem')}
+                        onClick={() =>
+                          setEditor({
+                            name: row.name,
+                            type: 'arr',
+                            kind: 'add',
+                            draft: 'null',
+                            items,
+                          })
+                        }
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <TestValueEditor
+                    type={row.type}
+                    display={row.display}
+                    disabled={row.readOnly}
+                    onCommit={(text) => onCommit(row.name, row.type, text)}
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <Modal
+        title={
+          editor?.kind === 'add'
+            ? t('lowcode.previewAddItem')
+            : editor?.kind === 'item'
+              ? t('lowcode.previewEditItem')
+              : t('lowcode.dataEditValue')
+        }
+        open={Boolean(editor)}
+        onCancel={() => setEditor(null)}
+        onOk={confirmEditor}
+        okButtonProps={{ disabled: !editor }}
+        destroyOnHidden
+        width={640}
+      >
+        {editor ? (
+          <CodeMirror
+            value={editor.draft}
+            height="240px"
+            theme="light"
+            extensions={[javascript()]}
+            onChange={(draft) => setEditor((current) => (current ? { ...current, draft } : current))}
+          />
+        ) : null}
+      </Modal>
+    </section>
+  );
+}
+
 /**
- * 中间工作区，包含布局、页面数据、事件三个页签。
+ * 中间工作区，包含布局、页面数据、事件、方法四个页签。
  * 平移、缩放、选中、表格编辑和预览消息都留在页面，这里只把对应的 ref 和回调接到 DOM。
  *
  * 布局页用 is-hidden 藏起来，而不是卸掉，切到数据和事件时 iframe 里的预览不会重新加载。
@@ -66,8 +396,18 @@ type CanvasWorkspaceProps = {
   rangeWidget: PageWidget | null;
   selectedOwnKeys: Set<string> | null | undefined;
   pageData: PageVariable[];
+  testData?: PageTestData;
+  previewDataEdits?: Readonly<Record<string, string>>;
+  commitPreviewTest: (section: 'props' | 'data', name: string, type: string, text: string) => boolean;
+  componentMode?: boolean;
+  componentProps: ComponentProp[];
+  componentEmits: ComponentEmit[];
+  commitComponentProps: (next: ComponentProp[], coalesceKey?: string) => void;
+  commitComponentEmits: (next: ComponentEmit[]) => void;
   pageEvents: WidgetEvents | undefined;
   commitPageEvents: (next: WidgetEvents | undefined) => void;
+  pageMethods: PageMethod[];
+  commitPageMethods: (next: PageMethod[]) => void;
   pageScopeId: string;
   readOnly: boolean;
   openBoxGroup: BoxGroup | null;
@@ -135,8 +475,18 @@ export function CanvasWorkspace({
   rangeWidget,
   selectedOwnKeys,
   pageData,
+  testData,
+  previewDataEdits,
+  commitPreviewTest,
+  componentMode,
+  componentProps,
+  componentEmits,
+  commitComponentProps,
+  commitComponentEmits,
   pageEvents,
   commitPageEvents,
+  pageMethods,
+  commitPageMethods,
   pageScopeId,
   readOnly,
   openBoxGroup,
@@ -173,6 +523,12 @@ export function CanvasWorkspace({
 }: CanvasWorkspaceProps) {
   const { t } = useTranslation();
   const selectedCanvasLabel = selectedWidget ? widgetCanvasLabel(selectedWidget, t) : null;
+  const schemaProps = buildPropsRecord(componentProps);
+  const previewPropScope = buildPropsRecord(applyTestValues(componentProps, testData?.props));
+  const previewDataOverrides = previewDataEdits && Object.keys(previewDataEdits).length > 0
+    ? { ...testData?.data, ...previewDataEdits }
+    : testData?.data;
+  const previewDataScope = resolvePageData(pageData, previewDataOverrides, schemaProps, previewPropScope);
   return (
     <Card
       size="small"
@@ -181,6 +537,7 @@ export function CanvasWorkspace({
         { key: 'layout', tab: t('lowcode.tabLayout') },
         { key: 'data', tab: t('lowcode.tabData') },
         { key: 'events', tab: t('lowcode.tabEvents') },
+        { key: 'methods', tab: t('lowcode.tabMethods') },
       ]}
       activeTabKey={centerTab}
       onTabChange={(key) => {
@@ -248,6 +605,7 @@ export function CanvasWorkspace({
               'canvas-stage',
               panning || panningRef.current ? 'is-panning' : '',
               previewing ? 'is-preview' : '',
+              componentMode ? 'is-component' : '',
               canvasSettling ? 'is-settling' : '',
             ]
               .filter(Boolean)
@@ -255,9 +613,53 @@ export function CanvasWorkspace({
             onPointerDown={onCanvasPointerDown}
             onMouseDown={onCanvasMouseDown}
           >
+            {previewing ? (
+              <aside
+                className="preview-scope-card"
+                onPointerDown={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                <div className="preview-scope-card-title">{t('lowcode.tabData')}</div>
+                {componentMode ? (
+                  <PreviewScopeSection
+                    title={t('lowcode.propsTitle')}
+                    empty={t('lowcode.propsEmpty')}
+                    dataScope={previewDataScope}
+                    propScope={previewPropScope}
+                    rows={componentProps.map((prop) => ({
+                      name: prop.name,
+                      type: prop.type,
+                      typeLabel: t(`lowcode.propType.${prop.type}`),
+                      value: previewPropScope[prop.name],
+                      display: formatActual(prop.type, previewPropScope[prop.name]),
+                    }))}
+                    onCommit={(name, type, text) => commitPreviewTest('props', name, type, text)}
+                  />
+                ) : null}
+                <PreviewScopeSection
+                  title={t('lowcode.dataSection')}
+                  empty={t('lowcode.dataEmpty')}
+                  dataScope={previewDataScope}
+                  propScope={previewPropScope}
+                  rows={pageData.map((variable) => ({
+                    name: variable.name,
+                    type: variable.type,
+                    typeLabel:
+                      variable.type === 'widget'
+                        ? t('lowcode.dataTypeWidget')
+                        : t(`lowcode.propType.${variable.type}`, { defaultValue: variable.type }),
+                    value: previewDataScope[variable.name],
+                    display: formatActual(variable.type, previewDataScope[variable.name]),
+                    readOnly: Boolean(variable.computed),
+                  }))}
+                  onCommit={(name, type, text) => commitPreviewTest('data', name, type, text)}
+                />
+              </aside>
+            ) : null}
             {canvasSettling ? (
               <div className="canvas-settle" aria-busy="true">
                 <Spin />
+                <span>{t('lowcode.canvasLoading')}</span>
               </div>
             ) : null}
             <div ref={phoneScreenRef} className="phone-screen">
@@ -309,6 +711,7 @@ export function CanvasWorkspace({
                     i18nCatalog={pageI18n}
                     projectId={projectId}
                     variables={pageData}
+                    componentProps={componentMode ? componentProps : []}
                     disabled={readOnly}
                     openGroup={openBoxGroup}
                     onOpenGroupChange={handleOpenBoxGroupChange}
@@ -506,30 +909,58 @@ export function CanvasWorkspace({
           </div>
         </div>
         {centerTab === 'data' ? (
-          <PageDataPanel
-            variables={pageData}
-            widgets={widgets}
-            disabled={readOnly}
-            onChange={commitPageData}
-            onEndCoalesce={endCoalesce}
-          />
+          <div className={['page-data-stack', componentMode ? 'is-split' : ''].filter(Boolean).join(' ')}>
+            {componentMode ? (
+              <ComponentPropsPanel
+                props={componentProps}
+                disabled={readOnly}
+                onChange={commitComponentProps}
+                onEndCoalesce={endCoalesce}
+              />
+            ) : null}
+            {componentMode ? <div className="page-section-split" /> : null}
+            <PageDataPanel
+              variables={pageData}
+              widgets={widgets}
+              propNames={componentMode ? componentProps.map((item) => item.name) : []}
+              componentProps={componentMode ? componentProps : []}
+              sectionTitle={componentMode ? t('lowcode.dataSection') : undefined}
+              disabled={readOnly}
+              onChange={commitPageData}
+              onEndCoalesce={endCoalesce}
+            />
+          </div>
         ) : null}
         {centerTab === 'events' ? (
-          <div className="page-events-panel">
+          <div className={['page-events-panel', componentMode ? 'is-split' : ''].filter(Boolean).join(' ')}>
+            {componentMode ? (
+              <ComponentEmitsPanel emits={componentEmits} disabled={readOnly} onChange={commitComponentEmits} />
+            ) : null}
+            {componentMode ? <div className="page-section-split" /> : null}
             <WidgetEventPanel
               specs={PAGE_EVENT_SPECS}
               events={pageEvents}
               scopeKey={pageScopeId}
               projectId={projectId}
+              sectionTitle={componentMode ? t('lowcode.pageEventsTitle') : undefined}
               disabled={readOnly}
               onChange={commitPageEvents}
             />
-            {pageEvents ? null : (
+            {pageEvents || componentMode ? null : (
               <div className="page-events-empty">
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('lowcode.eventsEmpty')} />
               </div>
             )}
           </div>
+        ) : null}
+        {centerTab === 'methods' ? (
+          <PageMethodPanel
+            methods={pageMethods}
+            projectId={projectId}
+            disabled={readOnly}
+            showExpose={componentMode}
+            onChange={commitPageMethods}
+          />
         ) : null}
       </div>
     </Card>

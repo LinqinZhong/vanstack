@@ -2,11 +2,11 @@ import { createElement } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import {
-  XmlParseError,
   isPageLangSnapshot,
   pageI18nFromSnapshot,
   type PageI18n,
   type PageLangSnapshot,
+  type PageXmlDocument,
 } from '@vanstack/xml';
 import { LowcodePage, type PageViewing } from './page';
 
@@ -25,6 +25,9 @@ export type RenderPageXmlOptions = {
   onModelValue?: (name: string, value: string, done?: boolean) => void;
   loadWidgetEvent?: (id: string) => Promise<string | null>;
   pageId?: string | null;
+  components?: Record<string, PageXmlDocument>;
+  centerContent?: boolean;
+  useComponentTestData?: boolean;
 };
 
 function resolveRenderCatalog(catalog: RenderPageXmlOptions['catalog']): PageI18n | undefined {
@@ -56,9 +59,9 @@ function rootFor(container: HTMLElement): Root {
   return root;
 }
 
-export function renderPageXml(
+export function renderPage(
   container: HTMLElement,
-  xml: string,
+  page: PageXmlDocument,
   options?: RenderPageXmlOptions,
 ): RenderPageXmlResult {
   const root = rootFor(container);
@@ -66,7 +69,7 @@ export function renderPageXml(
 
   try {
     const tree = createElement(LowcodePage, {
-      xml,
+      page,
       editing,
       tableLayout: Boolean(options?.tableLayout),
       locale: options?.locale,
@@ -76,6 +79,9 @@ export function renderPageXml(
       onModelValue: options?.onModelValue,
       loadWidgetEvent: options?.loadWidgetEvent,
       pageId: options?.pageId,
+      components: options?.components,
+      centerContent: options?.centerContent,
+      useComponentTestData: options?.useComponentTestData,
     });
     flushSync(() => {
       root.render(tree);
@@ -85,7 +91,7 @@ export function renderPageXml(
     flushSync(() => {
       root.render(null);
     });
-    const message = error instanceof XmlParseError ? error.message : 'Invalid page XML';
+    const message = error instanceof Error ? error.message : 'Invalid page';
     return { ok: false, error: message };
   }
 }

@@ -1,7 +1,7 @@
 import './styles.less';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { renderPageXml } from '@vanstack/lowcode-runtime';
+import { renderPage } from '@vanstack/lowcode-runtime';
 import { api } from '../../apis/api';
 import { eventScriptJavaScript } from '../../utils/eventScript';
 import type { PageI18n } from '@vanstack/xml';
@@ -19,7 +19,8 @@ export function PreviewPage() {
   const mountRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<HTMLDivElement>(null);
-  const xmlRef = useRef('');
+  const documentKeyRef = useRef('');
+  const componentsKeyRef = useRef('');
   const editingRef = useRef(true);
   const localeRef = useRef<string | undefined>(undefined);
   const catalogRef = useRef<string>('null');
@@ -47,6 +48,8 @@ export function PreviewPage() {
   const tableChromeRef = useRef<TableChromeState | null>(null);
   const tableDragKeyRef = useRef<string | null>(null);
   const tableEditingRef = useRef(false);
+  const centerContentRef = useRef(false);
+  const useComponentTestDataRef = useRef(false);
   const chromeLabelsRef = useRef<TableChromeLabels>({
     moveLeft: '',
     moveRight: '',
@@ -245,7 +248,7 @@ export function PreviewPage() {
         return;
       }
       const {
-        xml,
+        document,
         mode,
         selectedId,
         scale,
@@ -268,6 +271,9 @@ export function PreviewPage() {
         tableChrome,
         tableEditing,
         settle,
+        components,
+        centerContent,
+        useComponentTestData,
       } = event.data;
       const nextEditing = mode !== 'preview';
       const nextLocale = locale || undefined;
@@ -280,8 +286,15 @@ export function PreviewPage() {
       const nextProjectId = projectId || null;
       const nextPageId = pageId || null;
       const nextTableLayout = Boolean(tableLayout) && nextEditing;
+      const nextDocumentKey = JSON.stringify(document);
+      const nextComponentsKey = JSON.stringify(components ?? null);
+      const nextCenterContent = Boolean(centerContent);
+      const nextUseComponentTestData = Boolean(useComponentTestData);
       const shouldRender =
-        xml !== xmlRef.current ||
+        nextDocumentKey !== documentKeyRef.current ||
+        nextComponentsKey !== componentsKeyRef.current ||
+        nextCenterContent !== centerContentRef.current ||
+        nextUseComponentTestData !== useComponentTestDataRef.current ||
         nextEditing !== editingRef.current ||
         nextTableLayout !== tableLayoutRef.current ||
         nextLocale !== localeRef.current ||
@@ -304,6 +317,8 @@ export function PreviewPage() {
       viewingStatesRef.current = nextViewingStates;
       projectIdRef.current = nextProjectId;
       pageIdRef.current = nextPageId;
+      centerContentRef.current = nextCenterContent;
+      useComponentTestDataRef.current = nextUseComponentTestData;
       spacingDragRef.current = nextEditing ? nextSpacing : null;
       if (!spacingDragRef.current) {
         activeSpacingEdgeRef.current = null;
@@ -340,8 +355,9 @@ export function PreviewPage() {
         scale,
       );
       if (shouldRender) {
-        xmlRef.current = xml;
-        const result = renderPageXml(mountRef.current, xml, {
+        documentKeyRef.current = nextDocumentKey;
+        componentsKeyRef.current = nextComponentsKey;
+        const result = renderPage(mountRef.current, document, {
           editing: nextEditing,
           tableLayout: nextTableLayout,
           locale: nextLocale,
@@ -361,6 +377,9 @@ export function PreviewPage() {
               }
             : undefined,
           pageId: nextPageId,
+          components,
+          centerContent: nextCenterContent,
+          useComponentTestData: nextUseComponentTestData,
         });
         setError(result.ok ? null : result.error);
       }
@@ -614,13 +633,22 @@ export function PreviewPage() {
       if (!(node instanceof HTMLElement)) {
         return null;
       }
+      let hit = node;
       if (!tableEditingRef.current) {
         const table = node.closest('.lowcode-table');
         if (table instanceof HTMLElement) {
-          return table;
+          hit = table;
         }
       }
-      return node;
+      let host: HTMLElement | null = null;
+      let current: Element | null = hit;
+      while (current) {
+        if (current instanceof HTMLElement && current.dataset.widgetType === 'component') {
+          host = current;
+        }
+        current = current.parentElement;
+      }
+      return host ?? hit;
     }
 
     /** postSelect：通知父页选中变更，并刷新悬停框。 */

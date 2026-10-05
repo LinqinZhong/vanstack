@@ -4,14 +4,14 @@ import { linter, type Diagnostic } from '@codemirror/lint';
 import { EditorView } from '@codemirror/view';
 import { findDataRefRanges } from './pageData';
 
-export function createPageDataEditorExtensions(names: string[], unknownMessage: string) {
+export function createPageDataEditorExtensions(names: string[], unknownMessage: string, propNames: string[] = []) {
   const known = new Set(names);
   return [
     javascript(),
     autocompletion({
       activateOnTyping: true,
       activateOnTypingDelay: 0,
-      override: [createDataRefCompletions(names)],
+      override: [createDataRefCompletions(names), createPropsRefCompletions(propNames)],
     }),
     triggerDataRefCompletion(),
     linter(createDataRefLinter(known, unknownMessage), { delay: 150 }),
@@ -24,7 +24,8 @@ function triggerDataRefCompletion() {
       return;
     }
     const pos = update.state.selection.main.head;
-    if (update.state.sliceDoc(Math.max(0, pos - 6), pos) === '$data.') {
+    const recent = update.state.sliceDoc(Math.max(0, pos - 7), pos);
+    if (recent === '$data.' || recent.endsWith('$props.')) {
       startCompletion(update.view);
     }
   });
@@ -46,6 +47,24 @@ function createDataRefCompletions(names: string[]) {
         label: name,
         type: 'variable',
         detail: '$data',
+      })),
+      validFor: /^[\p{ID_Continue}$]*$/u,
+    };
+  };
+}
+
+function createPropsRefCompletions(names: string[]) {
+  return (context: CompletionContext) => {
+    const match = context.matchBefore(/\$props\.[^\s,;:?)}\]]*/u);
+    if (!match || match.text.length < '$props.'.length) {
+      return null;
+    }
+    return {
+      from: match.from + '$props.'.length,
+      options: names.map((name) => ({
+        label: name,
+        type: 'variable',
+        detail: '$props',
       })),
       validFor: /^[\p{ID_Continue}$]*$/u,
     };

@@ -1,4 +1,4 @@
-import type { PageI18n } from '@vanstack/xml';
+import type { PageI18n, PageXmlDocument } from '@vanstack/xml';
 
 export const LOWCODE_MESSAGE_SOURCE = 'vanstack-lowcode';
 
@@ -10,7 +10,8 @@ export type LowcodeReadyMessage = {
 export type LowcodePreviewMessage = {
   source: typeof LOWCODE_MESSAGE_SOURCE;
   type: 'preview';
-  xml: string;
+  document: PageXmlDocument;
+  components?: Record<string, PageXmlDocument>;
   mode: 'edit' | 'preview';
   selectedId: string | null;
   scale: number;
@@ -33,6 +34,10 @@ export type LowcodePreviewMessage = {
   tableChrome?: TableChromeState | null;
   tableEditing?: boolean;
   settle?: number;
+  /** 组件画布：内容在屏幕区域内居中，父页不再画屏幕框。 */
+  centerContent?: boolean;
+  /** 正在编辑组件时，嵌套组件使用自己的测试数据。 */
+  useComponentTestData?: boolean;
 };
 
 export type TableChromeState = {

@@ -28,6 +28,10 @@ import {
   DEFAULT_SWIPER_HEIGHT,
   DEFAULT_SWIPER_WIDTH,
   isCopyBinding,
+  propModelName,
+  validateDataLiteral,
+  type ComponentProp,
+  type ComponentPropType,
   sanitizeWidgetStyle,
   type BoxLength,
   type AngleValue,
@@ -63,6 +67,9 @@ type BoxQuad = {
 
 type InspectorProp = {
   key: string;
+  label?: string;
+  hint?: string;
+  copyTools?: boolean;
   value: string;
   onChange: (raw: string) => boolean;
   picker?: 'image' | 'icon' | 'model';
@@ -95,16 +102,17 @@ function ModelBindButton({
   const [open, setOpen] = useState(false);
   if (name) {
     return (
-      <Tooltip title={t('lowcode.modelValueUnbind')}>
-        <Button
-          size="small"
-          type="text"
-          className="inspector-prop-edit"
-          disabled={disabled}
-          icon={<DisconnectOutlined />}
-          onClick={() => onChange('')}
-        />
-      </Tooltip>
+      <span className="inspector-prop-edit">
+        <Tooltip title={t('lowcode.modelValueUnbind')}>
+          <Button
+            size="small"
+            type="text"
+            disabled={disabled}
+            icon={<DisconnectOutlined />}
+            onClick={() => onChange('')}
+          />
+        </Tooltip>
+      </span>
     );
   }
   const content = options.length ? (
@@ -127,17 +135,13 @@ function ModelBindButton({
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('lowcode.dataEmpty')} />
   );
   return (
-    <Popover trigger="click" open={open && !disabled} onOpenChange={setOpen} content={content} destroyOnHidden>
-      <Tooltip title={t('lowcode.modelValuePick')}>
-        <Button
-          size="small"
-          type="text"
-          className="inspector-prop-edit"
-          disabled={disabled}
-          icon={<LinkOutlined />}
-        />
-      </Tooltip>
-    </Popover>
+    <span className="inspector-prop-edit">
+      <Popover trigger="click" open={open && !disabled} onOpenChange={setOpen} content={content} destroyOnHidden>
+        <Tooltip title={t('lowcode.modelValuePick')}>
+          <Button size="small" type="text" disabled={disabled} icon={<LinkOutlined />} />
+        </Tooltip>
+      </Popover>
+    </span>
   );
 }
 
@@ -676,8 +680,8 @@ function PropertyGrid({
       if (!needle) {
         return true;
       }
-      const label = t(`lowcode.prop.${item.key}`, { defaultValue: item.key }).toLowerCase();
-      return item.key.toLowerCase().includes(needle) || label.includes(needle);
+      const label = (item.label ?? t(`lowcode.prop.${item.key}`, { defaultValue: item.key })).toLowerCase();
+      return item.key.toLowerCase().includes(needle) || label.includes(needle) || (item.hint ?? '').toLowerCase().includes(needle);
     });
   }, [items, query, t]);
 
@@ -689,9 +693,9 @@ function PropertyGrid({
     <div
       key={`${resetKey ?? ''}:${item.key}`}
       className={`inspector-prop${item.inherited ? ' is-inherited' : ''}`}
-      title={item.key}
+      title={item.hint ?? item.label ?? item.key}
     >
-      <span className="inspector-prop-label">{item.key}</span>
+      <span className="inspector-prop-label">{item.label ?? item.key}</span>
       <div className="inspector-prop-value">
         {item.picker === 'model' ? (
           <Select
@@ -722,7 +726,7 @@ function PropertyGrid({
             onChange={item.bind.onChange}
           />
         ) : null}
-        {(item.key === 'value' || item.key === 'text' || item.key === 'placeholder') && !item.skipTextTools ? (
+        {(item.copyTools || item.key === 'value' || item.key === 'text' || item.key === 'placeholder') && !item.skipTextTools ? (
           <>
             <CopyI18nPicker
               catalog={i18nCatalog}
@@ -821,7 +825,7 @@ function PropertyGrid({
       <Modal
         className="inspector-text-modal"
         open={Boolean(editing)}
-        title={editing?.key}
+        title={editing?.label ?? editing?.key}
         okText={t('lowcode.propEditConfirm')}
         cancelText={t('lowcode.propEditCancel')}
         onOk={() => {
@@ -841,7 +845,7 @@ function PropertyGrid({
           disabled={disabled}
           onChange={(event) => setEditorDraft(event.target.value)}
         />
-        {editing?.key === 'value' || editing?.key === 'text' || editing?.key === 'placeholder' ? (
+        {editing?.copyTools || editing?.key === 'value' || editing?.key === 'text' || editing?.key === 'placeholder' ? (
           <div className="inspector-text-modal-i18n">
             <CopyI18nPicker
               catalog={i18nCatalog}
@@ -881,6 +885,43 @@ function PropertyGrid({
   );
 }
 
+function boundDataName(raw: string, type: ComponentPropType, variables: PageVariable[] | undefined): string {
+  const match = /^\$data\.([\p{ID_Start}$_][\p{ID_Continue}$]*)$/u.exec(raw.trim());
+  if (!match) {
+    return '';
+  }
+  const found = (variables ?? []).find((variable) => variable.name === match[1] && variable.type === type);
+  return found ? found.name : '';
+}
+
+function acceptComponentArg(type: ComponentPropType, raw: string): string | null | false {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (isCopyBinding(trimmed)) {
+    return trimmed;
+  }
+  if (type === 'str') {
+    return trimmed;
+  }
+  if (type === 'num') {
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? String(parsed) : false;
+  }
+  if (type === 'bool') {
+    const lower = trimmed.toLowerCase();
+    if (lower === '1' || lower === 'true') {
+      return '1';
+    }
+    if (lower === '0' || lower === 'false') {
+      return '0';
+    }
+    return false;
+  }
+  return validateDataLiteral(trimmed, type) ? trimmed : false;
+}
+
 export function WidgetPropertyInspector({
   widget,
   parentType,
@@ -891,6 +932,8 @@ export function WidgetPropertyInspector({
   projectId,
   ownKeys,
   variables,
+  componentProps,
+  bindableProps,
 }: {
   widget: PageWidget;
   parentType?: PageWidget['type'];
@@ -901,6 +944,9 @@ export function WidgetPropertyInspector({
   projectId?: string;
   ownKeys?: Set<string>;
   variables?: PageVariable[];
+  componentProps?: ComponentProp[];
+  /** 正在编辑组件时，控件可以双向绑定到这些入参。 */
+  bindableProps?: ComponentProp[];
 }) {
   const { t } = useTranslation();
   const style = widget.style ?? {};
@@ -965,6 +1011,30 @@ export function WidgetPropertyInspector({
     };
   }
 
+  function modelChoices(type: PageVariable['type']): { value: string; label: string }[] {
+    const props = (bindableProps ?? [])
+      .filter((prop) => prop.bind && prop.type === type)
+      .map((prop) => ({
+        value: `$props.${prop.name}`,
+        label: prop.desc?.trim() ? `$props.${prop.name} · ${prop.desc.trim()}` : `$props.${prop.name}`,
+      }));
+    const data = (variables ?? [])
+      .filter((variable) => variable.type === type)
+      .map((variable) => ({
+        value: variable.name,
+        label: variable.desc?.trim() ? `${variable.name} · ${variable.desc.trim()}` : variable.name,
+      }));
+    return [...props, ...data];
+  }
+
+  function boundModelStillValid(name: string, type: PageVariable['type']) {
+    const prop = propModelName(name);
+    if (prop) {
+      return (bindableProps ?? []).some((item) => item.bind && item.name === prop && item.type === type);
+    }
+    return (variables ?? []).some((variable) => variable.name === name && variable.type === type);
+  }
+
   function boxProp(
     key: string,
     values: BoxQuad,
@@ -978,6 +1048,60 @@ export function WidgetPropertyInspector({
   }
 
   const items: InspectorProp[] = [];
+
+  if (widget.type === 'component') {
+    const args = widget.args ?? {};
+    function writeArg(name: string, value: string | null) {
+      const next = { ...args };
+      if (value) {
+        next[name] = value;
+      } else {
+        delete next[name];
+      }
+      onPatch({ args: next }, `edit:${widget.id}:arg:${name}`);
+    }
+    for (const prop of componentProps ?? []) {
+      const stored = args[prop.name] ?? '';
+      const dataName = prop.bind ? boundDataName(stored, prop.type, variables) : '';
+      const propBound = prop.bind ? propModelName(stored) : '';
+      const boundName = dataName || (propBound ? `$props.${propBound}` : '');
+      const modelOptions = prop.bind ? modelChoices(prop.type) : [];
+      items.push({
+        key: `arg.${prop.name}`,
+        label: prop.name,
+        hint: [prop.type, prop.required ? t('lowcode.propsRequired') : '', prop.desc?.trim() ?? '']
+          .filter(Boolean)
+          .join(' · '),
+        value: boundName || stored,
+        category: 'basic',
+        placeholder: prop.value,
+        disabled: Boolean(boundName),
+        copyTools: prop.type === 'str',
+        skipTextTools: prop.type !== 'str',
+        ...(prop.bind
+          ? {
+              bind: {
+                name: boundName,
+                options: modelOptions,
+                onChange: (name: string) =>
+                  writeArg(prop.name, name ? (name.startsWith('$') ? name : `$data.${name}`) : null),
+              },
+            }
+          : {}),
+        onChange: (raw) => {
+          if (boundName) {
+            return true;
+          }
+          const next = acceptComponentArg(prop.type, raw);
+          if (next === false) {
+            return false;
+          }
+          writeArg(prop.name, next);
+          return true;
+        },
+      });
+    }
+  }
 
   if (widget.type === 'image') {
     items.push({
@@ -1040,12 +1164,8 @@ export function WidgetPropertyInspector({
   }
   if (widget.type === 'input') {
     const modelBound = Boolean(widget.modelValue?.trim());
-    const modelOptions = (variables ?? [])
-      .filter((variable) => variable.type === inputModelDataType(widget.inputType))
-      .map((variable) => ({
-        value: variable.name,
-        label: variable.desc?.trim() ? `${variable.name} · ${variable.desc.trim()}` : variable.name,
-      }));
+    const allowed = inputModelDataType(widget.inputType);
+    const modelOptions = modelChoices(allowed);
     const boundName = widget.modelValue?.trim() ?? '';
     items.push({
       key: 'value',
@@ -1088,8 +1208,8 @@ export function WidgetPropertyInspector({
           return false;
         }
         const allowed = inputModelDataType(inputType);
-        const current = (variables ?? []).find((variable) => variable.name === widget.modelValue?.trim());
-        const modelValue = current && current.type === allowed ? current.name : '';
+        const currentName = widget.modelValue?.trim() ?? '';
+        const modelValue = boundModelStillValid(currentName, allowed) ? currentName : '';
         onPatch({ inputType, modelValue }, `edit:${widget.id}:type`);
         return true;
       },
@@ -1098,12 +1218,7 @@ export function WidgetPropertyInspector({
   if (widget.type === 'switch') {
     const boundName = widget.modelValue?.trim() ?? '';
     const modelBound = Boolean(boundName);
-    const modelOptions = (variables ?? [])
-      .filter((variable) => variable.type === 'bool')
-      .map((variable) => ({
-        value: variable.name,
-        label: variable.desc?.trim() ? `${variable.name} · ${variable.desc.trim()}` : variable.name,
-      }));
+    const modelOptions = modelChoices('bool');
     items.push({
       key: 'value',
       value: modelBound ? boundName : typeof widget.value === 'string' ? widget.value : widget.value ? 'true' : 'false',
@@ -1147,12 +1262,7 @@ export function WidgetPropertyInspector({
   }
   if (widget.type === 'checkbox') {
     const selectedBound = Boolean(widget.selected?.trim());
-    const selectedOptions = (variables ?? [])
-      .filter((variable) => variable.type === 'arr')
-      .map((variable) => ({
-        value: variable.name,
-        label: variable.desc?.trim() ? `${variable.name} · ${variable.desc.trim()}` : variable.name,
-      }));
+    const selectedOptions = modelChoices('arr');
     items.push({
       key: 'label',
       value: widget.text,

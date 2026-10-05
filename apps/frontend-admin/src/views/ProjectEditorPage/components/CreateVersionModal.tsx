@@ -57,7 +57,7 @@ export function CreateVersionModal({ open, form, versions, onOk, onCancel }: Cre
               placeholder={t('lowcode.createVersionFrom')}
               options={versions.map((version) => ({
                 value: version.id,
-                label: `v${version.versionNo} · ${t(`lowcode.versionStatus.${version.status}`)}`,
+                label: `v${version.versionNo}`,
               }))}
             />
           </Form.Item>

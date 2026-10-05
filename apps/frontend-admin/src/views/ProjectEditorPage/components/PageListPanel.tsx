@@ -1,57 +1,81 @@
 import { PlusOutlined } from '@ant-design/icons';
-import { Button, Card, Empty, Listy, Popconfirm, Typography } from 'antd';
+import { Button, Card, Empty, Listy, Popconfirm, Segmented, Typography } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ProjectPageDto } from '@vanstack/shared';
 
+export type CatalogKind = 'page' | 'component';
+
 /**
- * 当前项目的页面列表。点一行选中该页；编辑打开页面表单，删除先弹出确认再交给页面调接口。
- * 没有页面时只显示空状态，不渲染可点的行。
+ * 页面和组件共用的列表。标题是「页面 / 组件」页签，点一行选中，编辑和删除交给页面处理。
  */
 type PageListPanelProps = {
-  pages: ProjectPageDto[];
-  selectedPageId: string | null;
+  kind: CatalogKind;
+  items: ProjectPageDto[];
+  selectedId: string | null;
+  onKindChange: (kind: CatalogKind) => void;
   onCreate: () => void;
-  onEdit: (page: ProjectPageDto) => void;
-  onDelete: (page: ProjectPageDto) => void;
-  onSelect: (pageId: string) => void;
+  onEdit: (item: ProjectPageDto) => void;
+  onDelete: (item: ProjectPageDto) => void;
+  onSelect: (id: string) => void;
 };
 
-export function PageListPanel({ pages, selectedPageId, onCreate, onEdit, onDelete, onSelect }: PageListPanelProps) {
+export function PageListPanel({
+  kind,
+  items,
+  selectedId,
+  onKindChange,
+  onCreate,
+  onEdit,
+  onDelete,
+  onSelect,
+}: PageListPanelProps) {
   const { t } = useTranslation();
+  const createLabel = kind === 'component' ? t('lowcode.createComponent') : t('lowcode.createPage');
+  const emptyLabel = kind === 'component' ? t('lowcode.emptyComponents') : t('lowcode.emptyPages');
   return (
     <Card
       size="small"
       className="editor-panel"
-      title={t('lowcode.pages')}
+      title={
+        <Segmented
+          size="small"
+          value={kind}
+          options={[
+            { label: t('lowcode.pages'), value: 'page' },
+            { label: t('lowcode.components'), value: 'component' },
+          ]}
+          onChange={(value) => onKindChange(value as CatalogKind)}
+        />
+      }
       extra={
         <Button size="small" icon={<PlusOutlined />} onClick={onCreate}>
-          {t('lowcode.createPage')}
+          {createLabel}
         </Button>
       }
     >
-      {pages.length === 0 ? (
-        <Empty description={t('lowcode.emptyPages')} />
+      {items.length === 0 ? (
+        <Empty description={emptyLabel} />
       ) : (
         <Listy
           className="page-list"
-          items={pages}
+          items={items}
           rowKey="id"
-          itemRender={(page) => (
+          itemRender={(item) => (
             <div
-              className={page.id === selectedPageId ? 'page-list-row is-selected' : 'page-list-row'}
-              onClick={() => onSelect(page.id)}
+              className={item.id === selectedId ? 'page-list-row is-selected' : 'page-list-row'}
+              onClick={() => onSelect(item.id)}
             >
               <div className="page-list-meta">
-                <Typography.Text ellipsis>{page.name}</Typography.Text>
+                <Typography.Text ellipsis>{item.name}</Typography.Text>
                 <Typography.Text type="secondary" ellipsis>
-                  {page.key}
+                  {item.key}
                 </Typography.Text>
               </div>
               <div className="page-list-actions">
-                <Button type="link" onClick={() => onEdit(page)}>
+                <Button type="link" onClick={() => onEdit(item)}>
                   {t('lowcode.edit')}
                 </Button>
-                <Popconfirm title={t('lowcode.confirmDelete')} onConfirm={() => void onDelete(page)}>
+                <Popconfirm title={t('lowcode.confirmDelete')} onConfirm={() => void onDelete(item)}>
                   <Button type="link" danger>
                     {t('lowcode.delete')}
                   </Button>

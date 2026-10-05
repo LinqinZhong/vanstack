@@ -22,7 +22,7 @@ export type WidgetCssOptions = {
   bindingScope?: BindingScope;
 };
 
-function cssText(raw: string | undefined, options?: WidgetCssOptions): string | undefined {
+export function cssText(raw: string | undefined, options?: WidgetCssOptions): string | undefined {
   if (!raw) {
     return undefined;
   }
@@ -36,7 +36,7 @@ function cssText(raw: string | undefined, options?: WidgetCssOptions): string | 
   return resolved || undefined;
 }
 
-function cssMeasure(value: number | string | undefined, options?: WidgetCssOptions, unit = 'px'): string | undefined {
+export function cssMeasure(value: number | string | undefined, options?: WidgetCssOptions, unit = 'px'): string | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return `${value}${unit}`;
   }
@@ -600,6 +600,34 @@ function tableLineRules(cls: string, lines: { header?: TableLine; row?: TableLin
   return rules;
 }
 
+/** 纵向弹性盒里如果还有图片、组件这类自身有宽度的内容，自适应宽度用 min-content，文字按这个宽度换行，而不是把整行标题撑开。 */
+function columnShouldHugContent(widget: Extract<PageWidget, { type: 'flex' }>): boolean {
+  const direction = widget.flex?.flexDirection;
+  if (direction !== 'column' && direction !== 'column-reverse') {
+    return false;
+  }
+  if (widget.style?.width != null) {
+    return false;
+  }
+  return subtreeHasFixedContent(widget.children);
+}
+
+function subtreeHasFixedContent(widgets: PageWidget[]): boolean {
+  for (const widget of widgets) {
+    if (widget.type === 'text') {
+      continue;
+    }
+    if (widget.type === 'flex') {
+      if (subtreeHasFixedContent(widget.children)) {
+        return true;
+      }
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 export function pageCssText(widgets: PageWidget[]): string {
   const blocks: string[] = [];
 
@@ -626,6 +654,9 @@ export function pageCssText(widgets: PageWidget[]): string {
       }
       const stretchTrack = widget.type === 'th' || widget.type === 'tr' || widget.type === 'td';
       push(`.${cls}`, iconLayoutStyle(widget), !stretchTrack);
+      if (widget.type === 'flex' && columnShouldHugContent(widget)) {
+        blocks.push(`.lowcode-flex.${cls} { width: min-content; }`);
+      }
       if (widget.type === 'table') {
         blocks.push(...tableLineRules(cls, widget.lines));
       }

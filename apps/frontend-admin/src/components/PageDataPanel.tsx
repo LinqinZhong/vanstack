@@ -2,10 +2,9 @@ import { DeleteOutlined, HolderOutlined, PlusOutlined } from '@ant-design/icons'
 import { Button, Empty, Input, InputNumber, Modal, Select, Switch, Table, Tree, Typography, message } from 'antd';
 import type { TableColumnsType } from 'antd';
 import CodeMirror from '@uiw/react-codemirror';
-import { oneDark } from '@codemirror/theme-one-dark';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { PageDataType, PageVariable, PageWidget } from '@vanstack/xml';
+import { buildPropsRecord, type ComponentProp, type PageDataType, type PageVariable, type PageWidget } from '@vanstack/xml';
 import {
   PAGE_DATA_TYPE_OPTIONS,
   buildPageDataScope,
@@ -15,7 +14,8 @@ import {
   isWidgetDrag,
   moveVariable,
   nextVariableName,
-  parseReturnExpression,
+  dataEditorDraft,
+  dataEditorStored,
   readWidgetDragId,
   validateDataLiteral,
 } from '../utils/pageData';
@@ -25,12 +25,24 @@ import { findWidget, toWidgetTreeData, widgetTreeLabel } from '../utils/widgetTr
 type PageDataPanelProps = {
   variables: PageVariable[];
   widgets: PageWidget[];
+  propNames?: string[];
+  componentProps?: ComponentProp[];
+  sectionTitle?: string;
   disabled?: boolean;
   onChange: (next: PageVariable[], coalesceKey?: string) => void;
   onEndCoalesce: () => void;
 };
 
-export function PageDataPanel({ variables, widgets, disabled, onChange, onEndCoalesce }: PageDataPanelProps) {
+export function PageDataPanel({
+  variables,
+  widgets,
+  propNames = [],
+  componentProps = [],
+  sectionTitle,
+  disabled,
+  onChange,
+  onEndCoalesce,
+}: PageDataPanelProps) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState<{ index: number; type: 'arr' | 'obj' } | null>(null);
   const [pickingIndex, setPickingIndex] = useState<number | null>(null);
@@ -45,8 +57,8 @@ export function PageDataPanel({ variables, widgets, disabled, onChange, onEndCoa
     [variables, editing],
   );
   const editorExtensions = useMemo(
-    () => createPageDataEditorExtensions(knownNames, t('lowcode.dataUnknownRef')),
-    [knownNames, t],
+    () => createPageDataEditorExtensions(knownNames, t('lowcode.dataUnknownRef'), propNames),
+    [knownNames, propNames, t],
   );
   const typeOptions = useMemo(
     () =>
@@ -64,7 +76,7 @@ export function PageDataPanel({ variables, widgets, disabled, onChange, onEndCoa
     if (!editingVariable || (editingVariable.type !== 'arr' && editingVariable.type !== 'obj')) {
       return;
     }
-    setDraft(`return ${editingVariable.value || defaultPageDataValue(editingVariable.type)}`);
+    setDraft(dataEditorDraft(editingVariable.value, defaultPageDataValue(editingVariable.type)));
   }, [editingVariable]);
 
   useEffect(() => {
@@ -112,15 +124,34 @@ export function PageDataPanel({ variables, widgets, disabled, onChange, onEndCoa
     if (!current || current.type === type) {
       return;
     }
-    const next = variables.map((variable, i) =>
-      i === index
-        ? {
-            ...variable,
-            type,
-            value: defaultPageDataValue(type),
-          }
-        : variable,
-    );
+    const next = variables.map((variable, i) => {
+      if (i !== index) {
+        return variable;
+      }
+      const { computed: _computed, ...rest } = variable;
+      const keepsComputed = (type === 'arr' || type === 'obj') && variable.computed;
+      return {
+        ...rest,
+        type,
+        value: defaultPageDataValue(type),
+        ...(keepsComputed ? { computed: true } : {}),
+      };
+    });
+    onChange(next);
+  }
+
+  function changeComputed(index: number, computed: boolean) {
+    const current = variables[index];
+    if (!current || (current.type !== 'arr' && current.type !== 'obj') || Boolean(current.computed) === computed) {
+      return;
+    }
+    const next = variables.map((variable, i) => {
+      if (i !== index) {
+        return variable;
+      }
+      const { computed: _computed, ...rest } = variable;
+      return computed ? { ...rest, computed: true } : rest;
+    });
     onChange(next);
   }
 
@@ -160,9 +191,10 @@ export function PageDataPanel({ variables, widgets, disabled, onChange, onEndCoa
     if (!editing || !editingVariable) {
       return;
     }
-    const expr = parseReturnExpression(draft);
-    const scope = buildPageDataScope(variables, editing.index);
-    if (!expr || !validateDataLiteral(expr, editing.type, scope)) {
+    const expr = dataEditorStored(draft);
+    const props = buildPropsRecord(componentProps);
+    const scope = buildPageDataScope(variables, editing.index, props);
+    if (!expr || !validateDataLiteral(expr, editing.type, scope, props)) {
       message.error(t('lowcode.dataInvalidLiteral'));
       return;
     }
@@ -249,6 +281,24 @@ export function PageDataPanel({ variables, widgets, disabled, onChange, onEndCoa
             style={{ width: '100%' }}
           />
         ),
+      },
+      {
+        title: t('lowcode.dataComputed'),
+        dataIndex: 'computed',
+        width: 88,
+        render: (computed: boolean | undefined, record: PageVariable, index: number) => {
+          const expression = record.type === 'arr' || record.type === 'obj';
+          return (
+            <span title={expression ? t('lowcode.dataComputedHint') : undefined}>
+              <Switch
+                size="small"
+                disabled={disabled || !expression}
+                checked={expression && Boolean(computed)}
+                onChange={(checked) => changeComputed(index, checked)}
+              />
+            </span>
+          );
+        },
       },
       {
         title: t('lowcode.dataDesc', { defaultValue: t('lowcode.description') }),
@@ -373,7 +423,8 @@ export function PageDataPanel({ variables, widgets, disabled, onChange, onEndCoa
       }}
     >
       <div className="page-data-toolbar">
-        <Button size="small" type="primary" icon={<PlusOutlined />} disabled={disabled} onClick={addVariable}>
+        {sectionTitle ? <span className="component-contract-title">{sectionTitle}</span> : null}
+        <Button size="small" icon={<PlusOutlined />} disabled={disabled} onClick={addVariable}>
           {t('lowcode.dataAdd')}
         </Button>
       </div>
@@ -452,14 +503,14 @@ export function PageDataPanel({ variables, widgets, disabled, onChange, onEndCoa
             <CodeMirror
               value={draft}
               height="180px"
-              theme={oneDark}
+              theme="light"
               extensions={editorExtensions}
               basicSetup={{ lineNumbers: false, foldGutter: false, autocompletion: false }}
               onChange={setDraft}
             />
             <pre className="page-data-code-line">{'}'}</pre>
             <Typography.Text type="secondary" className="page-data-hint">
-              {t('lowcode.dataScopeHint')}
+              {editingVariable.computed ? t('lowcode.dataComputedHint') : t('lowcode.dataScopeHint')}
             </Typography.Text>
           </div>
         ) : null}

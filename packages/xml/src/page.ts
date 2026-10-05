@@ -1,6 +1,14 @@
 import { XMLBuilder, XMLParser, XMLValidator } from 'fast-xml-parser';
-import { buildPageDataScope } from './data';
-import { compactPageEvents, compactWidgetEvents, PAGE_EVENT_SPECS, widgetEventSpecs, type WidgetEvents } from './events';
+import { resolvePageData } from './data';
+import { compactPageEvents, compactWidgetEvents, isWidgetEventId, PAGE_EVENT_SPECS, widgetEventSpecs, type WidgetEvents } from './events';
+import {
+  isPageMethodId,
+  isPageMethodName,
+  isPageMethodParamName,
+  isPageMethodParamType,
+  type PageMethod,
+  type PageMethodParam,
+} from './methods';
 import { XmlParseError } from './errors';
 import { copyWidgetRuntimeMeta } from './runtime-meta';
 
@@ -170,6 +178,14 @@ export function inputModelDataType(inputType: string | undefined): 'str' | 'num'
   return inputType === 'number' ? 'num' : 'str';
 }
 
+const PROP_MODEL = /^\$props\.([\p{ID_Start}$_][\p{ID_Continue}$]*)$/u;
+
+/** 控件双向绑定到组件入参时，`modelValue` 存成 `$props.参数名`。 */
+export function propModelName(raw: string | undefined): string | null {
+  const match = PROP_MODEL.exec((raw ?? '').trim());
+  return match ? match[1] : null;
+}
+
 export function normalizeInputModelValue(inputType: string | undefined, raw: string): string | null {
   if (inputModelDataType(inputType) === 'str') {
     return raw;
@@ -214,13 +230,7 @@ export function checkboxBoundSelected(
   if (!variable) {
     return [];
   }
-  const live = (variables ?? []).map((item) => {
-    if (!overrides || !Object.prototype.hasOwnProperty.call(overrides, item.name)) {
-      return item;
-    }
-    return { ...item, value: overrides[item.name] };
-  });
-  const value = buildPageDataScope(live)[name];
+  const value = resolvePageData(variables, overrides)[name];
   if (!Array.isArray(value)) {
     return [];
   }
@@ -334,7 +344,7 @@ type WidgetStates = {
   transition?: number | string;
 };
 
-export const LOOP_FROMS = ['data', 'literal'] as const;
+export const LOOP_FROMS = ['data', 'props', 'literal'] as const;
 export type WidgetLoopFrom = (typeof LOOP_FROMS)[number];
 export const DEFAULT_LOOP_ITEM = 'item';
 export const DEFAULT_LOOP_INDEX = 'index';
@@ -358,6 +368,17 @@ export type PageWidget =
   | ({ type: 'image'; id: string; src: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({ type: 'icon'; id: string; src: string; size?: number | string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({ type: 'text'; id: string; value: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
+  | ({
+      type: 'component';
+      id: string;
+      componentId: string;
+      componentKey: string;
+      name: string;
+      /** 页面上传给这个组件实例的入参。键是入参名，值是字面量或 `$data` / `$()` 绑定。 */
+      args?: Record<string, string>;
+      style?: WidgetStyle;
+      item?: FlexItemStyle;
+    } & WidgetCommon)
   | ({ type: 'button'; id: string; text: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({
       type: 'input';
@@ -474,7 +495,90 @@ export type PageVariable = {
   value: string;
   desc?: string;
   watch?: string;
+  /** 数组或对象打开后按表达式跟随 `$data` / `$props`，关闭后只在创建时求值一次。 */
+  computed?: boolean;
 };
+
+export const COMPONENT_PROP_TYPES = ['num', 'str', 'bool', 'arr', 'obj'] as const;
+export type ComponentPropType = (typeof COMPONENT_PROP_TYPES)[number];
+
+export type ComponentProp = {
+  name: string;
+  type: ComponentPropType;
+  value: string;
+  desc?: string;
+  required?: boolean;
+  /** 双向绑定时，外部可以把这个入参写成可写绑定。脚本里用 `$props.参数名` 读取。 */
+  bind?: boolean;
+};
+
+/** 调试样本。键是入参或变量名，值的写法和定义里的 value 相同。缺省时用定义值。 */
+export type PageTestData = {
+  props?: Record<string, string>;
+  data?: Record<string, string>;
+};
+
+export function compactPageTestData(
+  input: PageTestData | undefined,
+  props: ComponentProp[] | undefined,
+  data: PageVariable[] | undefined,
+): PageTestData | undefined {
+  const propNames = new Set((props ?? []).map((item) => item.name));
+  const dataNames = new Set((data ?? []).map((item) => item.name));
+  const nextProps = pickTestBag(input?.props, propNames);
+  const nextData = pickTestBag(input?.data, dataNames);
+  if (!nextProps && !nextData) {
+    return undefined;
+  }
+  return {
+    ...(nextProps ? { props: nextProps } : {}),
+    ...(nextData ? { data: nextData } : {}),
+  };
+}
+
+function pickTestBag(
+  bag: Record<string, string> | undefined,
+  names: Set<string>,
+): Record<string, string> | undefined {
+  if (!bag) {
+    return undefined;
+  }
+  const next: Record<string, string> = {};
+  for (const [name, value] of Object.entries(bag)) {
+    if (!isJsIdentifier(name) || !names.has(name) || typeof value !== 'string') {
+      continue;
+    }
+    next[name] = value;
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+export type ComponentEmit = {
+  name: string;
+  desc?: string;
+  params: PageMethodParam[];
+};
+
+export function isComponentPropType(value: string): value is ComponentPropType {
+  return (COMPONENT_PROP_TYPES as readonly string[]).includes(value);
+}
+
+export function compactComponentArgs(
+  args: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!args) {
+    return undefined;
+  }
+  const next: Record<string, string> = {};
+  for (const [name, value] of Object.entries(args)) {
+    const trimmed = value.trim();
+    if (!isJsIdentifier(name) || !trimmed) {
+      continue;
+    }
+    next[name] = trimmed;
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
 
 export const PAGE_I18N_DIRS = ['ltr', 'rtl'] as const;
 export type PageI18nDir = (typeof PAGE_I18N_DIRS)[number];
@@ -731,6 +835,10 @@ export type PageXmlDocument = {
   style?: PageStyle;
   data?: PageVariable[];
   events?: WidgetEvents;
+  methods?: PageMethod[];
+  props?: ComponentProp[];
+  emits?: ComponentEmit[];
+  testData?: PageTestData;
 };
 
 type OrderedNode = Record<string, unknown> & {
@@ -831,6 +939,7 @@ const WIDGET_TAGS = [
   'image',
   'icon',
   'text',
+  'component',
   'button',
   'input',
   'checkbox',
@@ -2432,12 +2541,14 @@ function parsePageData(nodes: OrderedNode[]): PageVariable[] | undefined {
       const value = type === 'bool' ? (raw === '1' ? '1' : '0') : raw;
       const desc = attr(child, 'desc').trim();
       const watch = type === 'bool' ? attr(child, 'watch') : '';
+      const computed = (type === 'arr' || type === 'obj') && attr(child, 'computed') === '1';
       const variable: PageVariable = {
         type,
         name,
         value,
         ...(desc ? { desc } : {}),
         ...(watch ? { watch } : {}),
+        ...(computed ? { computed: true } : {}),
       };
       return [variable];
     }
@@ -2447,16 +2558,318 @@ function parsePageData(nodes: OrderedNode[]): PageVariable[] | undefined {
   return variables.length > 0 ? variables : undefined;
 }
 
+function parseMethodParams(nodes: OrderedNode[], tag: 'in' | 'out'): PageMethodParam[] {
+  const params: PageMethodParam[] = [];
+  for (const item of nodes) {
+    if (!Object.prototype.hasOwnProperty.call(item, tag)) {
+      continue;
+    }
+    const name = attr(item, 'name').trim();
+    const type = attr(item, 'type').trim();
+    if (!isPageMethodParamName(name) || !isPageMethodParamType(type)) {
+      continue;
+    }
+    params.push({ name, type });
+  }
+  return params;
+}
+
+function parsePageMethods(nodes: OrderedNode[]): PageMethod[] | undefined {
+  const root = nodes.find((child) => Object.prototype.hasOwnProperty.call(child, 'methods'));
+  if (!root) {
+    return undefined;
+  }
+  const methods: PageMethod[] = [];
+  const seen = new Set<string>();
+  for (const child of nodeList(root.methods)) {
+    if (!Object.prototype.hasOwnProperty.call(child, 'method')) {
+      continue;
+    }
+    const id = attr(child, 'id').trim();
+    const name = attr(child, 'name').trim();
+    if (!isPageMethodId(id) || !isPageMethodName(name) || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    const desc = attr(child, 'desc').trim();
+    const expose = attr(child, 'expose') === '1';
+    const body = nodeList(child.method);
+    const method: PageMethod = {
+      id,
+      name,
+      params: parseMethodParams(body, 'in'),
+      returns: parseMethodParams(body, 'out'),
+      ...(desc ? { desc } : {}),
+      ...(expose ? { expose: true } : {}),
+    };
+    methods.push(method);
+  }
+  return methods.length > 0 ? methods : undefined;
+}
+
+function parseComponentProps(nodes: OrderedNode[]): ComponentProp[] | undefined {
+  const root = nodes.find((child) => Object.prototype.hasOwnProperty.call(child, 'props'));
+  if (!root) {
+    return undefined;
+  }
+  const props: ComponentProp[] = [];
+  const seen = new Set<string>();
+  for (const child of nodeList(root.props)) {
+    const type = COMPONENT_PROP_TYPES.find((item) => Object.prototype.hasOwnProperty.call(child, item));
+    if (!type) {
+      continue;
+    }
+    const name = attr(child, 'n').trim();
+    if (!name || !isJsIdentifier(name) || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    const raw = elementText(child[type]);
+    const value = type === 'bool' ? (raw === '1' ? '1' : '0') : raw;
+    const desc = attr(child, 'desc').trim();
+    const required = attr(child, 'required') === '1';
+    const bind = attr(child, 'bind') === '1';
+    props.push({
+      name,
+      type,
+      value,
+      ...(desc ? { desc } : {}),
+      ...(required ? { required: true } : {}),
+      ...(bind ? { bind: true } : {}),
+    });
+  }
+  return props.length > 0 ? props : undefined;
+}
+
+function parseComponentEmits(nodes: OrderedNode[]): ComponentEmit[] | undefined {
+  const root = nodes.find((child) => Object.prototype.hasOwnProperty.call(child, 'emits'));
+  if (!root) {
+    return undefined;
+  }
+  const emits: ComponentEmit[] = [];
+  const seen = new Set<string>();
+  for (const child of nodeList(root.emits)) {
+    if (!Object.prototype.hasOwnProperty.call(child, 'emit')) {
+      continue;
+    }
+    const name = attr(child, 'name').trim();
+    if (!name || !isJsIdentifier(name) || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    const desc = attr(child, 'desc').trim();
+    emits.push({
+      name,
+      params: parseMethodParams(nodeList(child.emit), 'in'),
+      ...(desc ? { desc } : {}),
+    });
+  }
+  return emits.length > 0 ? emits : undefined;
+}
+
+function parseTestBag(nodes: OrderedNode[], types: readonly string[]): Record<string, string> | undefined {
+  const bag: Record<string, string> = {};
+  for (const child of nodes) {
+    const type = types.find((item) => Object.prototype.hasOwnProperty.call(child, item));
+    if (!type) {
+      continue;
+    }
+    const name = attr(child, 'n').trim();
+    if (!name || !isJsIdentifier(name) || Object.prototype.hasOwnProperty.call(bag, name)) {
+      continue;
+    }
+    const raw = elementText(child[type]);
+    bag[name] = type === 'bool' ? (raw === '1' ? '1' : '0') : raw;
+  }
+  return Object.keys(bag).length > 0 ? bag : undefined;
+}
+
+function parseTestData(nodes: OrderedNode[]): PageTestData | undefined {
+  const root = nodes.find((child) => Object.prototype.hasOwnProperty.call(child, 'testData'));
+  if (!root) {
+    return undefined;
+  }
+  const body = nodeList(root.testData);
+  const propsNode = body.find((child) => Object.prototype.hasOwnProperty.call(child, 'props'));
+  const dataNode = body.find((child) => Object.prototype.hasOwnProperty.call(child, 'data'));
+  const props = propsNode ? parseTestBag(nodeList(propsNode.props), COMPONENT_PROP_TYPES) : undefined;
+  const data = dataNode ? parseTestBag(nodeList(dataNode.data), PAGE_DATA_TYPES) : undefined;
+  if (!props && !data) {
+    return undefined;
+  }
+  return {
+    ...(props ? { props } : {}),
+    ...(data ? { data } : {}),
+  };
+}
+
 function splitPageChildren(nodes: OrderedNode[]): {
   widgets: OrderedNode[];
   data?: PageVariable[];
+  methods?: PageMethod[];
+  props?: ComponentProp[];
+  emits?: ComponentEmit[];
+  testData?: PageTestData;
 } {
   const data = parsePageData(nodes);
+  const methods = parsePageMethods(nodes);
+  const props = parseComponentProps(nodes);
+  const emits = parseComponentEmits(nodes);
+  const testData = compactPageTestData(parseTestData(nodes), props, data);
   const widgets = nodes.filter(
     (child) =>
-      !Object.prototype.hasOwnProperty.call(child, 'data') && !Object.prototype.hasOwnProperty.call(child, 'i18n'),
+      !Object.prototype.hasOwnProperty.call(child, 'data') &&
+      !Object.prototype.hasOwnProperty.call(child, 'i18n') &&
+      !Object.prototype.hasOwnProperty.call(child, 'methods') &&
+      !Object.prototype.hasOwnProperty.call(child, 'props') &&
+      !Object.prototype.hasOwnProperty.call(child, 'emits') &&
+      !Object.prototype.hasOwnProperty.call(child, 'testData'),
   );
-  return { widgets, ...(data ? { data } : {}) };
+  return {
+    widgets,
+    ...(data ? { data } : {}),
+    ...(methods ? { methods } : {}),
+    ...(props ? { props } : {}),
+    ...(emits ? { emits } : {}),
+    ...(testData ? { testData } : {}),
+  };
+}
+
+function parseComponentArgs(nodes: OrderedNode[]): Record<string, string> | undefined {
+  const args: Record<string, string> = {};
+  for (const child of nodes) {
+    if (!Object.prototype.hasOwnProperty.call(child, 'arg')) {
+      continue;
+    }
+    const name = attr(child, 'n').trim();
+    const value = elementText(child.arg).trim();
+    if (!isJsIdentifier(name) || !value) {
+      continue;
+    }
+    args[name] = value;
+  }
+  return compactComponentArgs(args);
+}
+
+function serializeComponentArgs(args: Record<string, string> | undefined): OrderedNode[] {
+  const compact = compactComponentArgs(args);
+  if (!compact) {
+    return [];
+  }
+  return Object.entries(compact).map(([name, value]) => ({
+    arg: [{ '#text': value }],
+    ':@': { '@_n': name },
+  }));
+}
+
+function serializeComponentProps(props: ComponentProp[]): OrderedNode {
+  return {
+    props: props.map((prop) => {
+      const attrs: Record<string, string> = { '@_n': prop.name };
+      const desc = prop.desc?.trim();
+      if (desc) {
+        attrs['@_desc'] = desc;
+      }
+      if (prop.required) {
+        attrs['@_required'] = '1';
+      }
+      if (prop.bind) {
+        attrs['@_bind'] = '1';
+      }
+      return {
+        [prop.type]: [{ '#text': prop.value }],
+        ':@': attrs,
+      };
+    }),
+  };
+}
+
+function serializeComponentEmits(emits: ComponentEmit[]): OrderedNode {
+  return {
+    emits: emits.map((emit) => {
+      const attrs: Record<string, string> = { '@_name': emit.name };
+      const desc = emit.desc?.trim();
+      if (desc) {
+        attrs['@_desc'] = desc;
+      }
+      return {
+        emit: emit.params.map((param) => serializeMethodParam('in', param)),
+        ':@': attrs,
+      };
+    }),
+  };
+}
+
+function serializeMethodParam(tag: 'in' | 'out', param: PageMethodParam): OrderedNode {
+  return {
+    [tag]: [],
+    ':@': { '@_name': param.name, '@_type': param.type },
+  };
+}
+
+function serializePageMethods(methods: PageMethod[]): OrderedNode {
+  return {
+    methods: methods.map((method) => {
+      const attrs: Record<string, string> = { '@_id': method.id, '@_name': method.name };
+      const desc = method.desc?.trim();
+      if (desc) {
+        attrs['@_desc'] = desc;
+      }
+      if (method.expose) {
+        attrs['@_expose'] = '1';
+      }
+      return {
+        method: [
+          ...method.params.map((param) => serializeMethodParam('in', param)),
+          ...method.returns.map((param) => serializeMethodParam('out', param)),
+        ],
+        ':@': attrs,
+      };
+    }),
+  };
+}
+
+function serializeTestBag(
+  tag: 'props' | 'data',
+  values: Record<string, string>,
+  types: ReadonlyMap<string, string>,
+): OrderedNode {
+  return {
+    [tag]: Object.entries(values).flatMap(([name, value]) => {
+      const type = types.get(name);
+      if (!type) {
+        return [];
+      }
+      return [
+        {
+          [type]: [{ '#text': value }],
+          ':@': { '@_n': name },
+        },
+      ];
+    }),
+  };
+}
+
+function serializeTestData(
+  testData: PageTestData,
+  props: ComponentProp[] | undefined,
+  data: PageVariable[] | undefined,
+): OrderedNode | undefined {
+  const compact = compactPageTestData(testData, props, data);
+  if (!compact) {
+    return undefined;
+  }
+  const children: OrderedNode[] = [];
+  if (compact.props) {
+    children.push(serializeTestBag('props', compact.props, new Map((props ?? []).map((item) => [item.name, item.type]))));
+  }
+  if (compact.data) {
+    children.push(serializeTestBag('data', compact.data, new Map((data ?? []).map((item) => [item.name, item.type]))));
+  }
+  if (children.length === 0) {
+    return undefined;
+  }
+  return { testData: children };
 }
 
 function serializePageData(variables: PageVariable[]): OrderedNode {
@@ -2469,6 +2882,9 @@ function serializePageData(variables: PageVariable[]): OrderedNode {
       }
       if (variable.type === 'bool' && variable.watch) {
         attrs['@_watch'] = variable.watch;
+      }
+      if ((variable.type === 'arr' || variable.type === 'obj') && variable.computed) {
+        attrs['@_computed'] = '1';
       }
       return {
         [variable.type]: [{ '#text': variable.value }],
@@ -3230,6 +3646,35 @@ function parseWidgets(
       });
       continue;
     }
+    if (allowContent && Object.prototype.hasOwnProperty.call(child, 'component')) {
+      ids.n += 1;
+      const style = parseStyle(child);
+      const item = asItem ? parseItem(child) : undefined;
+      const componentNodes = nodeList(child.component);
+      const extra = widgetStateSpread(child, componentNodes, ancestorIds);
+      const args = parseComponentArgs(componentNodes);
+      const name = attr(child, 'name').trim();
+      widgets.push({
+        type: 'component',
+        id: attr(child, 'id') || `n${ids.n}`,
+        componentId: attr(child, 'component-id').trim(),
+        componentKey: attr(child, 'component-key').trim(),
+        name,
+        ...(args ? { args } : {}),
+        ...(style ? { style } : {}),
+        ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
     if (allowContent && Object.prototype.hasOwnProperty.call(child, 'text')) {
       ids.n += 1;
       const style = parseStyle(child);
@@ -3609,6 +4054,17 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
         ':@': widgetHostAttrs(widget, id, style, { '@_value': widget.value, ...item }),
       };
     }
+    if (widget.type === 'component') {
+      return {
+        component: [...serializeComponentArgs(widget.args), ...inner],
+        ':@': widgetHostAttrs(widget, id, style, {
+          '@_component-id': widget.componentId,
+          '@_component-key': widget.componentKey,
+          '@_name': widget.name,
+          ...item,
+        }),
+      };
+    }
     if (widget.type === 'button') {
       return {
         button: inner,
@@ -3723,19 +4179,96 @@ export function parsePageXml(xml: string): PageXmlDocument {
   const pageNode = findPageRoot(pageParser.parse(xml));
   const style = parsePageStyle(pageNode);
   const events = parsePageEvents(pageNode);
-  const { widgets, data } = splitPageChildren(nodeList(pageNode.page));
+  const { widgets, data, methods, props, emits, testData } = splitPageChildren(nodeList(pageNode.page));
   return {
     widgets: parseWidgets(widgets, { n: 0 }, 'page'),
     ...(style ? { style } : {}),
     ...(data ? { data } : {}),
     ...(events ? { events } : {}),
+    ...(methods ? { methods } : {}),
+    ...(props ? { props } : {}),
+    ...(emits ? { emits } : {}),
+    ...(testData ? { testData } : {}),
   };
+}
+
+export function pageMethodIds(xml: string): string[] {
+  try {
+    return documentMethodIds(parsePageXml(xml));
+  } catch {
+    return [];
+  }
+}
+
+export function documentMethodIds(page: PageXmlDocument): string[] {
+  return [...new Set((page.methods ?? []).map((method) => method.id))];
+}
+
+/** 一份页面文档里出现过的事件 id。同一版本里重复引用只算一次。 */
+export function documentEventIds(page: PageXmlDocument): string[] {
+  const ids = new Set<string>();
+  collectEventIds(page.events, ids);
+  collectWidgetEventIds(page.widgets, ids);
+  return [...ids];
+}
+
+function collectWidgetEventIds(widgets: PageWidget[], ids: Set<string>) {
+  for (const widget of widgets) {
+    collectEventIds(widget.events, ids);
+    if ('children' in widget && widget.children) {
+      collectWidgetEventIds(widget.children, ids);
+    }
+  }
+}
+
+function collectEventIds(events: WidgetEvents | undefined, ids: Set<string>) {
+  if (!events) {
+    return;
+  }
+  for (const [name, value] of Object.entries(events)) {
+    if (name === 'order' || !Array.isArray(value)) {
+      continue;
+    }
+    for (const id of value) {
+      if (isWidgetEventId(id)) {
+        ids.add(id);
+      }
+    }
+  }
+}
+
+/** 用现有控件规则把一份页面文档收成规范形状。存储和接口只保留返回的对象。 */
+export function normalizePageDocument(input: unknown): PageXmlDocument {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new XmlParseError('Invalid page document');
+  }
+  const page = input as PageXmlDocument;
+  if (!Array.isArray(page.widgets)) {
+    throw new XmlParseError('Invalid page document');
+  }
+  return parsePageXml(
+    serializePageXml({
+      widgets: page.widgets,
+      ...(page.style ? { style: page.style } : {}),
+      ...(page.data && page.data.length > 0 ? { data: page.data } : {}),
+      ...(page.events ? { events: page.events } : {}),
+      ...(page.methods && page.methods.length > 0 ? { methods: page.methods } : {}),
+      ...(page.props && page.props.length > 0 ? { props: page.props } : {}),
+      ...(page.emits && page.emits.length > 0 ? { emits: page.emits } : {}),
+      ...(page.testData ? { testData: page.testData } : {}),
+    }),
+  );
 }
 
 export function serializePageXml(page: PageXmlDocument): string {
   const attrs = { ...pageStyleAttrs(page.style), ...pageEventAttrs(page.events) };
+  const testData = page.testData ? serializeTestData(page.testData, page.props, page.data) : undefined;
   const children = [
+    ...(page.props && page.props.length > 0 ? [serializeComponentProps(page.props)] : []),
+    ...(page.emits && page.emits.length > 0 ? [serializeComponentEmits(page.emits)] : []),
     ...(page.data && page.data.length > 0 ? [serializePageData(page.data)] : []),
+    ...(testData ? [testData] : []),
+    ...(page.methods && page.methods.length > 0 ? [serializePageMethods(page.methods)] : []),
     ...serializeWidgets(page.widgets, { n: 0 }, 'page'),
   ];
   return pageBuilder.build([
@@ -3751,3 +4284,5 @@ export function serializePageXml(page: PageXmlDocument): string {
 }
 
 export const EMPTY_PAGE_XML = serializePageXml({ widgets: [] });
+
+export const EMPTY_PAGE_DOCUMENT: PageXmlDocument = { widgets: [] };

@@ -898,6 +898,9 @@ export function patchResolvedWidget(
   if ('checked' in patch) {
     baseContent.checked = patch.checked;
   }
+  if ('args' in patch) {
+    baseContent.args = patch.args;
+  }
 
   if (layers.length === 0) {
     if (patch.value != null) {

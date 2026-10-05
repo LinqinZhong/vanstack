@@ -150,7 +150,7 @@ function Workspace({ user, onLogout }: { user: AuthUserDto; onLogout: () => void
   return (
     <Layout className="app-shell">
       {inProject ? null : (
-        <Layout.Sider width={260} theme="dark" className="sidebar">
+        <Layout.Sider width={260} theme="light" className="sidebar">
           <Typography.Title level={3} className="brand">
             {t('app.name')}
           </Typography.Title>
@@ -160,7 +160,7 @@ function Workspace({ user, onLogout }: { user: AuthUserDto; onLogout: () => void
             <LanguageSwitch />
           </div>
           <Menu
-            theme="dark"
+            theme="light"
             mode="inline"
             selectedKeys={[selected]}
             items={[

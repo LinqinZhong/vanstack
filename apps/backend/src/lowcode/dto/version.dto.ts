@@ -1,9 +1,8 @@
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CreatePageVersionDto {
-  @IsString()
-  @MinLength(1)
-  xml: string;
+  @IsObject()
+  document: object;
 
   @IsOptional()
   @IsString()
@@ -13,18 +12,11 @@ export class CreatePageVersionDto {
 
 export class UpdatePageVersionDto {
   @IsOptional()
-  @IsString()
-  @MinLength(1)
-  xml?: string;
+  @IsObject()
+  document?: object;
 
   @IsOptional()
   @IsString()
   @MaxLength(4000)
   description?: string;
-}
-
-export class ActivatePageVersionDto {
-  @IsString()
-  @MinLength(1)
-  versionId: string;
 }

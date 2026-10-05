@@ -1,6 +1,5 @@
 import { DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined } from '@ant-design/icons';
 import CodeMirror from '@uiw/react-codemirror';
-import { oneDark } from '@codemirror/theme-one-dark';
 import { Button, ConfigProvider, Form, Input, Modal, Popconfirm, Select, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -27,6 +26,7 @@ export function WidgetEventPanel({
   events,
   scopeKey,
   projectId,
+  sectionTitle,
   disabled,
   onChange,
 }: {
@@ -34,6 +34,7 @@ export function WidgetEventPanel({
   events: WidgetEvents | undefined;
   scopeKey: string;
   projectId?: string;
+  sectionTitle?: string;
   disabled?: boolean;
   onChange: (events: WidgetEvents | undefined) => void;
 }) {
@@ -145,12 +146,18 @@ export function WidgetEventPanel({
     const previous = eventRows(specs, events).find((row) => row.id === editingId);
     setSaving(true);
     try {
-      await api.putWidgetEvent(projectId, editingId, { source });
+      const saved = await api.putWidgetEvent(projectId, editingId, { source });
       const desc = editingDescription.replace(/\s+/g, ' ').trim();
-      setDescriptions((prev) => ({ ...prev, [editingId]: desc }));
-      if (previous && previous.name !== editingName) {
+      setDescriptions((prev) => {
+        const next = { ...prev, [saved.id]: desc };
+        if (saved.id !== editingId) {
+          delete next[editingId];
+        }
+        return next;
+      });
+      if (saved.id !== editingId || (previous && previous.name !== editingName)) {
         const nextRows = eventRows(specs, events).map((row) =>
-          row.id === editingId ? { ...row, name: editingName } : row,
+          row.id === editingId ? { ...row, id: saved.id, name: editingName } : row,
         );
         onChange(eventsFromSpecRows(specs, nextRows));
       }
@@ -177,19 +184,22 @@ export function WidgetEventPanel({
 
   return (
     <div className="widget-event-panel" onMouseDown={(event) => event.stopPropagation()}>
-      <Button
-        size="small"
-        block
-        icon={<PlusOutlined />}
-        disabled={disabled || !projectId}
-        onClick={() => {
-          setEventName(specs[0]?.name);
-          setDescription('');
-          setCreateOpen(true);
-        }}
-      >
-        {t('lowcode.eventCreate')}
-      </Button>
+      <div className={sectionTitle ? 'page-data-toolbar' : undefined}>
+        {sectionTitle ? <span className="component-contract-title">{sectionTitle}</span> : null}
+        <Button
+          size="small"
+          block={!sectionTitle}
+          icon={<PlusOutlined />}
+          disabled={disabled || !projectId}
+          onClick={() => {
+            setEventName(specs[0]?.name);
+            setDescription('');
+            setCreateOpen(true);
+          }}
+        >
+          {t('lowcode.eventCreate')}
+        </Button>
+      </div>
       {rows.map((row) => (
         <div
           key={row.id}
@@ -327,7 +337,7 @@ export function WidgetEventPanel({
             <CodeMirror
               value={body}
               height="280px"
-              theme={oneDark}
+              theme="light"
               extensions={editorExtensions}
               editable={!disabled}
               basicSetup={{ lineNumbers: true, foldGutter: false }}

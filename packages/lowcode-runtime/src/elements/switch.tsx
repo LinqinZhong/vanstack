@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactElement } from 'react';
-import { isCopyBinding, resolveCopyBinding, switchBoundOn, type PageWidget } from '@vanstack/xml';
+import { isCopyBinding, propModelName, resolveCopyBinding, switchBoundOn, type PageWidget } from '@vanstack/xml';
 import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
 import { chainEventProps, rememberWidgetValue, type WidgetRuntimeBindings } from '../events';
-import { widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
+import { readPropFlag, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
 export function renderSwitch(
   widget: Extract<PageWidget, { type: 'switch' }>,
@@ -22,7 +22,9 @@ function SwitchField({
   eventHandlers?: WidgetRuntimeBindings['dom'];
 }) {
   const modelName = widget.modelValue?.trim() ?? '';
-  const bound = modelName ? switchBoundOn(widget, ctx.pageData, ctx.modelOverrides) : null;
+  const propName = propModelName(modelName);
+  const propOn = propName ? readPropFlag(ctx.bindingScope.props?.[propName]) : null;
+  const bound = propName ? propOn : modelName ? switchBoundOn(widget, ctx.pageData, ctx.modelOverrides) : null;
   const literal =
     typeof widget.value === 'string'
       ? ctx.evaluateBindings && isCopyBinding(widget.value)

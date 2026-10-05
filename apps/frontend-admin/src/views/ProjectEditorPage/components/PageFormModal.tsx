@@ -16,23 +16,25 @@ export type PageFormValues = {
 type PageFormModalProps = {
   open: boolean;
   editing: boolean;
+  kind?: 'page' | 'component';
   form: FormInstance<PageFormValues>;
   onOk: () => void;
   onCancel: () => void;
 };
 
-export function PageFormModal({ open, editing, form, onOk, onCancel }: PageFormModalProps) {
+export function PageFormModal({ open, editing, kind = 'page', form, onOk, onCancel }: PageFormModalProps) {
   const { t } = useTranslation();
+  const title = editing
+    ? t(kind === 'component' ? 'lowcode.editComponent' : 'lowcode.editPage')
+    : t(kind === 'component' ? 'lowcode.createComponent' : 'lowcode.createPage');
   return (
-    <Modal
-      open={open}
-      title={editing ? t('lowcode.editPage') : t('lowcode.createPage')}
-      onOk={onOk}
-      onCancel={onCancel}
-      destroyOnHidden
-    >
+    <Modal open={open} title={title} onOk={onOk} onCancel={onCancel} destroyOnHidden>
       <Form form={form} layout="vertical">
-        <Form.Item name="name" label={t('lowcode.pageName')} rules={[{ required: true }]}>
+        <Form.Item
+          name="name"
+          label={t(kind === 'component' ? 'lowcode.componentName' : 'lowcode.pageName')}
+          rules={[{ required: true }]}
+        >
           <Input />
         </Form.Item>
         <Form.Item

@@ -26,6 +26,7 @@ export type WidgetPatch = {
   alias?: string;
   loop?: WidgetLoop | undefined;
   events?: WidgetEvents | undefined;
+  args?: Record<string, string> | undefined;
   stateFn?: string | undefined;
   hoverStateId?: string | undefined;
   style?: WidgetStyle | undefined;

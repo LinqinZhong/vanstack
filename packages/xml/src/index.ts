@@ -5,6 +5,7 @@ import { XmlParseError } from './errors';
 
 export { XmlParseError } from './errors';
 export {
+  EMPTY_PAGE_DOCUMENT,
   EMPTY_PAGE_XML,
   FLEX_ALIGN_CONTENTS,
   FLEX_ALIGN_ITEMS,
@@ -72,6 +73,10 @@ export {
   pageI18nDir,
   parseAngle,
   parseBoxLength,
+  documentEventIds,
+  documentMethodIds,
+  normalizePageDocument,
+  pageMethodIds,
   parsePageXml,
   pickPageLocale,
   resolveI18nCopy,
@@ -98,6 +103,15 @@ export {
   type FlexItemStyle,
   type FlexJustifyContent,
   type FlexWrap,
+  type ComponentEmit,
+  type ComponentProp,
+  type ComponentPropType,
+  type PageTestData,
+  compactPageTestData,
+  COMPONENT_PROP_TYPES,
+  isComponentPropType,
+  propModelName,
+  compactComponentArgs,
   type PageDataType,
   type PageI18n,
   type PageI18nDir,
@@ -138,10 +152,15 @@ export {
   type WidgetStyle,
 } from './page';
 export {
+  applyTestValues,
   buildPageDataScope,
+  buildPropsRecord,
   defaultPageDataValue,
   evaluateDataExpression,
+  isDataExpression,
+  presentRuntimeData,
   readVariableValue,
+  resolvePageData,
   validateDataLiteral,
 } from './data';
 export {
@@ -193,6 +212,18 @@ export {
   type WidgetEvents,
   type WidgetKind,
 } from './events';
+export {
+  isPageMethodId,
+  isPageMethodName,
+  isPageMethodParamName,
+  isPageMethodParamType,
+  METHOD_PARAM_TYPES,
+  parseMethodCode,
+  serializeMethodCode,
+  type MethodParamType,
+  type PageMethod,
+  type PageMethodParam,
+} from './methods';
 
 type DocumentXmlPayload = {
   documents: Array<{

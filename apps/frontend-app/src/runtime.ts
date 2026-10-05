@@ -1,7 +1,7 @@
 import type { RuntimeLangDto, RuntimePageDto, RuntimeProjectDto } from '@vanstack/shared';
-import { isPageLangSnapshot, pickPageLocale, type PageI18n, type PageLangSnapshot } from '@vanstack/xml';
+import { isPageLangSnapshot, pickPageLocale, type PageI18n, type PageLangSnapshot, type PageXmlDocument } from '@vanstack/xml';
 
-const xmlLoads = new Map<string, Promise<string>>();
+const documentLoads = new Map<string, Promise<PageXmlDocument>>();
 const langLoads = new Map<string, Promise<PageLangSnapshot | null>>();
 
 export function pickRuntimePage(project: RuntimeProjectDto, pageKey: string) {
@@ -20,26 +20,26 @@ export function pickRuntimeLang(langs: RuntimeLangDto[], runtimeLang?: string): 
   return langs.find((lang) => lang.key === key) ?? langs[0];
 }
 
-export function loadPageXml(xmlUrl: string) {
-  const pending = xmlLoads.get(xmlUrl);
+export function loadPageDocument(documentUrl: string) {
+  const pending = documentLoads.get(documentUrl);
   if (pending) {
     return pending;
   }
-  const next = fetch(xmlUrl).then(async (response) => {
+  const next = fetch(documentUrl).then(async (response) => {
     if (!response.ok) {
       throw new Error(String(response.status));
     }
-    return response.text();
+    return (await response.json()) as PageXmlDocument;
   });
-  xmlLoads.set(xmlUrl, next);
+  documentLoads.set(documentUrl, next);
   next.catch(() => {
-    xmlLoads.delete(xmlUrl);
+    documentLoads.delete(documentUrl);
   });
   return next;
 }
 
-export function preloadPageXml(xmlUrl: string) {
-  void loadPageXml(xmlUrl);
+export function preloadPageDocument(documentUrl: string) {
+  void loadPageDocument(documentUrl);
 }
 
 export function loadLangJson(jsonUrl: string) {

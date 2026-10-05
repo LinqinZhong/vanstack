@@ -54,6 +54,27 @@ export interface UpdateProjectInput {
   description?: string;
 }
 
+export interface PageDocumentDto {
+  widgets: unknown[];
+  style?: object;
+  data?: unknown[];
+  events?: object;
+  methods?: unknown[];
+  props?: unknown[];
+  emits?: unknown[];
+}
+
+export interface ProjectComponentDto {
+  id: string;
+  projectId: string;
+  name: string;
+  key: string;
+  description: string;
+  currentVersionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProjectPageDto {
   id: string;
   projectId: string;
@@ -61,9 +82,6 @@ export interface ProjectPageDto {
   key: string;
   description: string;
   currentVersionId: string | null;
-  xmlKey: string;
-  xmlUrl: string;
-  xml?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -80,34 +98,33 @@ export interface UpdateProjectPageInput {
   description?: string;
 }
 
-export const PAGE_VERSION_STATUSES = ['draft', 'published', 'in_use'] as const;
-export type PageVersionStatus = (typeof PAGE_VERSION_STATUSES)[number];
-
 export interface ProjectPageVersionDto {
   id: string;
   pageId: string;
   versionNo: number;
-  status: PageVersionStatus;
   description: string;
-  xmlKey: string;
-  xmlUrl: string;
-  xml?: string;
+  document: PageDocumentDto;
   createdAt: string;
   updatedAt: string;
+  lastModified: string;
+}
+
+export interface ProjectPageVersionMetaDto {
+  id: string;
+  pageId: string;
+  versionNo: number;
+  description: string;
+  lastModified: string;
 }
 
 export interface CreateProjectPageVersionInput {
-  xml: string;
+  document: PageDocumentDto;
   description?: string;
 }
 
 export interface UpdateProjectPageVersionInput {
-  xml?: string;
+  document?: PageDocumentDto;
   description?: string;
-}
-
-export interface ActivateProjectPageVersionInput {
-  versionId: string;
 }
 
 export type ProjectLangDir = 'ltr' | 'rtl';
@@ -143,7 +160,7 @@ export interface RuntimeLangDto {
 export interface RuntimePageDto {
   name: string;
   key: string;
-  xmlUrl: string;
+  documentUrl: string;
   langs: RuntimeLangDto[];
 }
 
@@ -194,8 +211,19 @@ export interface UpdateProjectIconGroupInput {
 export interface WidgetEventScriptDto {
   id: string;
   source: string;
+  forked: boolean;
 }
 
 export interface PutWidgetEventInput {
   source: string;
+}
+
+export interface MethodCodeDto {
+  id: string;
+  code: string;
+  forked: boolean;
+}
+
+export interface PutMethodCodeInput {
+  code: string;
 }

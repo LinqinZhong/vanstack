@@ -12,11 +12,12 @@ export function AntdProvider({ children }: PropsWithChildren) {
     <ConfigProvider
       locale={locale}
       theme={{
-        algorithm: theme.darkAlgorithm,
+        algorithm: theme.defaultAlgorithm,
         token: {
           colorPrimary: '#3dba9a',
           colorInfo: '#3dba9a',
-          colorBgLayout: '#0d1318',
+          colorBgLayout: '#f5f7fa',
+          colorBgContainer: '#ffffff',
           borderRadius: 10,
           fontFamily: '"IBM Plex Sans", "Segoe UI", sans-serif',
         },

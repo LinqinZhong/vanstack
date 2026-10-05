@@ -40,6 +40,7 @@ import {
   isStateFnConfigured,
   widgetEventSpecs,
   sanitizeWidgetStyle,
+  type ComponentProp,
   type OverflowMode,
   type PageI18n,
   type PageVariable,
@@ -300,6 +301,7 @@ export function WidgetStyleBubble({
   i18nCatalog,
   projectId,
   variables,
+  componentProps,
   disabled,
   onToolbarPopupChange,
   ownKeys,
@@ -322,6 +324,7 @@ export function WidgetStyleBubble({
   onOpenInspector: () => void;
   i18nCatalog?: PageI18n;
   variables?: PageVariable[];
+  componentProps?: ComponentProp[];
   disabled?: boolean;
   onToolbarPopupChange?: (open: boolean) => void;
   ownKeys?: Set<string>;
@@ -1174,6 +1177,7 @@ export function WidgetStyleBubble({
               <WidgetLoopPanel
                 widget={widget}
                 variables={variables ?? []}
+                props={componentProps}
                 disabled={disabled}
                 popupContainer={popupContainer}
                 onChange={onLoopChange}

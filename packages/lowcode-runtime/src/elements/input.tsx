@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactElement } from 'react';
-import { inputBoundText, isCopyBinding, resolveCopyBinding, type PageWidget } from '@vanstack/xml';
+import { inputBoundText, isCopyBinding, propModelName, resolveCopyBinding, type PageWidget } from '@vanstack/xml';
 import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
 import { chainEventProps, rememberWidgetValue } from '../events';
-import { resolveWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
+import { readPropText, resolveWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
 function inputKind(
   widget: Extract<PageWidget, { type: 'input' }>,
@@ -36,7 +36,9 @@ function InputField({
   eventHandlers?: Record<string, (...args: unknown[]) => void>;
 }) {
   const modelName = widget.modelValue?.trim() ?? '';
-  const bound = modelName ? inputBoundText(widget, ctx.pageData, ctx.modelOverrides) : null;
+  const propName = propModelName(modelName);
+  const propValue = propName ? readPropText(ctx.bindingScope.props?.[propName]) : null;
+  const bound = propName ? propValue : modelName ? inputBoundText(widget, ctx.pageData, ctx.modelOverrides) : null;
   const source = bound ?? resolveWidgetCopy(widget.value, ctx);
   const [draft, setDraft] = useState(source);
   useEffect(() => {

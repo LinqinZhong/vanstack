@@ -6,6 +6,7 @@ import type {
   CreateProjectInput,
   CreateProjectPageInput,
   CreateProjectPageVersionInput,
+  CreateProjectVersionInput,
   HealthDto,
   Locale,
   LoginInput,
@@ -17,8 +18,10 @@ import type {
   ProjectLangCatalogDto,
   ProjectComponentDto,
   ProjectPageDto,
+  ProjectPageSnapshotDto,
   ProjectPageVersionDto,
   ProjectPageVersionMetaDto,
+  ProjectVersionDto,
   UpdateProjectAssetGroupInput,
   UpdateProjectIconGroupInput,
   UpdateProjectInput,
@@ -80,40 +83,37 @@ export const api = {
   updateProject: (id: string, body: UpdateProjectInput) =>
     request<ProjectDto>(`/projects/${id}`, json('PATCH', body)),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
-  getProjectLangs: (id: string) => request<ProjectLangCatalogDto>(`/projects/${id}/langs`),
-  putProjectLangs: (id: string, body: ProjectLangCatalogDto) =>
-    request<ProjectLangCatalogDto>(`/projects/${id}/langs`, json('PUT', body)),
-  listPages: (projectId: string) => request<ProjectPageDto[]>(`/projects/${projectId}/pages`),
-  createPage: (projectId: string, body: CreateProjectPageInput) =>
-    request<ProjectPageDto>(`/projects/${projectId}/pages`, json('POST', body)),
-  getPage: (projectId: string, pageId: string) =>
-    request<ProjectPageDto>(`/projects/${projectId}/pages/${pageId}`),
-  updatePage: (projectId: string, pageId: string, body: UpdateProjectPageInput) =>
-    request<ProjectPageDto>(`/projects/${projectId}/pages/${pageId}`, json('PATCH', body)),
-  deletePage: (projectId: string, pageId: string) =>
-    request<void>(`/projects/${projectId}/pages/${pageId}`, { method: 'DELETE' }),
-  listVersions: (projectId: string, pageId: string) =>
-    request<ProjectPageVersionDto[]>(`/projects/${projectId}/pages/${pageId}/versions`),
-  listVersionMeta: (projectId: string, pageId: string) =>
-    request<ProjectPageVersionMetaDto[]>(`/projects/${projectId}/pages/${pageId}/versions/meta`),
-  getVersion: (projectId: string, pageId: string, versionId: string) =>
-    request<ProjectPageVersionDto>(`/projects/${projectId}/pages/${pageId}/versions/${versionId}`),
-  createVersion: (projectId: string, pageId: string, body: CreateProjectPageVersionInput) =>
-    request<ProjectPageVersionDto>(`/projects/${projectId}/pages/${pageId}/versions`, json('POST', body)),
-  updateVersion: (
-    projectId: string,
-    pageId: string,
-    versionId: string,
-    body: UpdateProjectPageVersionInput,
-  ) =>
-    request<ProjectPageVersionDto>(
-      `/projects/${projectId}/pages/${pageId}/versions/${versionId}`,
+  listProjectVersions: (projectId: string) =>
+    request<ProjectVersionDto[]>(`/projects/${projectId}/versions`),
+  createProjectVersion: (projectId: string, body: CreateProjectVersionInput) =>
+    request<ProjectVersionDto>(`/projects/${projectId}/versions`, json('POST', body)),
+  deleteProjectVersion: (projectId: string, versionId: string) =>
+    request<void>(`/projects/${projectId}/versions/${versionId}`, { method: 'DELETE' }),
+  getProjectLangs: (id: string, versionId: string) =>
+    request<ProjectLangCatalogDto>(`/projects/${id}/versions/${versionId}/langs`),
+  putProjectLangs: (id: string, versionId: string, body: ProjectLangCatalogDto) =>
+    request<ProjectLangCatalogDto>(`/projects/${id}/versions/${versionId}/langs`, json('PUT', body)),
+  listPages: (projectId: string, versionId: string) =>
+    request<ProjectPageDto[]>(`/projects/${projectId}/versions/${versionId}/pages`),
+  createPage: (projectId: string, versionId: string, body: CreateProjectPageInput) =>
+    request<ProjectPageDto>(`/projects/${projectId}/versions/${versionId}/pages`, json('POST', body)),
+  getPage: (projectId: string, versionId: string, pageId: string) =>
+    request<ProjectPageDto>(`/projects/${projectId}/versions/${versionId}/pages/${pageId}`),
+  updatePage: (projectId: string, versionId: string, pageId: string, body: UpdateProjectPageInput) =>
+    request<ProjectPageDto>(`/projects/${projectId}/versions/${versionId}/pages/${pageId}`, json('PATCH', body)),
+  deletePage: (projectId: string, versionId: string, pageId: string) =>
+    request<void>(`/projects/${projectId}/versions/${versionId}/pages/${pageId}`, { method: 'DELETE' }),
+  getPageDocument: (projectId: string, versionId: string, pageId: string) =>
+    request<ProjectPageSnapshotDto>(`/projects/${projectId}/versions/${versionId}/pages/${pageId}/document`),
+  updatePageDocument: (projectId: string, versionId: string, pageId: string, body: UpdateProjectPageVersionInput) =>
+    request<ProjectPageSnapshotDto>(
+      `/projects/${projectId}/versions/${versionId}/pages/${pageId}/document`,
       json('PATCH', body),
     ),
-  updateVersionKeepalive: (
+  updatePageDocumentKeepalive: (
     projectId: string,
-    pageId: string,
     versionId: string,
+    pageId: string,
     body: UpdateProjectPageVersionInput,
   ) => {
     const headers = new Headers({ 'Content-Type': 'application/json' });
@@ -124,7 +124,7 @@ export const api = {
       headers.set('Authorization', `Bearer ${token}`);
     }
     try {
-      void fetch(`${apiBase()}/projects/${projectId}/pages/${pageId}/versions/${versionId}`, {
+      void fetch(`${apiBase()}/projects/${projectId}/versions/${versionId}/pages/${pageId}/document`, {
         method: 'PATCH',
         headers,
         body: JSON.stringify(body),
@@ -134,8 +134,6 @@ export const api = {
       return;
     }
   },
-  deleteVersion: (projectId: string, pageId: string, versionId: string) =>
-    request<void>(`/projects/${projectId}/pages/${pageId}/versions/${versionId}`, { method: 'DELETE' }),
   listComponents: (projectId: string) => request<ProjectComponentDto[]>(`/projects/${projectId}/components`),
   createComponent: (projectId: string, body: CreateProjectPageInput) =>
     request<ProjectComponentDto>(`/projects/${projectId}/components`, json('POST', body)),
@@ -192,66 +190,70 @@ export const api = {
   },
   deleteComponentVersion: (projectId: string, componentId: string, versionId: string) =>
     request<void>(`/projects/${projectId}/components/${componentId}/versions/${versionId}`, { method: 'DELETE' }),
-  listAssetGroups: (projectId: string) =>
-    request<ProjectAssetGroupDto[]>(`/projects/${projectId}/assets/groups`),
-  createAssetGroup: (projectId: string, body: CreateProjectAssetGroupInput) =>
-    request<ProjectAssetGroupDto>(`/projects/${projectId}/assets/groups`, json('POST', body)),
-  renameAssetGroup: (projectId: string, group: string, body: UpdateProjectAssetGroupInput) =>
+  listAssetGroups: (projectId: string, versionId: string) =>
+    request<ProjectAssetGroupDto[]>(`/projects/${projectId}/versions/${versionId}/assets/groups`),
+  createAssetGroup: (projectId: string, versionId: string, body: CreateProjectAssetGroupInput) =>
+    request<ProjectAssetGroupDto>(`/projects/${projectId}/versions/${versionId}/assets/groups`, json('POST', body)),
+  renameAssetGroup: (projectId: string, versionId: string, group: string, body: UpdateProjectAssetGroupInput) =>
     request<ProjectAssetGroupDto>(
-      `/projects/${projectId}/assets/groups/${encodeURIComponent(group)}`,
+      `/projects/${projectId}/versions/${versionId}/assets/groups/${encodeURIComponent(group)}`,
       json('PATCH', body),
     ),
-  deleteAssetGroup: (projectId: string, group: string) =>
-    request<void>(`/projects/${projectId}/assets/groups/${encodeURIComponent(group)}`, { method: 'DELETE' }),
-  listAssetFiles: (projectId: string, group: string) =>
+  deleteAssetGroup: (projectId: string, versionId: string, group: string) =>
+    request<void>(`/projects/${projectId}/versions/${versionId}/assets/groups/${encodeURIComponent(group)}`, {
+      method: 'DELETE',
+    }),
+  listAssetFiles: (projectId: string, versionId: string, group: string) =>
     request<ProjectAssetFileDto[]>(
-      `/projects/${projectId}/assets/groups/${encodeURIComponent(group)}/files`,
+      `/projects/${projectId}/versions/${versionId}/assets/groups/${encodeURIComponent(group)}/files`,
     ),
-  uploadAssetFile: (projectId: string, group: string, file: File, name?: string) => {
+  uploadAssetFile: (projectId: string, versionId: string, group: string, file: File, name?: string) => {
     const body = new FormData();
     body.append('file', file);
     if (name?.trim()) {
       body.append('name', name.trim());
     }
     return request<ProjectAssetFileDto>(
-      `/projects/${projectId}/assets/groups/${encodeURIComponent(group)}/files`,
+      `/projects/${projectId}/versions/${versionId}/assets/groups/${encodeURIComponent(group)}/files`,
       { method: 'POST', body },
     );
   },
-  deleteAssetFile: (projectId: string, group: string, name: string) =>
+  deleteAssetFile: (projectId: string, versionId: string, group: string, name: string) =>
     request<void>(
-      `/projects/${projectId}/assets/groups/${encodeURIComponent(group)}/files/${encodeURIComponent(name)}`,
+      `/projects/${projectId}/versions/${versionId}/assets/groups/${encodeURIComponent(group)}/files/${encodeURIComponent(name)}`,
       { method: 'DELETE' },
     ),
-  listIconGroups: (projectId: string) =>
-    request<ProjectIconGroupDto[]>(`/projects/${projectId}/icons/groups`),
-  createIconGroup: (projectId: string, body: CreateProjectIconGroupInput) =>
-    request<ProjectIconGroupDto>(`/projects/${projectId}/icons/groups`, json('POST', body)),
-  renameIconGroup: (projectId: string, group: string, body: UpdateProjectIconGroupInput) =>
+  listIconGroups: (projectId: string, versionId: string) =>
+    request<ProjectIconGroupDto[]>(`/projects/${projectId}/versions/${versionId}/icons/groups`),
+  createIconGroup: (projectId: string, versionId: string, body: CreateProjectIconGroupInput) =>
+    request<ProjectIconGroupDto>(`/projects/${projectId}/versions/${versionId}/icons/groups`, json('POST', body)),
+  renameIconGroup: (projectId: string, versionId: string, group: string, body: UpdateProjectIconGroupInput) =>
     request<ProjectIconGroupDto>(
-      `/projects/${projectId}/icons/groups/${encodeURIComponent(group)}`,
+      `/projects/${projectId}/versions/${versionId}/icons/groups/${encodeURIComponent(group)}`,
       json('PATCH', body),
     ),
-  deleteIconGroup: (projectId: string, group: string) =>
-    request<void>(`/projects/${projectId}/icons/groups/${encodeURIComponent(group)}`, { method: 'DELETE' }),
-  listIconFiles: (projectId: string, group: string) =>
+  deleteIconGroup: (projectId: string, versionId: string, group: string) =>
+    request<void>(`/projects/${projectId}/versions/${versionId}/icons/groups/${encodeURIComponent(group)}`, {
+      method: 'DELETE',
+    }),
+  listIconFiles: (projectId: string, versionId: string, group: string) =>
     request<ProjectIconFileDto[]>(
-      `/projects/${projectId}/icons/groups/${encodeURIComponent(group)}/files`,
+      `/projects/${projectId}/versions/${versionId}/icons/groups/${encodeURIComponent(group)}/files`,
     ),
-  uploadIconFile: (projectId: string, group: string, file: File, name?: string) => {
+  uploadIconFile: (projectId: string, versionId: string, group: string, file: File, name?: string) => {
     const body = new FormData();
     body.append('file', file);
     if (name?.trim()) {
       body.append('name', name.trim());
     }
     return request<ProjectIconFileDto>(
-      `/projects/${projectId}/icons/groups/${encodeURIComponent(group)}/files`,
+      `/projects/${projectId}/versions/${versionId}/icons/groups/${encodeURIComponent(group)}/files`,
       { method: 'POST', body },
     );
   },
-  deleteIconFile: (projectId: string, group: string, name: string) =>
+  deleteIconFile: (projectId: string, versionId: string, group: string, name: string) =>
     request<void>(
-      `/projects/${projectId}/icons/groups/${encodeURIComponent(group)}/files/${encodeURIComponent(name)}`,
+      `/projects/${projectId}/versions/${versionId}/icons/groups/${encodeURIComponent(group)}/files/${encodeURIComponent(name)}`,
       { method: 'DELETE' },
     ),
   getMethodCode: (projectId: string, methodId: string) =>

@@ -26,6 +26,7 @@ export type LowcodePreviewMessage = {
   catalog?: PageI18n;
   projectId?: string | null;
   pageId?: string | null;
+  query?: Record<string, unknown>;
   viewingOwnerId: string | null;
   viewingState: string | null;
   viewingStates?: Array<{ ownerId: string; state: string | null }> | null;
@@ -227,6 +228,15 @@ export type LowcodeModelValueMessage = {
   done?: boolean;
 };
 
+export type LowcodeNavigateMessage = {
+  source: typeof LOWCODE_MESSAGE_SOURCE;
+  type: 'navigate';
+  action: 'to' | 'back';
+  pageKey?: string;
+  query?: Record<string, unknown>;
+  times?: number;
+};
+
 export type LowcodeMessage =
   | LowcodeReadyMessage
   | LowcodePreviewMessage
@@ -250,7 +260,8 @@ export type LowcodeMessage =
   | LowcodeWidgetHoverMessage
   | LowcodeWidgetBoxMessage
   | LowcodeCanvasSettledMessage
-  | LowcodeModelValueMessage;
+  | LowcodeModelValueMessage
+  | LowcodeNavigateMessage;
 
 const MESSAGE_TYPES = new Set([
   'ready',
@@ -277,6 +288,7 @@ const MESSAGE_TYPES = new Set([
   'widget-box',
   'canvas-settled',
   'model-value',
+  'navigate',
 ]);
 
 export function isLowcodeMessage(value: unknown): value is LowcodeMessage {

@@ -2,7 +2,7 @@ import { Form, Modal, Select, Typography, message } from 'antd';
 import CodeMirror from '@uiw/react-codemirror';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { compactStateFn, type PageVariable, type PageWidget, type WidgetStateDelta } from '@vanstack/xml';
+import { compactStateFn, type ComponentProp, type PageVariable, type PageWidget, type WidgetStateDelta } from '@vanstack/xml';
 import { createPageDataEditorExtensions } from '../utils/pageDataEditor';
 
 async function copyText(text: string, successMessage: string, failureMessage: string) {
@@ -30,6 +30,7 @@ export function WidgetStateFnModal({
   open,
   widget,
   variables,
+  props = [],
   disabled,
   onCancel,
   onChange,
@@ -37,6 +38,7 @@ export function WidgetStateFnModal({
   open: boolean;
   widget: PageWidget;
   variables: PageVariable[];
+  props?: ComponentProp[];
   disabled?: boolean;
   onCancel: () => void;
   onChange: (stateFn: string | undefined, hoverStateId?: string) => void;
@@ -45,6 +47,7 @@ export function WidgetStateFnModal({
   const [draft, setDraft] = useState(widget.stateFn ?? '');
   const [hoverDraft, setHoverDraft] = useState(widget.hoverStateId ?? '');
   const knownNames = useMemo(() => variables.map((variable) => variable.name), [variables]);
+  const propNames = useMemo(() => props.map((prop) => prop.name), [props]);
   const hoverChoices = useMemo(
     () =>
       (widget.states ?? []).map((state) => ({
@@ -68,8 +71,8 @@ export function WidgetStateFnModal({
     return rows;
   }, [widget]);
   const editorExtensions = useMemo(
-    () => createPageDataEditorExtensions(knownNames, t('lowcode.dataUnknownRef')),
-    [knownNames, t],
+    () => createPageDataEditorExtensions(knownNames, t('lowcode.dataUnknownRef'), propNames),
+    [knownNames, propNames, t],
   );
 
   useEffect(() => {
@@ -83,7 +86,7 @@ export function WidgetStateFnModal({
     const body = compactStateFn(draft);
     if (body) {
       try {
-        new Function('$data', '$item', '$index', `"use strict";\n${body}`);
+        new Function('$data', '$item', '$index', '$props', '$query', `"use strict";\n${body}`);
       } catch {
         message.error(t('lowcode.stateFnInvalid'));
         return;

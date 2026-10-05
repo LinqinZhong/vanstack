@@ -26,6 +26,7 @@ type PageDataPanelProps = {
   variables: PageVariable[];
   widgets: PageWidget[];
   propNames?: string[];
+  queryNames?: string[];
   componentProps?: ComponentProp[];
   sectionTitle?: string;
   disabled?: boolean;
@@ -37,6 +38,7 @@ export function PageDataPanel({
   variables,
   widgets,
   propNames = [],
+  queryNames = [],
   componentProps = [],
   sectionTitle,
   disabled,
@@ -57,8 +59,8 @@ export function PageDataPanel({
     [variables, editing],
   );
   const editorExtensions = useMemo(
-    () => createPageDataEditorExtensions(knownNames, t('lowcode.dataUnknownRef'), propNames),
-    [knownNames, propNames, t],
+    () => createPageDataEditorExtensions(knownNames, t('lowcode.dataUnknownRef'), propNames, queryNames),
+    [knownNames, propNames, queryNames, t],
   );
   const typeOptions = useMemo(
     () =>

@@ -24,9 +24,11 @@ import type {
   ProjectLangCatalogDto,
   ProjectComponentDto,
   ProjectPageDto,
+  ProjectPageSnapshotDto,
   MethodCodeDto,
   ProjectPageVersionDto,
   ProjectPageVersionMetaDto,
+  ProjectVersionDto,
   WidgetEventScriptDto,
 } from '@vanstack/shared';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
@@ -37,6 +39,7 @@ import { PutWidgetEventDto } from './dto/event.dto';
 import { PutMethodCodeDto } from './dto/method.dto';
 import { CreateProjectPageDto, UpdateProjectPageDto } from './dto/page.dto';
 import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
+import { CreateProjectVersionDto } from './dto/project-version.dto';
 import { CreatePageVersionDto, UpdatePageVersionDto } from './dto/version.dto';
 import { LowcodeService } from './lowcode.service';
 
@@ -74,110 +77,111 @@ export class LowcodeController {
     return this.lowcode.deleteProject(id);
   }
 
-  @Get(':id/langs')
-  getLangs(@Param('id', ParseUUIDPipe) id: string): Promise<ProjectLangCatalogDto> {
-    return this.lowcode.getLangs(id);
+  @Get(':id/versions')
+  listProjectVersions(@Param('id', ParseUUIDPipe) id: string): Promise<ProjectVersionDto[]> {
+    return this.lowcode.listProjectVersions(id);
   }
 
-  @Put(':id/langs')
+  @Post(':id/versions')
+  createProjectVersion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateProjectVersionDto,
+  ): Promise<ProjectVersionDto> {
+    return this.lowcode.createProjectVersion(id, dto);
+  }
+
+  @Delete(':id/versions/:versionId')
+  @HttpCode(204)
+  deleteProjectVersion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<void> {
+    return this.lowcode.deleteProjectVersion(id, versionId);
+  }
+
+  @Get(':id/versions/:versionId/langs')
+  getLangs(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<ProjectLangCatalogDto> {
+    return this.lowcode.getLangs(id, versionId);
+  }
+
+  @Put(':id/versions/:versionId/langs')
   putLangs(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Body() dto: PutProjectLangsDto,
   ): Promise<ProjectLangCatalogDto> {
-    return this.lowcode.putLangs(id, dto);
+    return this.lowcode.putLangs(id, versionId, dto);
   }
 
-  @Get(':id/pages')
-  listPages(@Param('id', ParseUUIDPipe) id: string): Promise<ProjectPageDto[]> {
-    return this.lowcode.listPages(id);
+  @Get(':id/versions/:versionId/pages')
+  listPages(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<ProjectPageDto[]> {
+    return this.lowcode.listPages(id, versionId);
   }
 
-  @Post(':id/pages')
+  @Post(':id/versions/:versionId/pages')
   createPage(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Body() dto: CreateProjectPageDto,
   ): Promise<ProjectPageDto> {
-    return this.lowcode.createPage(id, dto);
+    return this.lowcode.createPage(id, versionId, dto);
   }
 
-  @Get(':id/pages/:pageId')
+  @Get(':id/versions/:versionId/pages/:pageId')
   getPage(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Param('pageId', ParseUUIDPipe) pageId: string,
   ): Promise<ProjectPageDto> {
-    return this.lowcode.getPage(id, pageId);
+    return this.lowcode.getPage(id, versionId, pageId);
   }
 
-  @Patch(':id/pages/:pageId')
+  @Patch(':id/versions/:versionId/pages/:pageId')
   updatePage(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Param('pageId', ParseUUIDPipe) pageId: string,
     @Body() dto: UpdateProjectPageDto,
   ): Promise<ProjectPageDto> {
-    return this.lowcode.updatePage(id, pageId, dto);
+    return this.lowcode.updatePage(id, versionId, pageId, dto);
   }
 
-  @Delete(':id/pages/:pageId')
+  @Delete(':id/versions/:versionId/pages/:pageId')
   @HttpCode(204)
   deletePage(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Param('pageId', ParseUUIDPipe) pageId: string,
   ): Promise<void> {
-    return this.lowcode.deletePage(id, pageId);
+    return this.lowcode.deletePage(id, versionId, pageId);
   }
 
-  @Get(':id/pages/:pageId/versions')
-  listVersions(
+  @Get(':id/versions/:versionId/pages/:pageId/document')
+  getPageDocument(
     @Param('id', ParseUUIDPipe) id: string,
-    @Param('pageId', ParseUUIDPipe) pageId: string,
-  ): Promise<ProjectPageVersionDto[]> {
-    return this.lowcode.listVersions(id, pageId);
-  }
-
-  @Get(':id/pages/:pageId/versions/meta')
-  listVersionMeta(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('pageId', ParseUUIDPipe) pageId: string,
-  ): Promise<ProjectPageVersionMetaDto[]> {
-    return this.lowcode.listVersionMeta(id, pageId);
-  }
-
-  @Post(':id/pages/:pageId/versions')
-  createVersion(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('pageId', ParseUUIDPipe) pageId: string,
-    @Body() dto: CreatePageVersionDto,
-  ): Promise<ProjectPageVersionDto> {
-    return this.lowcode.createVersion(id, pageId, dto);
-  }
-
-  @Get(':id/pages/:pageId/versions/:versionId')
-  getVersion(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('pageId', ParseUUIDPipe) pageId: string,
     @Param('versionId', ParseUUIDPipe) versionId: string,
-  ): Promise<ProjectPageVersionDto> {
-    return this.lowcode.getVersion(id, pageId, versionId);
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+  ): Promise<ProjectPageSnapshotDto> {
+    return this.lowcode.getPageDocument(id, versionId, pageId);
   }
 
-  @Patch(':id/pages/:pageId/versions/:versionId')
-  updateVersion(
+  @Patch(':id/versions/:versionId/pages/:pageId/document')
+  updatePageDocument(
     @Param('id', ParseUUIDPipe) id: string,
-    @Param('pageId', ParseUUIDPipe) pageId: string,
     @Param('versionId', ParseUUIDPipe) versionId: string,
+    @Param('pageId', ParseUUIDPipe) pageId: string,
     @Body() dto: UpdatePageVersionDto,
-  ): Promise<ProjectPageVersionDto> {
-    return this.lowcode.updateVersion(id, pageId, versionId, dto);
-  }
-
-  @Delete(':id/pages/:pageId/versions/:versionId')
-  @HttpCode(204)
-  deleteVersion(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('pageId', ParseUUIDPipe) pageId: string,
-    @Param('versionId', ParseUUIDPipe) versionId: string,
-  ): Promise<void> {
-    return this.lowcode.deleteVersion(id, pageId, versionId);
+  ): Promise<ProjectPageSnapshotDto> {
+    if (!dto.document) {
+      throw new BadRequestException('document is required');
+    }
+    return this.lowcode.updatePageDocument(id, versionId, pageId, { document: dto.document });
   }
 
   @Get(':id/components')
@@ -273,46 +277,53 @@ export class LowcodeController {
     return this.lowcode.deleteComponentVersion(id, componentId, versionId);
   }
 
-  @Get(':id/assets/groups')
-  listAssetGroups(@Param('id', ParseUUIDPipe) id: string): Promise<ProjectAssetGroupDto[]> {
-    return this.lowcode.listAssetGroups(id);
+  @Get(':id/versions/:versionId/assets/groups')
+  listAssetGroups(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<ProjectAssetGroupDto[]> {
+    return this.lowcode.listAssetGroups(id, versionId);
   }
 
-  @Post(':id/assets/groups')
+  @Post(':id/versions/:versionId/assets/groups')
   createAssetGroup(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Body() dto: CreateAssetGroupDto,
   ): Promise<ProjectAssetGroupDto> {
-    return this.lowcode.createAssetGroup(id, dto.name);
+    return this.lowcode.createAssetGroup(id, versionId, dto.name);
   }
 
-  @Patch(':id/assets/groups/:group')
+  @Patch(':id/versions/:versionId/assets/groups/:group')
   renameAssetGroup(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Param('group') group: string,
     @Body() dto: UpdateAssetGroupDto,
   ): Promise<ProjectAssetGroupDto> {
-    return this.lowcode.renameAssetGroup(id, group, dto.name);
+    return this.lowcode.renameAssetGroup(id, versionId, group, dto.name);
   }
 
-  @Delete(':id/assets/groups/:group')
+  @Delete(':id/versions/:versionId/assets/groups/:group')
   @HttpCode(204)
   deleteAssetGroup(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Param('group') group: string,
   ): Promise<void> {
-    return this.lowcode.deleteAssetGroup(id, group);
+    return this.lowcode.deleteAssetGroup(id, versionId, group);
   }
 
-  @Get(':id/assets/groups/:group/files')
+  @Get(':id/versions/:versionId/assets/groups/:group/files')
   listAssetFiles(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Param('group') group: string,
   ): Promise<ProjectAssetFileDto[]> {
-    return this.lowcode.listAssetFiles(id, group);
+    return this.lowcode.listAssetFiles(id, versionId, group);
   }
 
-  @Post(':id/assets/groups/:group/files')
+  @Post(':id/versions/:versionId/assets/groups/:group/files')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -321,6 +332,7 @@ export class LowcodeController {
   )
   uploadAssetFile(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Param('group') group: string,
     @UploadedFile() file?: Express.Multer.File,
     @Body() dto?: UploadAssetFileDto,
@@ -328,59 +340,67 @@ export class LowcodeController {
     if (!file) {
       throw new BadRequestException('file is required');
     }
-    return this.lowcode.uploadAssetFile(id, group, file, dto?.name);
+    return this.lowcode.uploadAssetFile(id, versionId, group, file, dto?.name);
   }
 
-  @Delete(':id/assets/groups/:group/files/:name')
+  @Delete(':id/versions/:versionId/assets/groups/:group/files/:name')
   @HttpCode(204)
   deleteAssetFile(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Param('group') group: string,
     @Param('name') name: string,
   ): Promise<void> {
-    return this.lowcode.deleteAssetFile(id, group, name);
+    return this.lowcode.deleteAssetFile(id, versionId, group, name);
   }
 
-  @Get(':id/icons/groups')
-  listIconGroups(@Param('id', ParseUUIDPipe) id: string): Promise<ProjectIconGroupDto[]> {
-    return this.lowcode.listIconGroups(id);
+  @Get(':id/versions/:versionId/icons/groups')
+  listIconGroups(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<ProjectIconGroupDto[]> {
+    return this.lowcode.listIconGroups(id, versionId);
   }
 
-  @Post(':id/icons/groups')
+  @Post(':id/versions/:versionId/icons/groups')
   createIconGroup(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Body() dto: CreateIconGroupDto,
   ): Promise<ProjectIconGroupDto> {
-    return this.lowcode.createIconGroup(id, dto.name);
+    return this.lowcode.createIconGroup(id, versionId, dto.name);
   }
 
-  @Patch(':id/icons/groups/:group')
+  @Patch(':id/versions/:versionId/icons/groups/:group')
   renameIconGroup(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Param('group') group: string,
     @Body() dto: UpdateIconGroupDto,
   ): Promise<ProjectIconGroupDto> {
-    return this.lowcode.renameIconGroup(id, group, dto.name);
+    return this.lowcode.renameIconGroup(id, versionId, group, dto.name);
   }
 
-  @Delete(':id/icons/groups/:group')
+  @Delete(':id/versions/:versionId/icons/groups/:group')
   @HttpCode(204)
   deleteIconGroup(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Param('group') group: string,
   ): Promise<void> {
-    return this.lowcode.deleteIconGroup(id, group);
+    return this.lowcode.deleteIconGroup(id, versionId, group);
   }
 
-  @Get(':id/icons/groups/:group/files')
+  @Get(':id/versions/:versionId/icons/groups/:group/files')
   listIconFiles(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Param('group') group: string,
   ): Promise<ProjectIconFileDto[]> {
-    return this.lowcode.listIconFiles(id, group);
+    return this.lowcode.listIconFiles(id, versionId, group);
   }
 
-  @Post(':id/icons/groups/:group/files')
+  @Post(':id/versions/:versionId/icons/groups/:group/files')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -389,6 +409,7 @@ export class LowcodeController {
   )
   uploadIconFile(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Param('group') group: string,
     @UploadedFile() file?: Express.Multer.File,
     @Body() dto?: UploadIconFileDto,
@@ -396,17 +417,18 @@ export class LowcodeController {
     if (!file) {
       throw new BadRequestException('file is required');
     }
-    return this.lowcode.uploadIconFile(id, group, file, dto?.name);
+    return this.lowcode.uploadIconFile(id, versionId, group, file, dto?.name);
   }
 
-  @Delete(':id/icons/groups/:group/files/:name')
+  @Delete(':id/versions/:versionId/icons/groups/:group/files/:name')
   @HttpCode(204)
   deleteIconFile(
     @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
     @Param('group') group: string,
     @Param('name') name: string,
   ): Promise<void> {
-    return this.lowcode.deleteIconFile(id, group, name);
+    return this.lowcode.deleteIconFile(id, versionId, group, name);
   }
 
   @Get(':id/methods/:methodId')

@@ -28,6 +28,7 @@ export type WidgetRenderContext = {
   evaluateBindings: boolean;
   bindingScope: BindingScope;
   instanceKey: string;
+  hoverInstanceKeys?: readonly string[];
   hoverFor: (widget: PageWidget) => WidgetHoverHandlers | undefined;
   render: (
     widget: PageWidget,

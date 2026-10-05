@@ -18,6 +18,7 @@ import {
 
 type PropsPanelProps = {
   props: ComponentProp[];
+  variant?: 'props' | 'query';
   disabled?: boolean;
   onChange: (next: ComponentProp[], coalesceKey?: string) => void;
   onEndCoalesce: () => void;
@@ -29,18 +30,18 @@ type EmitsPanelProps = {
   onChange: (next: ComponentEmit[]) => void;
 };
 
-function nextPropName(props: ComponentProp[]) {
+function nextPropName(props: ComponentProp[], prefix: string) {
   const used = new Set(props.map((item) => item.name));
   let index = props.length + 1;
-  let name = `prop${index}`;
+  let name = `${prefix}${index}`;
   while (used.has(name)) {
     index += 1;
-    name = `prop${index}`;
+    name = `${prefix}${index}`;
   }
   return name;
 }
 
-export function ComponentPropsPanel({ props, disabled, onChange, onEndCoalesce }: PropsPanelProps) {
+export function ComponentPropsPanel({ props, variant = 'props', disabled, onChange, onEndCoalesce }: PropsPanelProps) {
   const { t } = useTranslation();
   const typeOptions = useMemo(
     () =>
@@ -67,7 +68,7 @@ export function ComponentPropsPanel({ props, disabled, onChange, onEndCoalesce }
     }
     onChange(
       props.map((item, i) => (i === index ? { ...item, name } : item)),
-      `prop:${current.name}:name`,
+      `${variant}:${current.name}:name`,
     );
     return true;
   }
@@ -128,25 +129,31 @@ export function ComponentPropsPanel({ props, disabled, onChange, onEndCoalesce }
           onChange={(event) => {
             const raw = event.target.value;
             const { desc: _ignored, ...rest } = record;
-            patch(index, raw.trim() ? { ...rest, desc: raw } : rest, `prop:${record.name}:desc`);
+            patch(index, raw.trim() ? { ...rest, desc: raw } : rest, `${variant}:${record.name}:desc`);
           }}
           onBlur={onEndCoalesce}
         />
       ),
     },
-    {
-      title: t('lowcode.propsRequired'),
-      dataIndex: 'required',
-      width: 72,
-      render: (required: boolean | undefined, record, index) => (
-        <Switch
-          size="small"
-          disabled={disabled}
-          checked={Boolean(required)}
-          onChange={(checked) => patch(index, { ...record, ...(checked ? { required: true } : { required: undefined }) })}
-        />
-      ),
-    },
+    ...(variant === 'props'
+      ? [
+          {
+            title: t('lowcode.propsRequired'),
+            dataIndex: 'required',
+            width: 72,
+            render: (required: boolean | undefined, record: ComponentProp, index: number) => (
+              <Switch
+                size="small"
+                disabled={disabled}
+                checked={Boolean(required)}
+                onChange={(checked) =>
+                  patch(index, { ...record, ...(checked ? { required: true } : { required: undefined }) })
+                }
+              />
+            ),
+          } satisfies TableColumnsType<ComponentProp>[number],
+        ]
+      : []),
     {
       title: t('lowcode.dataValue'),
       dataIndex: 'value',
@@ -159,7 +166,7 @@ export function ComponentPropsPanel({ props, disabled, onChange, onEndCoalesce }
               disabled={disabled}
               value={Number(value)}
               style={{ width: '100%' }}
-              onChange={(next) => patch(index, { ...record, value: String(next ?? 0) }, `prop:${record.name}:value`)}
+              onChange={(next) => patch(index, { ...record, value: String(next ?? 0) }, `${variant}:${record.name}:value`)}
               onBlur={onEndCoalesce}
             />
           );
@@ -179,25 +186,29 @@ export function ComponentPropsPanel({ props, disabled, onChange, onEndCoalesce }
             size="small"
             disabled={disabled}
             value={value}
-            onChange={(event) => patch(index, { ...record, value: event.target.value }, `prop:${record.name}:value`)}
+            onChange={(event) => patch(index, { ...record, value: event.target.value }, `${variant}:${record.name}:value`)}
             onBlur={onEndCoalesce}
           />
         );
       },
     },
-    {
-      title: t('lowcode.propsBind'),
-      dataIndex: 'bind',
-      width: 96,
-      render: (bind: boolean | undefined, record, index) => (
-        <Switch
-          size="small"
-          disabled={disabled}
-          checked={Boolean(bind)}
-          onChange={(checked) => patch(index, { ...record, ...(checked ? { bind: true } : { bind: undefined }) })}
-        />
-      ),
-    },
+    ...(variant === 'props'
+      ? [
+          {
+            title: t('lowcode.propsBind'),
+            dataIndex: 'bind',
+            width: 96,
+            render: (bind: boolean | undefined, record: ComponentProp, index: number) => (
+              <Switch
+                size="small"
+                disabled={disabled}
+                checked={Boolean(bind)}
+                onChange={(checked) => patch(index, { ...record, ...(checked ? { bind: true } : { bind: undefined }) })}
+              />
+            ),
+          } satisfies TableColumnsType<ComponentProp>[number],
+        ]
+      : []),
     {
       title: t('lowcode.delete'),
       width: 64,
@@ -219,13 +230,22 @@ export function ComponentPropsPanel({ props, disabled, onChange, onEndCoalesce }
     <section className="component-contract">
       <div className="page-data-toolbar">
         <span className="component-contract-title">{t('lowcode.propsTitle')}</span>
-        <span className="component-contract-hint">{t('lowcode.propsHint')}</span>
+        <span className="component-contract-hint">
+          {t(variant === 'query' ? 'lowcode.queryHint' : 'lowcode.propsHint')}
+        </span>
         <Button
           size="small"
           icon={<PlusOutlined />}
           disabled={disabled}
           onClick={() =>
-            onChange([...props, { type: 'str', name: nextPropName(props), value: defaultPageDataValue('str') }])
+            onChange([
+              ...props,
+              {
+                type: 'str',
+                name: nextPropName(props, variant === 'query' ? 'query' : 'prop'),
+                value: defaultPageDataValue('str'),
+              },
+            ])
           }
         >
           {t('lowcode.propsAdd')}

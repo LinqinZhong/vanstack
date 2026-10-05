@@ -1,6 +1,6 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { documentEventIds, type PageXmlDocument } from '@vanstack/xml';
+import { type PageXmlDocument } from '@vanstack/xml';
 import { Collection, Db, MongoClient } from 'mongodb';
 
 export type ComponentRecord = {
@@ -27,14 +27,14 @@ export type ComponentVersionRecord = PageXmlDocument & {
   updatedAt: Date;
 };
 
+/** 页面内容快照。多个工程版本可以指向同一份；uses 是指向它的工程版本数。 */
 export type PageVersionRecord = PageXmlDocument & {
   _id: string;
   projectId: string;
   projectKey: string;
   pageId: string;
   pageKey: string;
-  versionNo: number;
-  description?: string;
+  uses: number;
   createdAt?: Date;
   updatedAt: Date;
 };
@@ -69,12 +69,60 @@ export type ProjectRecord = {
   name: string;
   key: string;
   description: string;
+  currentVersionId: string | null;
   createdAt: Date;
   updatedAt: Date;
-  pages: ProjectPageRecord[];
 };
 
-export type LangRecord = {
+export type ProjectVersionRecord = {
+  _id: string;
+  projectId: string;
+  projectKey: string;
+  versionNo: number;
+  description: string;
+  pages: ProjectPageRecord[];
+  langVersionId: string;
+  assetVersionId: string;
+  iconVersionId: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type LangVersionRecord = {
+  _id: string;
+  projectId: string;
+  projectKey: string;
+  /** 有多少个工程版本引用这份语言库。 */
+  uses: number;
+  langs: ProjectLangRecord[];
+  langValues: ProjectLangValueRecord[];
+  updatedAt: Date;
+};
+
+export type LibraryFileRecord = {
+  name: string;
+  key: string;
+  size: number;
+  contentType?: string;
+};
+
+export type LibraryGroupRecord = {
+  name: string;
+  files: LibraryFileRecord[];
+};
+
+export type LibraryVersionRecord = {
+  _id: string;
+  projectId: string;
+  projectKey: string;
+  /** 有多少个工程版本引用这份库。 */
+  uses: number;
+  groups: LibraryGroupRecord[];
+  updatedAt: Date;
+};
+
+/** 迁移前嵌在工程上的语言库，读完就不再写入。 */
+export type LegacyLangRecord = {
   _id: string;
   projectKey: string;
   langs: ProjectLangRecord[];
@@ -96,25 +144,30 @@ export type EventRecord = {
   projectKey: string;
   id: string;
   source: string;
-  /** 有多少个已保存的页面版本引用这份事件。 */
+  /** 有多少个工程版本（以及组件版本）引用这份事件。 */
   uses: number;
   updatedAt: Date;
 };
 
 /**
- * 低代码文档按业务集合存放：`project`、`page.version`、`component`、`component.version`、`function`、`event`、`lang`。
+ * 低代码文档按业务集合存放：`project`、`project.version`、`page.version`、`component`、`component.version`、
+ * `function`、`event`、`lang.version`、`asset.version`、`icon.version`。
  */
 @Injectable()
 export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
   private readonly client: MongoClient;
   private readonly dbName: string;
   private projects: Collection<ProjectRecord> | null = null;
+  private projectVersions: Collection<ProjectVersionRecord> | null = null;
   private pageVersions: Collection<PageVersionRecord> | null = null;
   private components: Collection<ComponentRecord> | null = null;
   private componentVersions: Collection<ComponentVersionRecord> | null = null;
   private functions: Collection<FunctionRecord> | null = null;
   private events: Collection<EventRecord> | null = null;
-  private langs: Collection<LangRecord> | null = null;
+  private langVersions: Collection<LangVersionRecord> | null = null;
+  private legacyLangs: Collection<LegacyLangRecord> | null = null;
+  private assetVersions: Collection<LibraryVersionRecord> | null = null;
+  private iconVersions: Collection<LibraryVersionRecord> | null = null;
 
   constructor(config: ConfigService) {
     this.dbName = config.get<string>('MONGO_DB', 'vanstack');
@@ -126,24 +179,28 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     const db = this.client.db(this.dbName);
     await renameCollection(db, 'page_versions', 'page.version');
     this.projects = db.collection<ProjectRecord>('project');
+    this.projectVersions = db.collection<ProjectVersionRecord>('project.version');
     this.pageVersions = db.collection<PageVersionRecord>('page.version');
     this.components = db.collection<ComponentRecord>('component');
     this.componentVersions = db.collection<ComponentVersionRecord>('component.version');
     this.functions = db.collection<FunctionRecord>('function');
     this.events = db.collection<EventRecord>('event');
-    this.langs = db.collection<LangRecord>('lang');
+    this.langVersions = db.collection<LangVersionRecord>('lang.version');
+    this.legacyLangs = db.collection<LegacyLangRecord>('lang');
+    this.assetVersions = db.collection<LibraryVersionRecord>('asset.version');
+    this.iconVersions = db.collection<LibraryVersionRecord>('icon.version');
     await adoptBusinessId(this.projects, 'id');
     await adoptBusinessId(this.pageVersions, 'versionId');
     await adoptBusinessId(this.components, 'id');
     await adoptBusinessId(this.componentVersions, 'versionId');
     await this.projects.createIndex({ key: 1 }, { unique: true });
-    await this.pageVersions.createIndex({ projectId: 1, pageId: 1, versionNo: 1 });
+    await this.projectVersions.createIndex({ projectId: 1, versionNo: 1 }, { unique: true });
+    await this.pageVersions.createIndex({ projectId: 1, pageId: 1 });
     await this.components.createIndex({ projectId: 1, key: 1 }, { unique: true });
     await this.componentVersions.createIndex({ projectId: 1, componentId: 1, versionNo: 1 });
     await this.functions.createIndex({ projectId: 1, id: 1 }, { unique: true });
     await this.events.createIndex({ projectId: 1, id: 1 }, { unique: true });
     await this.importMethodUsage(db);
-    await this.recountEventUses();
     await this.moveLangs();
   }
 
@@ -171,6 +228,22 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     await this.projectDocs().replaceOne({ _id: project._id }, project, { upsert: true });
   }
 
+  async listProjectVersions(projectId: string): Promise<ProjectVersionRecord[]> {
+    return this.projectVersionDocs().find({ projectId }).sort({ versionNo: 1 }).toArray();
+  }
+
+  async getProjectVersion(id: string): Promise<ProjectVersionRecord | null> {
+    return this.projectVersionDocs().findOne({ _id: id });
+  }
+
+  async saveProjectVersion(version: ProjectVersionRecord): Promise<void> {
+    await this.projectVersionDocs().replaceOne({ _id: version._id }, version, { upsert: true });
+  }
+
+  async deleteProjectVersion(id: string): Promise<void> {
+    await this.projectVersionDocs().deleteOne({ _id: id });
+  }
+
   async listPageVersions(pageId: string): Promise<PageVersionRecord[]> {
     return this.pageDocs().find({ pageId }).sort({ versionNo: 1 }).toArray();
   }
@@ -182,10 +255,6 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
       .toArray();
   }
 
-  async listProjectVersions(projectId: string): Promise<PageVersionRecord[]> {
-    return this.pageDocs().find({ projectId }).toArray();
-  }
-
   async getPage(versionId: string): Promise<PageVersionRecord | null> {
     return this.pageDocs().findOne({ _id: versionId });
   }
@@ -194,7 +263,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     const existing = await this.pageDocs().findOne({ _id: record._id });
     const next: PageVersionRecord = {
       ...record,
-      description: record.description ?? existing?.description ?? '',
+      uses: record.uses ?? existing?.uses ?? 0,
       createdAt: existing?.createdAt ?? record.createdAt ?? new Date(),
       updatedAt: new Date(),
     };
@@ -208,6 +277,24 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
 
   async deletePagesByPage(pageId: string): Promise<void> {
     await this.pageDocs().deleteMany({ pageId });
+  }
+
+  async addPageUses(id: string, delta: number): Promise<number> {
+    const updated = await this.pageDocs().findOneAndUpdate(
+      { _id: id },
+      { $inc: { uses: delta } },
+      { returnDocument: 'after' },
+    );
+    const uses = updated?.uses ?? 0;
+    if (uses < 0) {
+      await this.pageDocs().updateOne({ _id: id }, { $set: { uses: 0 } });
+      return 0;
+    }
+    return uses;
+  }
+
+  async listProjectPageSnapshots(projectId: string): Promise<PageVersionRecord[]> {
+    return this.pageDocs().find({ projectId }).toArray();
   }
 
   async listComponents(projectId: string): Promise<ComponentRecord[]> {
@@ -332,21 +419,89 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     await this.eventDocs().deleteOne({ projectId, id });
   }
 
-  async getLang(projectId: string): Promise<LangRecord | null> {
-    return this.langDocs().findOne({ _id: projectId });
+  async getLegacyLang(projectId: string): Promise<LegacyLangRecord | null> {
+    return this.legacyLangDocs().findOne({ _id: projectId });
   }
 
-  async saveLang(record: LangRecord): Promise<void> {
-    await this.langDocs().replaceOne({ _id: record._id }, record, { upsert: true });
+  async getLangVersion(id: string): Promise<LangVersionRecord | null> {
+    return this.langVersionDocs().findOne({ _id: id });
   }
 
-  async renameLangProject(projectId: string, projectKey: string): Promise<void> {
-    await this.langDocs().updateOne({ _id: projectId }, { $set: { projectKey } });
+  async saveLangVersion(record: LangVersionRecord): Promise<void> {
+    await this.langVersionDocs().replaceOne({ _id: record._id }, record, { upsert: true });
+  }
+
+  async deleteLangVersion(id: string): Promise<void> {
+    await this.langVersionDocs().deleteOne({ _id: id });
+  }
+
+  async addLangUses(id: string, delta: number): Promise<number> {
+    return this.addUses(this.langVersionDocs(), id, delta);
+  }
+
+  async getLibraryVersion(kind: 'asset' | 'icon', id: string): Promise<LibraryVersionRecord | null> {
+    return this.libraryDocs(kind).findOne({ _id: id });
+  }
+
+  async saveLibraryVersion(kind: 'asset' | 'icon', record: LibraryVersionRecord): Promise<void> {
+    await this.libraryDocs(kind).replaceOne({ _id: record._id }, record, { upsert: true });
+  }
+
+  async deleteLibraryVersion(kind: 'asset' | 'icon', id: string): Promise<void> {
+    await this.libraryDocs(kind).deleteOne({ _id: id });
+  }
+
+  async addLibraryUses(kind: 'asset' | 'icon', id: string, delta: number): Promise<number> {
+    return this.addUses(this.libraryDocs(kind), id, delta);
+  }
+
+  async countBlobKey(key: string): Promise<number> {
+    const filter = { 'groups.files.key': key };
+    const assets = await this.libraryDocs('asset').countDocuments(filter);
+    const icons = await this.libraryDocs('icon').countDocuments(filter);
+    return assets + icons;
+  }
+
+  async listFunctions(projectId: string): Promise<FunctionRecord[]> {
+    return this.functionDocs().find({ projectId }).toArray();
+  }
+
+  async listEvents(projectId: string): Promise<EventRecord[]> {
+    return this.eventDocs().find({ projectId }).toArray();
+  }
+
+  async setFunctionUses(projectId: string, id: string, uses: number): Promise<void> {
+    if (uses <= 0) {
+      const current = await this.functionDocs().findOne({ projectId, id });
+      if (!current || current.code == null) {
+        await this.functionDocs().deleteOne({ projectId, id });
+        return;
+      }
+      await this.functionDocs().updateOne({ projectId, id }, { $set: { uses: 0, updatedAt: new Date() } });
+      return;
+    }
+    await this.functionDocs().updateOne({ projectId, id }, { $set: { uses, updatedAt: new Date() } });
+  }
+
+  async setEventUses(projectId: string, id: string, uses: number): Promise<void> {
+    if (uses <= 0) {
+      await this.eventDocs().deleteOne({ projectId, id });
+      return;
+    }
+    await this.eventDocs().updateOne({ projectId, id }, { $set: { uses, updatedAt: new Date() } });
+  }
+
+  async setPageUses(id: string, uses: number): Promise<void> {
+    await this.pageDocs().updateOne({ _id: id }, { $set: { uses } });
   }
 
   async deleteByProject(projectId: string): Promise<void> {
     await this.projectDocs().deleteOne({ _id: projectId });
-    await this.langDocs().deleteOne({ _id: projectId });
+    await this.projectVersionDocs().deleteMany({ projectId });
+    await this.legacyLangDocs().deleteOne({ _id: projectId });
+    await this.langVersionDocs().deleteMany({ projectId });
+    await this.libraryDocs('asset').deleteMany({ projectId });
+    await this.libraryDocs('icon').deleteMany({ projectId });
     await this.pageDocs().deleteMany({ projectId });
     await this.componentDocs().deleteMany({ projectId });
     await this.componentVersionDocs().deleteMany({ projectId });
@@ -354,25 +509,25 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     await this.eventDocs().deleteMany({ projectId });
   }
 
-  /** 按已保存的页面版本重算事件引用数。同一版本里重复出现只计一次。 */
-  private async recountEventUses() {
-    const counts = new Map<string, number>();
-    const versions = [
-      ...(await this.pageDocs().find().toArray()),
-      ...(await this.componentVersionDocs().find().toArray()),
-    ];
-    for (const version of versions) {
-      for (const eventId of documentEventIds(version)) {
-        const key = `${version.projectId}\0${eventId}`;
-        counts.set(key, (counts.get(key) ?? 0) + 1);
-      }
-    }
-    for (const event of await this.eventDocs().find().toArray()) {
-      const uses = counts.get(`${event.projectId}\0${event.id}`) ?? 0;
-      if (event.uses !== uses) {
-        await this.eventDocs().updateOne({ projectId: event.projectId, id: event.id }, { $set: { uses } });
-      }
-    }
+  async renameProjectKey(projectId: string, projectKey: string): Promise<void> {
+    const set = { $set: { projectKey } };
+    await this.projectVersionDocs().updateMany({ projectId }, set);
+    await this.pageDocs().updateMany({ projectId }, set);
+    await this.langVersionDocs().updateMany({ projectId }, set);
+    await this.libraryDocs('asset').updateMany({ projectId }, set);
+    await this.libraryDocs('icon').updateMany({ projectId }, set);
+    await this.componentDocs().updateMany({ projectId }, set);
+    await this.componentVersionDocs().updateMany({ projectId }, set);
+    await this.functionDocs().updateMany({ projectId }, set);
+    await this.eventDocs().updateMany({ projectId }, set);
+  }
+
+  /** 迁走工程文档上残留的 pages 字段，并记下当前工程版本。 */
+  async finishProjectMigration(projectId: string, currentVersionId: string): Promise<void> {
+    await this.projectDocs().updateOne(
+      { _id: projectId },
+      { $set: { currentVersionId }, $unset: { pages: '' } },
+    );
   }
 
   private async importMethodUsage(db: Db) {
@@ -446,8 +601,8 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
       const id = String(project._id);
       const langs = Array.isArray(project.langs) ? (project.langs as ProjectLangRecord[]) : [];
       const langValues = Array.isArray(project.langValues) ? (project.langValues as ProjectLangValueRecord[]) : [];
-      if ((langs.length > 0 || langValues.length > 0) && !(await this.langDocs().findOne({ _id: id }))) {
-        await this.langDocs().insertOne({
+      if ((langs.length > 0 || langValues.length > 0) && !(await this.legacyLangDocs().findOne({ _id: id }))) {
+        await this.legacyLangDocs().insertOne({
           _id: id,
           projectKey: String(project.key ?? ''),
           langs,
@@ -466,11 +621,52 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     return this.events;
   }
 
-  private langDocs() {
-    if (!this.langs) {
+  private projectVersionDocs() {
+    if (!this.projectVersions) {
+      throw new Error('project.version collection is not ready');
+    }
+    return this.projectVersions;
+  }
+
+  private legacyLangDocs() {
+    if (!this.legacyLangs) {
       throw new Error('lang collection is not ready');
     }
-    return this.langs;
+    return this.legacyLangs;
+  }
+
+  private langVersionDocs() {
+    if (!this.langVersions) {
+      throw new Error('lang.version collection is not ready');
+    }
+    return this.langVersions;
+  }
+
+  private libraryDocs(kind: 'asset' | 'icon') {
+    const docs = kind === 'asset' ? this.assetVersions : this.iconVersions;
+    if (!docs) {
+      throw new Error(`${kind}.version collection is not ready`);
+    }
+    return docs;
+  }
+
+  private async addUses(
+    docs: Collection<LangVersionRecord> | Collection<LibraryVersionRecord>,
+    id: string,
+    delta: number,
+  ): Promise<number> {
+    const collection = docs as unknown as Collection<{ _id: string; uses: number }>;
+    const updated = await collection.findOneAndUpdate(
+      { _id: id },
+      { $inc: { uses: delta } },
+      { returnDocument: 'after' },
+    );
+    const uses = updated?.uses ?? 0;
+    if (uses < 0) {
+      await collection.updateOne({ _id: id }, { $set: { uses: 0 } });
+      return 0;
+    }
+    return uses;
   }
 }
 

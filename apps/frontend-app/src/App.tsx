@@ -1,9 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { type RuntimeProjectDto } from '@vanstack/shared';
-import { renderPage } from '@vanstack/lowcode-runtime';
-import { pageI18nFromSnapshot, pickPageLocale, type PageI18n, type PageXmlDocument } from '@vanstack/xml';
-import { loadLangJson, loadPageDocument, pickRuntimeLang, pickRuntimePage, preloadPageDocument, preloadPageLangs } from './runtime';
+import { installPageNavigation, renderPage } from '@vanstack/lowcode-runtime';
+import { buildPropsRecord, pageI18nFromSnapshot, pickPageLocale, type PageI18n, type PageXmlDocument } from '@vanstack/xml';
+import {
+  pageUrl,
+  parseRoute,
+  plainQuery,
+  readNavIndex,
+  resetPendingBack,
+  takeBackSteps,
+  withNavIndex,
+  type PageQuery,
+} from './navigation';
+import { loadLangJson, loadPageDocument, loadRuntimeEvent, pickRuntimeLang, pickRuntimePage, preloadPageDocument, preloadPageLangs } from './runtime';
 
 const DEMO_PAGE: PageXmlDocument = {
   widgets: [
@@ -19,26 +29,59 @@ const DEMO_PAGE: PageXmlDocument = {
   ],
 };
 
-function parsePath() {
-  const [projectKey = '', pageKey = ''] = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/');
-  return { projectKey, pageKey };
-}
-
 export default function App() {
   const { t, i18n } = useTranslation();
   const lang = i18n.resolvedLanguage ?? i18n.language;
   const mountRef = useRef<HTMLDivElement>(null);
-  const [{ projectKey, pageKey }, setRoute] = useState(parsePath);
+  const [route, setRoute] = useState(() => parseRoute(window.location));
+  const { projectKey, pageKey } = route;
   const [project, setProject] = useState<RuntimeProjectDto | null>(null);
   const [pageDocument, setPageDocument] = useState<PageXmlDocument | null>(null);
   const [catalog, setCatalog] = useState<PageI18n | undefined>(undefined);
+  const [shownQuery, setShownQuery] = useState<PageQuery>({});
+  const [shownPageKey, setShownPageKey] = useState('');
+  const projectRef = useRef<RuntimeProjectDto | null>(null);
+  const routeRef = useRef(route);
+  projectRef.current = project;
+  routeRef.current = route;
+
+  installPageNavigation({
+    navigateTo(nextPageKey, query) {
+      const current = routeRef.current;
+      const currentProject = projectRef.current;
+      const key = nextPageKey.trim();
+      if (!current.projectKey || !currentProject || !currentProject.pages.some((page) => page.key === key)) {
+        return;
+      }
+      const nextQuery = plainQuery(query);
+      const nextUrl = pageUrl(current.projectKey, key, nextQuery, window.location.search);
+      const currentUrl = `${window.location.pathname}${window.location.search}`;
+      if (currentUrl === nextUrl) {
+        return;
+      }
+      const index = (readNavIndex(window.history.state) ?? 0) + 1;
+      window.history.pushState(withNavIndex(window.history.state, index), '', nextUrl);
+      setRoute(parseRoute(window.location));
+    },
+    navigateBack(times) {
+      const index = readNavIndex(window.history.state) ?? 0;
+      const steps = takeBackSteps(index, times);
+      if (steps > 0) {
+        window.history.go(-steps);
+      }
+    },
+  });
   const [status, setStatus] = useState<'idle' | 'loading' | 'missing' | 'empty' | 'ready'>(
     projectKey ? 'loading' : 'idle',
   );
 
   useEffect(() => {
     function onPopState() {
-      setRoute(parsePath());
+      resetPendingBack();
+      setRoute(parseRoute(window.location));
+    }
+    if (readNavIndex(window.history.state) == null) {
+      window.history.replaceState(withNavIndex(window.history.state, 0), '');
     }
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -49,6 +92,8 @@ export default function App() {
       setProject(null);
       setPageDocument(DEMO_PAGE);
       setCatalog(undefined);
+      setShownQuery({});
+      setShownPageKey('');
       setStatus('idle');
       return;
     }
@@ -56,6 +101,8 @@ export default function App() {
     setStatus('loading');
     setPageDocument(null);
     setCatalog(undefined);
+    setShownQuery({});
+    setShownPageKey('');
     void fetch(`/api/runtime/projects/${encodeURIComponent(projectKey)}?lang=${encodeURIComponent(lang)}`, {
       headers: { Accept: 'application/json', 'x-lang': lang },
     })
@@ -84,6 +131,9 @@ export default function App() {
     };
   }, [lang, projectKey]);
 
+  const queryKey = JSON.stringify(route.query);
+  const documentReadyRef = useRef(false);
+  documentReadyRef.current = pageDocument != null;
   useEffect(() => {
     if (!project || project.pages.length === 0) {
       return;
@@ -94,7 +144,10 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    setStatus('loading');
+    const requestedQuery = JSON.parse(queryKey) as PageQuery;
+    if (!documentReadyRef.current) {
+      setStatus('loading');
+    }
     const langMeta = pickRuntimeLang(page.langs ?? [], lang);
     const loading = Promise.all([
       loadPageDocument(page.documentUrl),
@@ -112,12 +165,16 @@ export default function App() {
           return;
         }
         setPageDocument(nextDocument);
+        setShownQuery(requestedQuery);
+        setShownPageKey(page.key);
         setCatalog(snapshot ? pageI18nFromSnapshot(snapshot) : undefined);
         setStatus('ready');
       })
       .catch(() => {
         if (!cancelled) {
           setPageDocument(null);
+          setShownQuery({});
+          setShownPageKey('');
           setCatalog(undefined);
           setStatus('missing');
         }
@@ -125,7 +182,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [lang, pageKey, project]);
+  }, [lang, pageKey, project, queryKey]);
 
   useEffect(() => {
     if (!mountRef.current) {
@@ -138,8 +195,11 @@ export default function App() {
     renderPage(mountRef.current, pageDocument, {
       locale: pickPageLocale(catalog, lang),
       catalog,
+      query: { ...buildPropsRecord(pageDocument.query), ...shownQuery },
+      pageId: shownPageKey ? `${shownPageKey}:${JSON.stringify(shownQuery)}` : null,
+      loadWidgetEvent: projectKey ? (eventId) => loadRuntimeEvent(projectKey, eventId) : undefined,
     });
-  }, [catalog, lang, pageDocument]);
+  }, [catalog, lang, pageDocument, projectKey, shownPageKey, shownQuery]);
 
   return (
     <div className="h5-frame">

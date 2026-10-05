@@ -132,8 +132,17 @@ export function hiddenCss(hidden: boolean | undefined, editing: boolean): CSSPro
   return hidden && editing ? { visibility: 'hidden' } : undefined;
 }
 
+function pageOverflowValue(style: PageStyle | undefined, editing: boolean, options?: WidgetCssOptions) {
+  if (editing) {
+    return 'visible';
+  }
+  return cssText(style?.overflow, options) ?? 'auto';
+}
+
 export function pageCss(style: PageStyle | undefined, editing = false, options?: WidgetCssOptions): CSSProperties {
-  const overflow = editing ? 'visible' : (cssText(style?.overflow, options) ?? 'auto');
+  // perspective 会成为 position:fixed 的包含块。包含块自己滚动时，固定定位会跟着内容走。
+  // 所以页面壳只负责透视和屏幕尺寸，真正的滚动放在 .lowcode-page-scroll。
+  const overflow = pageOverflowValue(style, editing, options);
   const css: CSSProperties = {
     boxSizing: 'border-box',
     position: 'relative',
@@ -144,7 +153,7 @@ export function pageCss(style: PageStyle | undefined, editing = false, options?:
     width: '100%',
     height: '100%',
     minHeight: '100%',
-    overflow: overflow as CSSProperties['overflow'],
+    overflow: overflow === 'visible' ? 'visible' : 'hidden',
   };
   const background = cssText(style?.background, options);
   if (background) {
@@ -167,6 +176,21 @@ export function pageCss(style: PageStyle | undefined, editing = false, options?:
     css.paddingLeft = paddingLeft;
   }
   return css;
+}
+
+/** 页面内容的滚动层。与带 perspective 的页面壳分开，固定定位才相对屏幕而不是跟着滚。 */
+export function pageScrollCss(style: PageStyle | undefined, editing = false, options?: WidgetCssOptions): CSSProperties {
+  return {
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    flex: '1 1 auto',
+    alignSelf: 'stretch',
+    width: '100%',
+    minHeight: 0,
+    overflow: pageOverflowValue(style, editing, options) as CSSProperties['overflow'],
+  };
 }
 
 export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOptions): CSSProperties | undefined {
@@ -628,6 +652,46 @@ function subtreeHasFixedContent(widgets: PageWidget[]): boolean {
   return false;
 }
 
+function bottomIsPinned(value: BoxLength | string | undefined) {
+  if (value == null || value === 'auto') {
+    return false;
+  }
+  if (typeof value === 'string') {
+    return !isCopyBinding(value);
+  }
+  return value.mode !== 'auto';
+}
+
+function hasBottomFixed(widgets: PageWidget[]): boolean {
+  for (const widget of widgets) {
+    if (widget.style?.position === 'fixed' && bottomIsPinned(widget.style.bottom)) {
+      return true;
+    }
+    if ('children' in widget && hasBottomFixed(widget.children)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** 底栏贴在屏幕底边时，自动高度盒子的底内边距要露在栏下面，而不是被栏盖住。 */
+function fixedBottomClearance(widget: PageWidget): string | undefined {
+  if (widget.type !== 'flex' || widget.style?.height != null || !hasBottomFixed(widget.children)) {
+    return undefined;
+  }
+  const value = widget.style?.paddingBottom;
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return `${value}px`;
+  }
+  if (!value || typeof value === 'string' || value.mode === 'auto') {
+    return undefined;
+  }
+  if (value.value <= 0) {
+    return undefined;
+  }
+  return value.mode === '%' ? `${value.value}%` : `${value.value}px`;
+}
+
 export function pageCssText(widgets: PageWidget[]): string {
   const blocks: string[] = [];
 
@@ -638,7 +702,7 @@ export function pageCssText(widgets: PageWidget[]): string {
     }
   }
 
-  function walk(list: PageWidget[]) {
+  function walk(list: PageWidget[], root: boolean) {
     for (const widget of list) {
       const cls = widgetClassName(widget.id);
       for (const override of widget.stateOverrides ?? []) {
@@ -657,6 +721,12 @@ export function pageCssText(widgets: PageWidget[]): string {
       if (widget.type === 'flex' && columnShouldHugContent(widget)) {
         blocks.push(`.lowcode-flex.${cls} { width: min-content; }`);
       }
+      if (root) {
+        const clearance = fixedBottomClearance(widget);
+        if (clearance) {
+          blocks.push(`.lowcode-page-scroll > .${cls} { min-height: calc(100% + ${clearance}) !important; }`);
+        }
+      }
       if (widget.type === 'table') {
         blocks.push(...tableLineRules(cls, widget.lines));
       }
@@ -664,14 +734,14 @@ export function pageCssText(widgets: PageWidget[]): string {
         push(`.${cls}[data-state~="${escapeStateId(state.id)}"]`, state.style, false);
       }
       if ('children' in widget) {
-        walk(widget.children);
+        walk(widget.children, false);
       }
     }
   }
 
-  walk(widgets);
+  walk(widgets, true);
   blocks.push(
-    '.lowcode-page > [data-widget-id] { flex: 0 0 auto; max-width: none; }',
+    '.lowcode-page-scroll > [data-widget-id] { flex: 0 0 auto; max-width: none; }',
     '.lowcode-table { scrollbar-width: none; }',
     '.lowcode-table::-webkit-scrollbar { width: 0; height: 0; display: none; }',
     '.lowcode-table-slot { display: flex; align-items: center; }',

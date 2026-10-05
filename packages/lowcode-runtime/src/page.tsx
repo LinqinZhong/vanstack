@@ -1,4 +1,4 @@
-import { createElement, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { createElement, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
   buildPropsRecord,
   resolvePageData,
@@ -15,10 +15,11 @@ import {
   type PageXmlDocument,
   type WidgetStateLayer,
 } from '@vanstack/xml';
-import { pageCss, pageCssText } from './css';
+import { pageCss, pageCssText, pageScrollCss } from './css';
 import { widgetElement } from './elements';
 import { HOVER_STATE_NAME, resolveRuntimeOwnState, widgetHasHoverState } from './hover';
 import { expandLoopTree, widgetInstanceKey, widgetInstanceMeta } from './loop';
+import { setPageQuery } from './navigate';
 import { usePageToast } from './toast';
 import { pointEventPayload, runEventIds, timeEventPayload, type WidgetEventLoader } from './events';
 import type { WidgetHoverHandlers } from './widget-render';
@@ -39,12 +40,14 @@ export type LowcodePageProps = {
   onModelValue?: (name: string, value: string, done?: boolean) => void;
   loadWidgetEvent?: WidgetEventLoader;
   pageId?: string | null;
+  query?: Record<string, unknown>;
   components?: Record<string, PageXmlDocument>;
   centerContent?: boolean;
   useComponentTestData?: boolean;
 };
 
 const EMPTY_SCOPE: BindingScope = { data: Object.create(null) as Record<string, unknown> };
+const EMPTY_QUERY: Record<string, unknown> = {};
 
 function pageDataKey(data: PageVariable[] | undefined) {
   return (data ?? [])
@@ -52,7 +55,8 @@ function pageDataKey(data: PageVariable[] | undefined) {
     .join('\n');
 }
 
-export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel, onModelValue, loadWidgetEvent, pageId, components, centerContent, useComponentTestData }: LowcodePageProps): ReactElement {
+export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel, onModelValue, loadWidgetEvent, pageId, query, components, centerContent, useComponentTestData }: LowcodePageProps): ReactElement {
+  const pageQuery = query ?? EMPTY_QUERY;
   const loaderRef = useRef(loadWidgetEvent);
   loaderRef.current = loadWidgetEvent;
   const eventsRef = useRef(page.events);
@@ -81,25 +85,32 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     setHoverInstanceKeys([]);
   }, [page, editing]);
 
+  useLayoutEffect(() => {
+    if (editing) {
+      return undefined;
+    }
+    setPageQuery(pageQuery);
+    return () => {
+      setPageQuery(EMPTY_QUERY);
+    };
+  }, [editing, pageQuery]);
+
   useEffect(() => {
     if (editing) {
       return undefined;
     }
     const loader = loaderRef.current;
     const events = eventsRef.current;
-    if (!loader) {
-      return undefined;
-    }
     let cancelled = false;
     const run = async (name: string, arg: unknown) => {
-      if (cancelled) {
+      if (cancelled || !loader) {
         return;
       }
       const ids = events?.[name];
       if (!ids?.length) {
         return;
       }
-      await runEventIds(loader, ids, [arg]);
+      await runEventIds(loader, ids, [arg], pageQuery);
     };
     void (async () => {
       await run('init', timeEventPayload());
@@ -113,16 +124,19 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       const leave = timeEventPayload();
       const before = events?.beforeleave;
       const left = events?.left;
+      if (!loader || (!before?.length && !left?.length)) {
+        return;
+      }
       void (async () => {
         if (before?.length) {
-          await runEventIds(loader, before, [leave]);
+          await runEventIds(loader, before, [leave], pageQuery);
         }
         if (left?.length) {
-          await runEventIds(loader, left, [leave]);
+          await runEventIds(loader, left, [leave], pageQuery);
         }
       })();
     };
-  }, [editing, pageId]);
+  }, [editing, pageId, pageQuery]);
 
   function runPageTouch(name: 'touchstart' | 'touchmove' | 'touchend', event: unknown) {
     if (editing) {
@@ -144,9 +158,9 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       }
       return { ...prop, value: modelOverrides[key] };
     });
-    return buildPropsRecord(live);
-  }, [page.props, modelOverrides]);
-  const dataProps = useMemo(() => buildPropsRecord(page.props), [page.props]);
+    return buildPropsRecord(live, pageQuery);
+  }, [page.props, modelOverrides, pageQuery]);
+  const dataProps = useMemo(() => buildPropsRecord(page.props, pageQuery), [page.props, pageQuery]);
   const dataOverrides = useMemo(() => {
     const overrides: Record<string, string> = Object.create(null);
     let any = false;
@@ -162,18 +176,18 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     return any ? overrides : undefined;
   }, [page.data, modelOverrides]);
   const dataScope = useMemo(
-    () => resolvePageData(page.data, dataOverrides, dataProps, propsScope),
-    [page.data, dataOverrides, dataProps, propsScope],
+    () => resolvePageData(page.data, dataOverrides, dataProps, propsScope, pageQuery),
+    [page.data, dataOverrides, dataProps, propsScope, pageQuery],
   );
   const { widgets, stateLayers } = useMemo(() => {
     const sink = new WeakMap<object, WidgetStateLayer[]>();
-    const expanded = expandLoopTree(page.widgets, { data: dataScope, props: propsScope, aliases: {} }, editing);
+    const expanded = expandLoopTree(page.widgets, { data: dataScope, props: propsScope, query: pageQuery, aliases: {} }, editing);
     const resolved = resolveWidgetTree(expanded, editing ? viewing : null, {
       appliedStateFor: editing ? undefined : (widget) => resolveRuntimeOwnState(widget, hoverInstanceKeys),
       stateLayersSink: sink,
     });
     return { widgets: resolved, stateLayers: sink };
-  }, [page.widgets, viewing, dataScope, propsScope, editing, hoverInstanceKeys]);
+  }, [page.widgets, viewing, dataScope, propsScope, pageQuery, editing, hoverInstanceKeys]);
   const toast = usePageToast();
   const currentLocale = locale || pickPageLocale(catalog);
   const dir = pageI18nDir(catalog, currentLocale);
@@ -286,6 +300,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       evaluateBindings: instantiate || !editing,
       bindingScope: meta?.scope ?? EMPTY_SCOPE,
       instanceKey: meta?.key ?? widget.id,
+      hoverInstanceKeys,
       hoverFor,
       summarizeCopy,
       dynamicTextLabel,
@@ -307,6 +322,10 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     });
   }
 
+  const bindingOptions = {
+    evaluateBindings: !editing,
+    bindingScope: { data: dataScope, props: propsScope, query: pageQuery },
+  };
   return createElement(
     'div',
     {
@@ -314,8 +333,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       dir,
       'data-hover-active': hoverInstanceKeys.length > 0 ? HOVER_STATE_NAME : undefined,
       style: {
-        ...pageCss(page.style, editing, { evaluateBindings: !editing, bindingScope: { data: dataScope, props: propsScope } }),
-        ...(centerContent ? { alignItems: 'center', justifyContent: 'center' } : null),
+        ...pageCss(page.style, editing, bindingOptions),
         direction: dir,
       },
       onTouchStart: editing ? undefined : (event: unknown) => runPageTouch('touchstart', event),
@@ -326,7 +344,17 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       key: 'lowcode-page-style',
       dangerouslySetInnerHTML: { __html: styleText },
     }),
-    widgets.map((widget) => render(widget)),
+    createElement(
+      'div',
+      {
+        className: 'lowcode-page-scroll',
+        style: {
+          ...pageScrollCss(page.style, editing, bindingOptions),
+          ...(centerContent ? { alignItems: 'center', justifyContent: 'center' } : null),
+        },
+      },
+      widgets.map((widget) => render(widget)),
+    ),
     toast,
   );
 }

@@ -512,9 +512,10 @@ export type ComponentProp = {
   bind?: boolean;
 };
 
-/** 调试样本。键是入参或变量名，值的写法和定义里的 value 相同。缺省时用定义值。 */
+/** 调试样本。键是入参、页面 query 或变量名，值的写法和定义里的 value 相同。缺省时用定义值。 */
 export type PageTestData = {
   props?: Record<string, string>;
+  query?: Record<string, string>;
   data?: Record<string, string>;
 };
 
@@ -522,16 +523,20 @@ export function compactPageTestData(
   input: PageTestData | undefined,
   props: ComponentProp[] | undefined,
   data: PageVariable[] | undefined,
+  query?: ComponentProp[],
 ): PageTestData | undefined {
   const propNames = new Set((props ?? []).map((item) => item.name));
   const dataNames = new Set((data ?? []).map((item) => item.name));
+  const queryNames = new Set((query ?? []).map((item) => item.name));
   const nextProps = pickTestBag(input?.props, propNames);
   const nextData = pickTestBag(input?.data, dataNames);
-  if (!nextProps && !nextData) {
+  const nextQuery = pickTestBag(input?.query, queryNames);
+  if (!nextProps && !nextData && !nextQuery) {
     return undefined;
   }
   return {
     ...(nextProps ? { props: nextProps } : {}),
+    ...(nextQuery ? { query: nextQuery } : {}),
     ...(nextData ? { data: nextData } : {}),
   };
 }
@@ -837,6 +842,8 @@ export type PageXmlDocument = {
   events?: WidgetEvents;
   methods?: PageMethod[];
   props?: ComponentProp[];
+  /** 页面 query。预览和运行时用 `$query.参数名` 读取，缺省时用这里的值。 */
+  query?: ComponentProp[];
   emits?: ComponentEmit[];
   testData?: PageTestData;
 };
@@ -2608,13 +2615,21 @@ function parsePageMethods(nodes: OrderedNode[]): PageMethod[] | undefined {
 }
 
 function parseComponentProps(nodes: OrderedNode[]): ComponentProp[] | undefined {
-  const root = nodes.find((child) => Object.prototype.hasOwnProperty.call(child, 'props'));
+  return parseContractProps(nodes, 'props');
+}
+
+function parsePageQuery(nodes: OrderedNode[]): ComponentProp[] | undefined {
+  return parseContractProps(nodes, 'query');
+}
+
+function parseContractProps(nodes: OrderedNode[], tag: 'props' | 'query'): ComponentProp[] | undefined {
+  const root = nodes.find((child) => Object.prototype.hasOwnProperty.call(child, tag));
   if (!root) {
     return undefined;
   }
   const props: ComponentProp[] = [];
   const seen = new Set<string>();
-  for (const child of nodeList(root.props)) {
+  for (const child of nodeList(root[tag])) {
     const type = COMPONENT_PROP_TYPES.find((item) => Object.prototype.hasOwnProperty.call(child, item));
     if (!type) {
       continue;
@@ -2627,8 +2642,8 @@ function parseComponentProps(nodes: OrderedNode[]): ComponentProp[] | undefined 
     const raw = elementText(child[type]);
     const value = type === 'bool' ? (raw === '1' ? '1' : '0') : raw;
     const desc = attr(child, 'desc').trim();
-    const required = attr(child, 'required') === '1';
-    const bind = attr(child, 'bind') === '1';
+    const required = tag === 'props' && attr(child, 'required') === '1';
+    const bind = tag === 'props' && attr(child, 'bind') === '1';
     props.push({
       name,
       type,
@@ -2691,14 +2706,17 @@ function parseTestData(nodes: OrderedNode[]): PageTestData | undefined {
   }
   const body = nodeList(root.testData);
   const propsNode = body.find((child) => Object.prototype.hasOwnProperty.call(child, 'props'));
+  const queryNode = body.find((child) => Object.prototype.hasOwnProperty.call(child, 'query'));
   const dataNode = body.find((child) => Object.prototype.hasOwnProperty.call(child, 'data'));
   const props = propsNode ? parseTestBag(nodeList(propsNode.props), COMPONENT_PROP_TYPES) : undefined;
+  const query = queryNode ? parseTestBag(nodeList(queryNode.query), COMPONENT_PROP_TYPES) : undefined;
   const data = dataNode ? parseTestBag(nodeList(dataNode.data), PAGE_DATA_TYPES) : undefined;
-  if (!props && !data) {
+  if (!props && !query && !data) {
     return undefined;
   }
   return {
     ...(props ? { props } : {}),
+    ...(query ? { query } : {}),
     ...(data ? { data } : {}),
   };
 }
@@ -2708,20 +2726,23 @@ function splitPageChildren(nodes: OrderedNode[]): {
   data?: PageVariable[];
   methods?: PageMethod[];
   props?: ComponentProp[];
+  query?: ComponentProp[];
   emits?: ComponentEmit[];
   testData?: PageTestData;
 } {
   const data = parsePageData(nodes);
   const methods = parsePageMethods(nodes);
   const props = parseComponentProps(nodes);
+  const query = parsePageQuery(nodes);
   const emits = parseComponentEmits(nodes);
-  const testData = compactPageTestData(parseTestData(nodes), props, data);
+  const testData = compactPageTestData(parseTestData(nodes), props, data, query);
   const widgets = nodes.filter(
     (child) =>
       !Object.prototype.hasOwnProperty.call(child, 'data') &&
       !Object.prototype.hasOwnProperty.call(child, 'i18n') &&
       !Object.prototype.hasOwnProperty.call(child, 'methods') &&
       !Object.prototype.hasOwnProperty.call(child, 'props') &&
+      !Object.prototype.hasOwnProperty.call(child, 'query') &&
       !Object.prototype.hasOwnProperty.call(child, 'emits') &&
       !Object.prototype.hasOwnProperty.call(child, 'testData'),
   );
@@ -2730,6 +2751,7 @@ function splitPageChildren(nodes: OrderedNode[]): {
     ...(data ? { data } : {}),
     ...(methods ? { methods } : {}),
     ...(props ? { props } : {}),
+    ...(query ? { query } : {}),
     ...(emits ? { emits } : {}),
     ...(testData ? { testData } : {}),
   };
@@ -2763,17 +2785,25 @@ function serializeComponentArgs(args: Record<string, string> | undefined): Order
 }
 
 function serializeComponentProps(props: ComponentProp[]): OrderedNode {
+  return serializeContractProps('props', props);
+}
+
+function serializePageQuery(query: ComponentProp[]): OrderedNode {
+  return serializeContractProps('query', query);
+}
+
+function serializeContractProps(tag: 'props' | 'query', props: ComponentProp[]): OrderedNode {
   return {
-    props: props.map((prop) => {
+    [tag]: props.map((prop) => {
       const attrs: Record<string, string> = { '@_n': prop.name };
       const desc = prop.desc?.trim();
       if (desc) {
         attrs['@_desc'] = desc;
       }
-      if (prop.required) {
+      if (tag === 'props' && prop.required) {
         attrs['@_required'] = '1';
       }
-      if (prop.bind) {
+      if (tag === 'props' && prop.bind) {
         attrs['@_bind'] = '1';
       }
       return {
@@ -2830,7 +2860,7 @@ function serializePageMethods(methods: PageMethod[]): OrderedNode {
 }
 
 function serializeTestBag(
-  tag: 'props' | 'data',
+  tag: 'props' | 'query' | 'data',
   values: Record<string, string>,
   types: ReadonlyMap<string, string>,
 ): OrderedNode {
@@ -2854,14 +2884,18 @@ function serializeTestData(
   testData: PageTestData,
   props: ComponentProp[] | undefined,
   data: PageVariable[] | undefined,
+  query?: ComponentProp[],
 ): OrderedNode | undefined {
-  const compact = compactPageTestData(testData, props, data);
+  const compact = compactPageTestData(testData, props, data, query);
   if (!compact) {
     return undefined;
   }
   const children: OrderedNode[] = [];
   if (compact.props) {
     children.push(serializeTestBag('props', compact.props, new Map((props ?? []).map((item) => [item.name, item.type]))));
+  }
+  if (compact.query) {
+    children.push(serializeTestBag('query', compact.query, new Map((query ?? []).map((item) => [item.name, item.type]))));
   }
   if (compact.data) {
     children.push(serializeTestBag('data', compact.data, new Map((data ?? []).map((item) => [item.name, item.type]))));
@@ -4179,7 +4213,7 @@ export function parsePageXml(xml: string): PageXmlDocument {
   const pageNode = findPageRoot(pageParser.parse(xml));
   const style = parsePageStyle(pageNode);
   const events = parsePageEvents(pageNode);
-  const { widgets, data, methods, props, emits, testData } = splitPageChildren(nodeList(pageNode.page));
+  const { widgets, data, methods, props, query, emits, testData } = splitPageChildren(nodeList(pageNode.page));
   return {
     widgets: parseWidgets(widgets, { n: 0 }, 'page'),
     ...(style ? { style } : {}),
@@ -4187,6 +4221,7 @@ export function parsePageXml(xml: string): PageXmlDocument {
     ...(events ? { events } : {}),
     ...(methods ? { methods } : {}),
     ...(props ? { props } : {}),
+    ...(query ? { query } : {}),
     ...(emits ? { emits } : {}),
     ...(testData ? { testData } : {}),
   };
@@ -4254,6 +4289,7 @@ export function normalizePageDocument(input: unknown): PageXmlDocument {
       ...(page.events ? { events: page.events } : {}),
       ...(page.methods && page.methods.length > 0 ? { methods: page.methods } : {}),
       ...(page.props && page.props.length > 0 ? { props: page.props } : {}),
+      ...(page.query && page.query.length > 0 ? { query: page.query } : {}),
       ...(page.emits && page.emits.length > 0 ? { emits: page.emits } : {}),
       ...(page.testData ? { testData: page.testData } : {}),
     }),
@@ -4262,9 +4298,10 @@ export function normalizePageDocument(input: unknown): PageXmlDocument {
 
 export function serializePageXml(page: PageXmlDocument): string {
   const attrs = { ...pageStyleAttrs(page.style), ...pageEventAttrs(page.events) };
-  const testData = page.testData ? serializeTestData(page.testData, page.props, page.data) : undefined;
+  const testData = page.testData ? serializeTestData(page.testData, page.props, page.data, page.query) : undefined;
   const children = [
     ...(page.props && page.props.length > 0 ? [serializeComponentProps(page.props)] : []),
+    ...(page.query && page.query.length > 0 ? [serializePageQuery(page.query)] : []),
     ...(page.emits && page.emits.length > 0 ? [serializeComponentEmits(page.emits)] : []),
     ...(page.data && page.data.length > 0 ? [serializePageData(page.data)] : []),
     ...(testData ? [testData] : []),

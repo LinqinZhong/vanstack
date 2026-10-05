@@ -98,6 +98,7 @@ export function expandLoopTree(
         const nextScope: BindingScope = {
           data: scope.data,
           props: scope.props,
+          query: scope.query,
           aliases: {
             ...scope.aliases,
             [loopItemName(loop)]: item,

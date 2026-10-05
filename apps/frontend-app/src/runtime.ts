@@ -3,6 +3,7 @@ import { isPageLangSnapshot, pickPageLocale, type PageI18n, type PageLangSnapsho
 
 const documentLoads = new Map<string, Promise<PageXmlDocument>>();
 const langLoads = new Map<string, Promise<PageLangSnapshot | null>>();
+const eventLoads = new Map<string, Promise<string | null>>();
 
 export function pickRuntimePage(project: RuntimeProjectDto, pageKey: string) {
   return project.pages.find((page) => page.key === pageKey) ?? project.pages[0];
@@ -60,6 +61,33 @@ export function loadLangJson(jsonUrl: string) {
   next.then((snapshot) => {
     if (!snapshot) {
       langLoads.delete(jsonUrl);
+    }
+  });
+  return next;
+}
+
+export function loadRuntimeEvent(projectKey: string, eventId: string) {
+  const cacheKey = `${projectKey}\0${eventId}`;
+  const pending = eventLoads.get(cacheKey);
+  if (pending) {
+    return pending;
+  }
+  const next = fetch(
+    `/api/runtime/projects/${encodeURIComponent(projectKey)}/events/${encodeURIComponent(eventId)}`,
+    { headers: { Accept: 'application/json' } },
+  )
+    .then(async (response) => {
+      if (!response.ok) {
+        return null;
+      }
+      const body = (await response.json()) as { source?: unknown };
+      return typeof body.source === 'string' ? body.source : null;
+    })
+    .catch(() => null);
+  eventLoads.set(cacheKey, next);
+  next.then((source) => {
+    if (!source) {
+      eventLoads.delete(cacheKey);
     }
   });
   return next;

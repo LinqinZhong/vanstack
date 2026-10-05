@@ -1,6 +1,6 @@
 import { Form, Modal, Radio, Select, type FormInstance } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { ProjectPageVersionDto } from '@vanstack/shared';
+import type { VersionListItem } from './VersionListPanel';
 
 /**
  * 新建版本。source 在组件内用 Form.useWatch 读取，选「从已有版本复制」时才出现来源下拉。
@@ -14,7 +14,7 @@ export type VersionFormValues = {
 type CreateVersionModalProps = {
   open: boolean;
   form: FormInstance<VersionFormValues>;
-  versions: ProjectPageVersionDto[];
+  versions: VersionListItem[];
   onOk: () => void;
   onCancel: () => void;
 };

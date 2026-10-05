@@ -38,6 +38,7 @@ export interface ProjectDto {
   name: string;
   key: string;
   description: string;
+  currentVersionId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -125,6 +126,32 @@ export interface CreateProjectPageVersionInput {
 export interface UpdateProjectPageVersionInput {
   document?: PageDocumentDto;
   description?: string;
+}
+
+/** 工程版本。页面、语言、资源和图标都是这份版本里的指针，可以和别的工程版本共享。 */
+export interface ProjectVersionDto {
+  id: string;
+  projectId: string;
+  versionNo: number;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+  lastModified: string;
+}
+
+export interface CreateProjectVersionInput {
+  source: 'blank' | 'copy';
+  copyFromId?: string;
+}
+
+/** 某个工程版本里一页的内容快照。id 是 page.version 的项。 */
+export interface ProjectPageSnapshotDto {
+  id: string;
+  pageId: string;
+  forked: boolean;
+  document: PageDocumentDto;
+  updatedAt: string;
+  lastModified: string;
 }
 
 export type ProjectLangDir = 'ltr' | 'rtl';

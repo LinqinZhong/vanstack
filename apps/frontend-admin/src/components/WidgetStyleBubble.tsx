@@ -1190,6 +1190,7 @@ export function WidgetStyleBubble({
             open={stateFnOpen}
             widget={widget}
             variables={variables ?? []}
+            props={componentProps}
             disabled={disabled}
             onCancel={() => setStateFnOpen(false)}
             onChange={(stateFn, hoverStateId) => {

@@ -1,21 +1,22 @@
 import { RightOutlined } from '@ant-design/icons';
 import { Button, Card, Empty, List, Popconfirm, Radio } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { ProjectPageVersionDto } from '@vanstack/shared';
-
 /**
- * 右侧版本列表。单选切换正在编辑的版本，任何版本都可以改。
- * 折叠只收起侧栏，不改变当前选中项。
- * 没有选中页面时 createDisabled 为真，不能新建版本。
+ * 右侧工程版本列表。折叠只收起侧栏，不改变当前选中项。
  */
+export type VersionListItem = {
+  id: string;
+  versionNo: number;
+};
+
 type VersionListPanelProps = {
-  versions: ProjectPageVersionDto[];
+  versions: VersionListItem[];
   selectedVersionId: string | null;
   createDisabled: boolean;
   onCollapse: () => void;
   onCreate: () => void;
-  onSelect: (version: ProjectPageVersionDto) => void;
-  onDelete: (version: ProjectPageVersionDto) => void;
+  onSelect: (version: VersionListItem) => void;
+  onDelete: (version: VersionListItem) => void;
 };
 
 export function VersionListPanel({

@@ -4,14 +4,23 @@ import { linter, type Diagnostic } from '@codemirror/lint';
 import { EditorView } from '@codemirror/view';
 import { findDataRefRanges } from './pageData';
 
-export function createPageDataEditorExtensions(names: string[], unknownMessage: string, propNames: string[] = []) {
+export function createPageDataEditorExtensions(
+  names: string[],
+  unknownMessage: string,
+  propNames: string[] = [],
+  queryNames: string[] = [],
+) {
   const known = new Set(names);
   return [
     javascript(),
     autocompletion({
       activateOnTyping: true,
       activateOnTypingDelay: 0,
-      override: [createDataRefCompletions(names), createPropsRefCompletions(propNames)],
+      override: [
+        createDataRefCompletions(names),
+        createScopeRefCompletions('$props', propNames),
+        createScopeRefCompletions('$query', queryNames),
+      ],
     }),
     triggerDataRefCompletion(),
     linter(createDataRefLinter(known, unknownMessage), { delay: 150 }),
@@ -25,7 +34,7 @@ function triggerDataRefCompletion() {
     }
     const pos = update.state.selection.main.head;
     const recent = update.state.sliceDoc(Math.max(0, pos - 7), pos);
-    if (recent === '$data.' || recent.endsWith('$props.')) {
+    if (recent === '$data.' || recent.endsWith('$props.') || recent.endsWith('$query.')) {
       startCompletion(update.view);
     }
   });
@@ -53,18 +62,19 @@ function createDataRefCompletions(names: string[]) {
   };
 }
 
-function createPropsRefCompletions(names: string[]) {
+function createScopeRefCompletions(scope: '$props' | '$query', names: string[]) {
+  const prefix = `${scope}.`;
   return (context: CompletionContext) => {
-    const match = context.matchBefore(/\$props\.[^\s,;:?)}\]]*/u);
-    if (!match || match.text.length < '$props.'.length) {
+    const match = context.matchBefore(scope === '$props' ? /\$props\.[^\s,;:?)}\]]*/u : /\$query\.[^\s,;:?)}\]]*/u);
+    if (!match || match.text.length < prefix.length) {
       return null;
     }
     return {
-      from: match.from + '$props.'.length,
+      from: match.from + prefix.length,
       options: names.map((name) => ({
         label: name,
         type: 'variable',
-        detail: '$props',
+        detail: scope,
       })),
       validFor: /^[\p{ID_Continue}$]*$/u,
     };

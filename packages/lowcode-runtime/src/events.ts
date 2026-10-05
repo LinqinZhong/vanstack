@@ -99,7 +99,18 @@ function eventPayload(widgetId: string, payload: WidgetEventPayload, event: unkn
   return { timestamp };
 }
 
-export async function runEventIds(load: WidgetEventLoader, ids: string[], args: unknown[]) {
+function currentPageQuery(): Record<string, unknown> {
+  const query = (globalThis as { $query?: Record<string, unknown> }).$query;
+  return query && typeof query === 'object' ? query : {};
+}
+
+export async function runEventIds(
+  load: WidgetEventLoader,
+  ids: string[],
+  args: unknown[],
+  query?: Record<string, unknown>,
+) {
+  const pageQuery = query ?? currentPageQuery();
   for (const id of ids) {
     const source = await load(id);
     if (!source) {
@@ -109,11 +120,11 @@ export async function runEventIds(load: WidgetEventLoader, ids: string[], args: 
     if (!parsed) {
       continue;
     }
+    const names = parsed.paramNames.includes('$query') ? parsed.paramNames : ['$query', ...parsed.paramNames];
+    const values = parsed.paramNames.includes('$query') ? args : [pageQuery, ...args];
     try {
-      const fn = new Function(...parsed.paramNames, `"use strict";\n${parsed.body}`) as (
-        ...values: unknown[]
-      ) => unknown;
-      await fn(...args);
+      const fn = new Function(...names, `"use strict";\n${parsed.body}`) as (...input: unknown[]) => unknown;
+      await fn(...values);
     } catch (error) {
       console.error(error);
     }

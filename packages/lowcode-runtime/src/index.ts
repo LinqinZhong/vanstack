@@ -25,6 +25,7 @@ export type RenderPageXmlOptions = {
   onModelValue?: (name: string, value: string, done?: boolean) => void;
   loadWidgetEvent?: (id: string) => Promise<string | null>;
   pageId?: string | null;
+  query?: Record<string, unknown>;
   components?: Record<string, PageXmlDocument>;
   centerContent?: boolean;
   useComponentTestData?: boolean;
@@ -79,6 +80,7 @@ export function renderPage(
       onModelValue: options?.onModelValue,
       loadWidgetEvent: options?.loadWidgetEvent,
       pageId: options?.pageId,
+      query: options?.query,
       components: options?.components,
       centerContent: options?.centerContent,
       useComponentTestData: options?.useComponentTestData,
@@ -97,4 +99,5 @@ export function renderPage(
 }
 
 export { HOVER_STATE_NAME, mergeHoverViewing, widgetHasHoverState } from './hover';
+export { installPageNavigation } from './navigate';
 

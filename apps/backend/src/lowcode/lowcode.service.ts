@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import ts from 'typescript';
 import {
   BadRequestException,
   ConflictException,
   Injectable,
   Logger,
   NotFoundException,
+  OnApplicationBootstrap,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
@@ -19,9 +21,11 @@ import type {
   ProjectLangGroupDto,
   ProjectComponentDto,
   ProjectPageDto,
+  ProjectPageSnapshotDto,
   MethodCodeDto,
   ProjectPageVersionDto,
   ProjectPageVersionMetaDto,
+  ProjectVersionDto,
   WidgetEventScriptDto,
   RuntimeLangDto,
   RuntimeProjectDto,
@@ -43,12 +47,30 @@ import {
   LowcodeMongo,
   type ComponentRecord,
   type ComponentVersionRecord,
+  type LangVersionRecord,
+  type LibraryFileRecord,
+  type LibraryGroupRecord,
+  type LibraryVersionRecord,
   type PageVersionRecord,
-  type LangRecord,
   type ProjectLangValueRecord,
   type ProjectPageRecord,
   type ProjectRecord,
+  type ProjectVersionRecord,
 } from './lowcode-mongo';
+
+function eventJavaScript(source: string): string {
+  try {
+    const output = ts.transpileModule(source, {
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.None,
+      },
+    }).outputText;
+    return output.trim() || source;
+  } catch {
+    return source;
+  }
+}
 
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && (error as { code: unknown }).code === 11000;
@@ -83,8 +105,12 @@ function safeDecode(value: string) {
 }
 
 @Injectable()
-export class LowcodeService {
+export class LowcodeService implements OnApplicationBootstrap {
   private readonly logger = new Logger(LowcodeService.name);
+
+  async onApplicationBootstrap() {
+    await this.migrateProjectVersions();
+  }
 
   constructor(
     private readonly oss: OssService,
@@ -106,29 +132,28 @@ export class LowcodeService {
       throw new NotFoundException();
     }
     const project = await this.mongo.getProjectByKey(projectKey);
-    if (!project) {
+    const version = project ? await this.publishedVersion(project) : null;
+    if (!project || !version) {
       throw new NotFoundException();
     }
-    const pages = this.sortedPages(project);
-    const langRows = [...((await this.mongo.getLang(project._id))?.langs ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
-    const versions = await this.mongo.listProjectVersions(project._id);
-    const versionById = new Map(versions.map((version) => [version._id, version]));
+    const langRows = [...((await this.mongo.getLangVersion(version.langVersionId))?.langs ?? [])].sort(
+      (a, b) => a.sortOrder - b.sortOrder,
+    );
     const runtimePages = [];
-    for (const page of pages) {
-      if (!page.currentVersionId || !versionById.has(page.currentVersionId)) {
+    for (const page of this.sortedPages(version.pages)) {
+      if (!page.currentVersionId) {
         continue;
       }
-      const version = versionById.get(page.currentVersionId);
-      const langs: RuntimeLangDto[] = version
-        ? langRows.map((lang) => ({
-            key: lang.key,
-            name: lang.name,
-            dir: lang.dir === 'rtl' ? 'rtl' : 'ltr',
-            jsonUrl: this.oss.getPublicUrl(
-              this.langObjectKey(project.key, page.key, version.versionNo, lang.key),
-            ),
-          }))
-        : [];
+      const snapshot = await this.mongo.getPage(page.currentVersionId);
+      if (!snapshot) {
+        continue;
+      }
+      const langs: RuntimeLangDto[] = langRows.map((lang) => ({
+        key: lang.key,
+        name: lang.name,
+        dir: lang.dir === 'rtl' ? 'rtl' : 'ltr',
+        jsonUrl: this.oss.getPublicUrl(this.langObjectKey(project.key, page.key, version.versionNo, lang.key)),
+      }));
       runtimePages.push({
         name: page.name,
         key: page.key,
@@ -143,23 +168,39 @@ export class LowcodeService {
     };
   }
 
-  async getRuntimePage(projectKey: string, pageKey: string): Promise<PageXmlDocument> {
-    if (!/^[a-z][a-z0-9-]{0,63}$/.test(projectKey) || !/^[a-z][a-z0-9-]{0,63}$/.test(pageKey)) {
+  async getRuntimeEvent(projectKey: string, eventId: string): Promise<{ source: string }> {
+    if (!/^[a-z][a-z0-9-]{0,63}$/.test(projectKey) || !isWidgetEventId(eventId)) {
       throw new NotFoundException();
     }
     const project = await this.mongo.getProjectByKey(projectKey);
     if (!project) {
       throw new NotFoundException();
     }
-    const page = project.pages.find((item) => item.key === pageKey);
+    const current = await this.mongo.getEvent(project._id, eventId);
+    if (!current?.source) {
+      throw new NotFoundException();
+    }
+    return { source: eventJavaScript(current.source) };
+  }
+
+  async getRuntimePage(projectKey: string, pageKey: string): Promise<PageXmlDocument> {
+    if (!/^[a-z][a-z0-9-]{0,63}$/.test(projectKey) || !/^[a-z][a-z0-9-]{0,63}$/.test(pageKey)) {
+      throw new NotFoundException();
+    }
+    const project = await this.mongo.getProjectByKey(projectKey);
+    const version = project ? await this.publishedVersion(project) : null;
+    if (!project || !version) {
+      throw new NotFoundException();
+    }
+    const page = version.pages.find((item) => item.key === pageKey);
     if (!page?.currentVersionId) {
       throw new NotFoundException();
     }
-    const version = await this.mongo.getPage(page.currentVersionId);
-    if (!version || version.pageId !== page.id) {
+    const snapshot = await this.mongo.getPage(page.currentVersionId);
+    if (!snapshot || snapshot.pageId !== page.id) {
       throw new NotFoundException();
     }
-    return this.contentOf(version);
+    return this.contentOf(snapshot);
   }
 
   async createProject(input: { name: string; key: string; description?: string }): Promise<ProjectDto> {
@@ -169,12 +210,15 @@ export class LowcodeService {
       name: input.name.trim(),
       key: input.key,
       description: input.description?.trim() ?? '',
+      currentVersionId: null,
       createdAt: now,
       updatedAt: now,
-      pages: [],
     };
     try {
       await this.mongo.insertProject(project);
+      const version = await this.insertProjectVersion(project, 1, [], null);
+      project.currentVersionId = version._id;
+      await this.mongo.saveProject(project);
       return this.toProjectDto(project);
     } catch (error) {
       this.rethrowUnique(error);
@@ -203,11 +247,7 @@ export class LowcodeService {
       this.rethrowUnique(error);
     }
     if (project.key !== previousKey) {
-      await this.mongo.renameLangProject(project._id, project.key);
-      const versions = await this.mongo.listProjectVersions(project._id);
-      for (const version of versions) {
-        await this.mongo.putPage({ ...this.versionBody(version), projectKey: project.key });
-      }
+      await this.mongo.renameProjectKey(project._id, project.key);
     }
     return this.toProjectDto(project);
   }
@@ -215,27 +255,109 @@ export class LowcodeService {
   async deleteProject(id: string): Promise<void> {
     const project = await this.requireProject(id);
     const versions = await this.mongo.listProjectVersions(project._id);
-    const langKeys = ((await this.mongo.getLang(project._id))?.langs ?? []).map((row) => row.key);
-    const pageById = new Map(project.pages.map((page) => [page.id, page]));
-    const keys = versions.flatMap((version) => {
-      const page = pageById.get(version.pageId);
-      if (!page) {
-        return [];
+    const keys = new Set<string>();
+    for (const version of versions) {
+      const lang = await this.mongo.getLangVersion(version.langVersionId);
+      for (const page of version.pages) {
+        for (const item of lang?.langs ?? []) {
+          keys.add(this.langObjectKey(project.key, page.key, version.versionNo, item.key));
+        }
       }
-      return langKeys.map((langKey) => this.langObjectKey(project.key, page.key, version.versionNo, langKey));
-    });
+      for (const kind of ['asset', 'icon'] as const) {
+        const libraryId = kind === 'asset' ? version.assetVersionId : version.iconVersionId;
+        const library = await this.mongo.getLibraryVersion(kind, libraryId);
+        for (const group of library?.groups ?? []) {
+          for (const file of group.files) {
+            keys.add(file.key);
+          }
+        }
+      }
+    }
+    for (const prefix of [this.assetRoot(project.key), this.iconRoot(project.key), `lowcode/${project.key}/blobs/`, `lowcode/${project.key}/lang/`]) {
+      for (const item of await this.oss.listObjects(prefix)) {
+        keys.add(item.key);
+      }
+    }
     await this.mongo.deleteByProject(project._id);
-    const assetKeys = (await this.oss.listObjects(this.assetRoot(project.key))).map((item) => item.key);
-    await this.deleteOssKeys([...new Set([...keys, ...assetKeys])]);
+    await this.deleteOssKeys([...keys]);
   }
 
-  async getLangs(projectId: string): Promise<ProjectLangCatalogDto> {
+  async listProjectVersions(projectId: string): Promise<ProjectVersionDto[]> {
     await this.requireProject(projectId);
-    return this.catalogOf(await this.mongo.getLang(projectId));
+    const rows = await this.mongo.listProjectVersions(projectId);
+    return rows.map((row) => this.toProjectVersionDto(row));
   }
 
-  async putLangs(projectId: string, input: { langs: unknown[]; groups: unknown[] }): Promise<ProjectLangCatalogDto> {
+  async createProjectVersion(
+    projectId: string,
+    input: { source: 'blank' | 'copy'; copyFromId?: string },
+  ): Promise<ProjectVersionDto> {
     const project = await this.requireProject(projectId);
+    const existing = await this.mongo.listProjectVersions(project._id);
+    const versionNo = existing.reduce((max, version) => Math.max(max, version.versionNo), 0) + 1;
+    let saved: ProjectVersionRecord;
+    if (input.source === 'copy') {
+      const source = existing.find((version) => version._id === input.copyFromId);
+      if (!source) {
+        throw new NotFoundException();
+      }
+      const now = new Date();
+      saved = {
+        _id: randomUUID(),
+        projectId: project._id,
+        projectKey: project.key,
+        versionNo,
+        description: '',
+        pages: source.pages.map((page) => ({ ...page })),
+        langVersionId: source.langVersionId,
+        assetVersionId: source.assetVersionId,
+        iconVersionId: source.iconVersionId,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await this.mongo.saveProjectVersion(saved);
+      await this.retainVersionShares(saved);
+    } else {
+      saved = await this.insertProjectVersion(project, versionNo, [], null);
+    }
+    if (!project.currentVersionId) {
+      project.currentVersionId = saved._id;
+      project.updatedAt = new Date();
+      await this.mongo.saveProject(project);
+    }
+    await this.recountCodeUses(project._id);
+    return this.toProjectVersionDto(saved);
+  }
+
+  async deleteProjectVersion(projectId: string, versionId: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    const version = await this.requireProjectVersion(projectId, versionId);
+    const wasCurrent = project.currentVersionId === version._id;
+    const lang = await this.mongo.getLangVersion(version.langVersionId);
+    await this.mongo.deleteProjectVersion(version._id);
+    await this.releaseVersionShares(version);
+    if (wasCurrent) {
+      const rest = (await this.mongo.listProjectVersions(project._id)).sort((a, b) => b.versionNo - a.versionNo);
+      project.currentVersionId = rest[0]?._id ?? null;
+      project.updatedAt = new Date();
+      await this.mongo.saveProject(project);
+    }
+    await this.deleteOssKeys(this.langSnapshotKeys(project.key, version, lang?.langs ?? []));
+    await this.recountCodeUses(project._id);
+  }
+
+  async getLangs(projectId: string, versionId: string): Promise<ProjectLangCatalogDto> {
+    const version = await this.requireProjectVersion(projectId, versionId);
+    return this.catalogOf(await this.mongo.getLangVersion(version.langVersionId));
+  }
+
+  async putLangs(
+    projectId: string,
+    versionId: string,
+    input: { langs: unknown[]; groups: unknown[] },
+  ): Promise<ProjectLangCatalogDto> {
+    const project = await this.requireProject(projectId);
+    const version = await this.requireProjectVersion(projectId, versionId);
     const catalog = this.parseLangCatalog(input);
     const langs = catalog.langs.map((lang, index) => ({
       key: lang.key,
@@ -271,37 +393,37 @@ export class LowcodeService {
         sortOrder: groupIndex * 10000,
       });
     }
-    const record: LangRecord = {
-      _id: project._id,
-      projectKey: project.key,
-      langs,
-      langValues: valueRows,
-      updatedAt: new Date(),
-    };
-    await this.mongo.saveLang(record);
-    await this.syncCurrentLangSnapshots(project);
-    return this.catalogOf(record);
+    const lang = await this.writableLang(version);
+    lang.langs = langs;
+    lang.langValues = valueRows;
+    lang.updatedAt = new Date();
+    await this.mongo.saveLangVersion(lang);
+    if (project.currentVersionId === version._id) {
+      await this.writeLangSnapshots(project, version);
+    }
+    return this.catalogOf(lang);
   }
 
-  async listPages(projectId: string): Promise<ProjectPageDto[]> {
-    const project = await this.requireProject(projectId);
-    return this.sortedPages(project).map((row) => this.toPageDto(project._id, row));
+  async listPages(projectId: string, versionId: string): Promise<ProjectPageDto[]> {
+    const version = await this.requireProjectVersion(projectId, versionId);
+    return this.sortedPages(version.pages).map((row) => this.toPageDto(projectId, row));
   }
 
-  async getPage(projectId: string, pageId: string): Promise<ProjectPageDto> {
-    const { project, page } = await this.requirePage(projectId, pageId);
-    return this.toPageDto(project._id, page);
+  async getPage(projectId: string, versionId: string, pageId: string): Promise<ProjectPageDto> {
+    const version = await this.requireProjectVersion(projectId, versionId);
+    return this.toPageDto(projectId, this.pageIn(version, pageId));
   }
 
   async createPage(
     projectId: string,
+    versionId: string,
     input: { name: string; key: string; description?: string },
   ): Promise<ProjectPageDto> {
     const project = await this.requireProject(projectId);
-    if (project.pages.some((page) => page.key === input.key)) {
+    const version = await this.requireProjectVersion(projectId, versionId);
+    if (version.pages.some((page) => page.key === input.key)) {
       throw new ConflictException('key already exists');
     }
-    const document = this.normalizeDocument(EMPTY_PAGE_DOCUMENT);
     const now = new Date();
     const page: ProjectPageRecord = {
       id: randomUUID(),
@@ -312,47 +434,39 @@ export class LowcodeService {
       createdAt: now,
       updatedAt: now,
     };
-    const version: PageVersionRecord = {
+    const snapshot = await this.mongo.putPage({
       _id: randomUUID(),
       projectId: project._id,
       projectKey: project.key,
       pageId: page.id,
       pageKey: page.key,
-      versionNo: 1,
-      description: '',
+      uses: 1,
       createdAt: now,
-      updatedAt: now,
-      ...this.contentOf(document),
-    };
-    project.pages.push(page);
-    project.updatedAt = now;
-    try {
-      await this.mongo.saveProject(project);
-      page.currentVersionId = version._id;
-      await this.mongo.putPage(this.versionBody(version));
-      await this.mongo.saveProject(project);
-      await this.writeLangSnapshots(project, page, version);
-      return this.toPageDto(project._id, page);
-    } catch (error) {
-      project.pages = project.pages.filter((item) => item.id !== page.id);
-      await this.mongo.saveProject(project).catch(() => undefined);
-      await this.mongo.deletePage(version._id).catch(() => undefined);
-      this.rethrowUnique(error);
+      ...this.contentOf(this.normalizeDocument(EMPTY_PAGE_DOCUMENT)),
+    });
+    page.currentVersionId = snapshot._id;
+    version.pages.push(page);
+    version.updatedAt = now;
+    await this.mongo.saveProjectVersion(version);
+    if (project.currentVersionId === version._id) {
+      await this.writeLangSnapshots(project, version);
     }
+    return this.toPageDto(project._id, page);
   }
 
   async updatePage(
     projectId: string,
+    versionId: string,
     pageId: string,
     input: { name?: string; key?: string; description?: string },
   ): Promise<ProjectPageDto> {
-    const { project, page } = await this.requirePage(projectId, pageId);
-    const previousKey = page.key;
+    const version = await this.requireProjectVersion(projectId, versionId);
+    const page = this.pageIn(version, pageId);
     if (input.name != null) {
       page.name = input.name.trim();
     }
     if (input.key != null) {
-      if (project.pages.some((item) => item.id !== page.id && item.key === input.key)) {
+      if (version.pages.some((item) => item.id !== page.id && item.key === input.key)) {
         throw new ConflictException('key already exists');
       }
       page.key = input.key;
@@ -360,169 +474,64 @@ export class LowcodeService {
     if (input.description != null) {
       page.description = input.description.trim();
     }
-    const now = new Date();
-    page.updatedAt = now;
-    project.updatedAt = now;
-    await this.mongo.saveProject(project);
-    if (page.key !== previousKey) {
-      const versions = await this.mongo.listPageVersions(page.id);
-      for (const version of versions) {
-        await this.mongo.putPage({ ...this.versionBody(version), pageKey: page.key });
+    page.updatedAt = new Date();
+    version.updatedAt = page.updatedAt;
+    await this.mongo.saveProjectVersion(version);
+    if (page.currentVersionId) {
+      const snapshot = await this.mongo.getPage(page.currentVersionId);
+      if (snapshot && snapshot.uses <= 1 && snapshot.pageKey !== page.key) {
+        snapshot.pageKey = page.key;
+        await this.mongo.putPage(this.versionBody(snapshot));
       }
     }
-    return this.toPageDto(project._id, page);
+    return this.toPageDto(projectId, page);
   }
 
-  async deletePage(projectId: string, pageId: string): Promise<void> {
-    const { project, page } = await this.requirePage(projectId, pageId);
-    const versions = await this.mongo.listPageVersions(page.id);
-    for (const version of versions) {
-      await this.syncMethodUses(projectId, this.contentOf(version), EMPTY_PAGE_DOCUMENT);
+  async deletePage(projectId: string, versionId: string, pageId: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    const version = await this.requireProjectVersion(projectId, versionId);
+    const page = this.pageIn(version, pageId);
+    const snapshotId = page.currentVersionId;
+    version.pages = version.pages.filter((item) => item.id !== page.id);
+    version.updatedAt = new Date();
+    await this.mongo.saveProjectVersion(version);
+    if (snapshotId) {
+      await this.releasePageSnapshot(version, snapshotId);
     }
-    await this.mongo.deletePagesByPage(page.id);
-    const langKeys = ((await this.mongo.getLang(project._id))?.langs ?? []).map((lang) => lang.key);
-    const keys = versions.flatMap((version) =>
-      langKeys.map((langKey) => this.langObjectKey(project.key, page.key, version.versionNo, langKey)),
-    );
-    project.pages = project.pages.filter((item) => item.id !== page.id);
-    project.updatedAt = new Date();
-    await this.mongo.saveProject(project);
-    await this.deleteOssKeys([...new Set(keys)]);
+    await this.recountCodeUses(projectId);
+    if (project.currentVersionId === version._id && snapshotId) {
+      const lang = await this.mongo.getLangVersion(version.langVersionId);
+      await this.deleteOssKeys(
+        (lang?.langs ?? []).map((item) => this.langObjectKey(project.key, page.key, version.versionNo, item.key)),
+      );
+    }
   }
 
-  async listVersions(projectId: string, pageId: string): Promise<ProjectPageVersionDto[]> {
-    await this.requirePage(projectId, pageId);
-    const rows = await this.mongo.listPageVersions(pageId);
-    return rows.map((row) => this.toVersionDto(row));
+  async getPageDocument(projectId: string, versionId: string, pageId: string): Promise<ProjectPageSnapshotDto> {
+    const version = await this.requireProjectVersion(projectId, versionId);
+    const page = this.pageIn(version, pageId);
+    const snapshot = await this.pageSnapshot(page);
+    return this.toSnapshotDto(snapshot, false);
   }
 
-  async listVersionMeta(projectId: string, pageId: string): Promise<ProjectPageVersionMetaDto[]> {
-    await this.requirePage(projectId, pageId);
-    const rows = await this.mongo.listPageVersionStamps(pageId);
-    return rows.map((row) => this.toVersionMeta(row));
-  }
-
-  async getVersion(projectId: string, pageId: string, versionId: string): Promise<ProjectPageVersionDto> {
-    const version = await this.requireVersion(projectId, pageId, versionId);
-    return this.toVersionDto(version);
-  }
-
-  async createVersion(
+  async updatePageDocument(
     projectId: string,
-    pageId: string,
-    input: { document: object; description?: string },
-  ): Promise<ProjectPageVersionDto> {
-    const { project, page } = await this.requirePage(projectId, pageId);
-    const document = this.normalizeDocument(input.document);
-    const existing = await this.mongo.listPageVersions(page.id);
-    const versionNo = existing.reduce((max, version) => Math.max(max, version.versionNo), 0) + 1;
-    const now = new Date();
-    let saved: PageVersionRecord | undefined;
-    try {
-      saved = await this.mongo.putPage({
-        _id: randomUUID(),
-        projectId: project._id,
-        projectKey: project.key,
-        pageId: page.id,
-        pageKey: page.key,
-        versionNo,
-        description: input.description?.trim() ?? '',
-        createdAt: now,
-        ...this.contentOf(document),
-      });
-    } catch (error) {
-      if (saved) {
-        await this.mongo.deletePage(saved._id).catch(() => undefined);
-      }
-      this.rethrowUnique(error);
-    }
-    await this.syncMethodUses(projectId, EMPTY_PAGE_DOCUMENT, document);
-    if (!page.currentVersionId) {
-      page.currentVersionId = saved._id;
-      page.updatedAt = now;
-      project.updatedAt = now;
-      await this.mongo.saveProject(project);
-      await this.writeLangSnapshots(project, page, saved);
-    }
-    return this.toVersionDto(saved);
-  }
-
-  async updateVersion(
-    projectId: string,
-    pageId: string,
     versionId: string,
-    input: { document?: object; description?: string },
-  ): Promise<ProjectPageVersionDto> {
-    const { project, page } = await this.requirePage(projectId, pageId);
-    const version = await this.requireVersion(projectId, pageId, versionId);
-    if (input.description != null) {
-      version.description = input.description.trim();
+    pageId: string,
+    input: { document: object },
+  ): Promise<ProjectPageSnapshotDto> {
+    const project = await this.requireProject(projectId);
+    const version = await this.requireProjectVersion(projectId, versionId);
+    const page = this.pageIn(version, pageId);
+    const originalId = page.currentVersionId;
+    const snapshot = await this.writablePage(version, page);
+    this.applyDocument(snapshot, this.normalizeDocument(input.document));
+    const saved = await this.mongo.putPage(this.versionBody(snapshot));
+    await this.recountCodeUses(projectId);
+    if (project.currentVersionId === version._id) {
+      await this.writeLangSnapshots(project, version);
     }
-    if (input.document != null) {
-      const next = this.normalizeDocument(input.document);
-      const previous = this.contentOf(version);
-      version.widgets = next.widgets;
-      if (next.style) {
-        version.style = next.style;
-      } else {
-        delete version.style;
-      }
-      if (next.data && next.data.length > 0) {
-        version.data = next.data;
-      } else {
-        delete version.data;
-      }
-      if (next.events) {
-        version.events = next.events;
-      } else {
-        delete version.events;
-      }
-      if (next.methods && next.methods.length > 0) {
-        version.methods = next.methods;
-      } else {
-        delete version.methods;
-      }
-      if (next.props && next.props.length > 0) {
-        version.props = next.props;
-      } else {
-        delete version.props;
-      }
-      if (next.emits && next.emits.length > 0) {
-        version.emits = next.emits;
-      } else {
-        delete version.emits;
-      }
-      await this.syncMethodUses(projectId, previous, next);
-    }
-    const saved = await this.mongo.putPage(this.versionBody(version));
-    if (!page.currentVersionId || page.currentVersionId === version._id) {
-      page.currentVersionId = version._id;
-      const now = new Date();
-      page.updatedAt = now;
-      project.updatedAt = now;
-      await this.mongo.saveProject(project);
-      await this.writeLangSnapshots(project, page, saved);
-    }
-    return this.toVersionDto(saved);
-  }
-
-  async deleteVersion(projectId: string, pageId: string, versionId: string): Promise<void> {
-    const { project, page } = await this.requirePage(projectId, pageId);
-    const version = await this.requireVersion(projectId, pageId, versionId);
-    const wasCurrent = page.currentVersionId === version._id;
-    const langObjects = ((await this.mongo.getLang(project._id))?.langs ?? []).map((lang) =>
-      this.langObjectKey(project.key, page.key, version.versionNo, lang.key),
-    );
-    await this.mongo.deletePage(versionId);
-    if (wasCurrent) {
-      const rest = (await this.mongo.listPageVersions(page.id)).sort((a, b) => b.versionNo - a.versionNo);
-      page.currentVersionId = rest[0]?._id ?? null;
-      page.updatedAt = new Date();
-      project.updatedAt = new Date();
-      await this.mongo.saveProject(project);
-    }
-    await this.syncMethodUses(projectId, this.contentOf(version), EMPTY_PAGE_DOCUMENT);
-    await this.deleteOssKeys(langObjects);
+    return this.toSnapshotDto(saved, saved._id !== originalId);
   }
 
   async listComponents(projectId: string): Promise<ProjectComponentDto[]> {
@@ -616,11 +625,9 @@ export class LowcodeService {
   async deleteComponent(projectId: string, componentId: string): Promise<void> {
     const component = await this.requireComponent(projectId, componentId);
     const versions = await this.mongo.listComponentVersions(component._id);
-    for (const version of versions) {
-      await this.syncMethodUses(projectId, this.contentOf(version), EMPTY_PAGE_DOCUMENT);
-    }
     await this.mongo.deleteComponentVersions(component._id);
     await this.mongo.deleteComponent(component._id);
+    await this.recountCodeUses(projectId);
   }
 
   async listComponentVersions(projectId: string, componentId: string): Promise<ProjectPageVersionDto[]> {
@@ -673,7 +680,7 @@ export class LowcodeService {
       }
       this.rethrowUnique(error);
     }
-    await this.syncMethodUses(projectId, EMPTY_PAGE_DOCUMENT, document);
+    await this.recountCodeUses(projectId);
     if (!component.currentVersionId) {
       component.currentVersionId = saved._id;
       component.updatedAt = now;
@@ -695,11 +702,12 @@ export class LowcodeService {
     }
     if (input.document != null) {
       const next = this.normalizeDocument(input.document);
-      const previous = this.contentOf(version);
       this.applyDocument(version, next);
-      await this.syncMethodUses(projectId, previous, next);
     }
     const saved = await this.mongo.putComponentVersion(this.componentVersionBody(version));
+    if (input.document != null) {
+      await this.recountCodeUses(projectId);
+    }
     if (!component.currentVersionId || component.currentVersionId === version._id) {
       component.currentVersionId = version._id;
       component.updatedAt = new Date();
@@ -719,85 +727,60 @@ export class LowcodeService {
       component.updatedAt = new Date();
       await this.mongo.saveComponent(component);
     }
-    await this.syncMethodUses(projectId, this.contentOf(version), EMPTY_PAGE_DOCUMENT);
+    await this.recountCodeUses(projectId);
   }
 
-  async listAssetGroups(projectId: string): Promise<ProjectAssetGroupDto[]> {
-    const project = await this.requireProject(projectId);
-    const prefix = this.assetRoot(project.key);
-    const names = new Set<string>();
-    for (const item of await this.oss.listObjects(prefix)) {
-      const rest = item.key.slice(prefix.length);
-      const group = rest.split('/')[0];
-      if (group) {
-        names.add(group);
-      }
-    }
-    return [...names].sort((a, b) => a.localeCompare(b)).map((name) => ({ name }));
+  async listAssetGroups(projectId: string, versionId: string): Promise<ProjectAssetGroupDto[]> {
+    return (await this.libraryOf('asset', projectId, versionId)).groups
+      .map((group) => ({ name: group.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  async createAssetGroup(projectId: string, name: string): Promise<ProjectAssetGroupDto> {
-    const project = await this.requireProject(projectId);
+  async createAssetGroup(projectId: string, versionId: string, name: string): Promise<ProjectAssetGroupDto> {
     const group = this.assertAssetGroupName(name);
-    const existing = await this.listAssetGroups(projectId);
-    if (existing.some((item) => item.name === group)) {
-      throw new ConflictException('group already exists');
-    }
-    await this.oss.putObject(this.assetKeepKey(project.key, group), Buffer.alloc(0), 'application/octet-stream');
+    await this.editLibrary('asset', projectId, versionId, (library) => {
+      if (library.groups.some((item) => item.name === group)) {
+        throw new ConflictException('group already exists');
+      }
+      library.groups.push({ name: group, files: [] });
+    });
     return { name: group };
   }
 
-  async renameAssetGroup(projectId: string, fromName: string, toName: string): Promise<ProjectAssetGroupDto> {
-    const project = await this.requireProject(projectId);
+  async renameAssetGroup(projectId: string, versionId: string, fromName: string, toName: string): Promise<ProjectAssetGroupDto> {
     const from = this.assertAssetGroupName(fromName);
     const to = this.assertAssetGroupName(toName);
-    if (from === to) {
-      return { name: to };
-    }
-    const groups = await this.listAssetGroups(projectId);
-    if (!groups.some((item) => item.name === from)) {
-      throw new NotFoundException();
-    }
-    if (groups.some((item) => item.name === to)) {
-      throw new ConflictException('group already exists');
-    }
-    const fromPrefix = this.assetGroupPrefix(project.key, from);
-    const objects = await this.oss.listObjects(fromPrefix);
-    for (const item of objects) {
-      const nextKey = this.assetGroupPrefix(project.key, to) + item.key.slice(fromPrefix.length);
-      await this.oss.copyObject(item.key, nextKey);
-    }
-    await this.deleteOssKeys(objects.map((item) => item.key));
+    await this.editLibrary('asset', projectId, versionId, (library) => {
+      this.renameLibraryGroup(library, from, to);
+    });
     return { name: to };
   }
 
-  async deleteAssetGroup(projectId: string, name: string): Promise<void> {
-    const project = await this.requireProject(projectId);
+  async deleteAssetGroup(projectId: string, versionId: string, name: string): Promise<void> {
     const group = this.assertAssetGroupName(name);
-    const objects = await this.oss.listObjects(this.assetGroupPrefix(project.key, group));
-    await this.deleteOssKeys(objects.map((item) => item.key));
+    const removed: string[] = [];
+    await this.editLibrary('asset', projectId, versionId, (library) => {
+      const index = library.groups.findIndex((item) => item.name === group);
+      if (index < 0) {
+        throw new NotFoundException();
+      }
+      removed.push(...library.groups[index].files.map((file) => file.key));
+      library.groups.splice(index, 1);
+    });
+    for (const key of removed) {
+      await this.releaseBlob(key);
+    }
   }
 
-  async listAssetFiles(projectId: string, name: string): Promise<ProjectAssetFileDto[]> {
-    const project = await this.requireProject(projectId);
+  async listAssetFiles(projectId: string, versionId: string, name: string): Promise<ProjectAssetFileDto[]> {
     const group = this.assertAssetGroupName(name);
-    const prefix = this.assetGroupPrefix(project.key, group);
-    return (await this.oss.listObjects(prefix))
-      .filter((item) => {
-        const fileName = item.key.slice(prefix.length);
-        return fileName && !fileName.includes('/') && fileName !== '.keep';
-      })
-      .map((item) => ({
-        name: item.key.slice(prefix.length),
-        key: item.key,
-        url: this.oss.getPublicUrl(item.key),
-        size: item.size,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    const library = await this.libraryOf('asset', projectId, versionId);
+    return this.libraryFiles(library, group);
   }
 
   async uploadAssetFile(
     projectId: string,
+    versionId: string,
     name: string,
     file: Express.Multer.File,
     displayName?: string,
@@ -805,133 +788,131 @@ export class LowcodeService {
     const project = await this.requireProject(projectId);
     const group = this.assertAssetGroupName(name);
     const fileName = this.assertAssetFileName(this.assetUploadName(file.originalname, displayName));
-    const key = this.assetGroupPrefix(project.key, group) + fileName;
-    const existing = await this.oss.getObject(key);
-    if (existing) {
-      throw new ConflictException('file already exists');
-    }
+    const key = this.blobKey(project.key, fileName);
     const stored = await this.oss.putObject(key, file.buffer, file.mimetype || 'application/octet-stream');
-    return {
-      name: fileName,
-      key: stored.key,
-      url: stored.url,
-      size: file.size,
-    };
+    try {
+      await this.editLibrary('asset', projectId, versionId, (library) => {
+        const target = library.groups.find((item) => item.name === group);
+        if (!target) {
+          throw new NotFoundException();
+        }
+        if (target.files.some((item) => item.name === fileName)) {
+          throw new ConflictException('file already exists');
+        }
+        target.files.push({ name: fileName, key: stored.key, size: file.size, contentType: file.mimetype });
+      });
+    } catch (error) {
+      await this.releaseBlob(stored.key);
+      throw error;
+    }
+    return { name: fileName, key: stored.key, url: stored.url, size: file.size };
   }
 
-  async deleteAssetFile(projectId: string, groupName: string, fileName: string): Promise<void> {
-    const project = await this.requireProject(projectId);
+  async deleteAssetFile(projectId: string, versionId: string, groupName: string, fileName: string): Promise<void> {
     const group = this.assertAssetGroupName(groupName);
     const name = this.assertAssetFileName(fileName);
-    await this.oss.deleteObject(this.assetGroupPrefix(project.key, group) + name);
-  }
-
-  async listIconGroups(projectId: string): Promise<ProjectIconGroupDto[]> {
-    const project = await this.requireProject(projectId);
-    const prefix = this.iconRoot(project.key);
-    const names = new Set<string>();
-    for (const item of await this.oss.listObjects(prefix)) {
-      const rest = item.key.slice(prefix.length);
-      const group = rest.split('/')[0];
-      if (group) {
-        names.add(group);
-      }
+    const removed: string[] = [];
+    await this.editLibrary('asset', projectId, versionId, (library) => {
+      removed.push(...this.takeLibraryFile(library, group, name));
+    });
+    for (const key of removed) {
+      await this.releaseBlob(key);
     }
-    return [...names].sort((a, b) => a.localeCompare(b)).map((name) => ({ name }));
   }
 
-  async createIconGroup(projectId: string, name: string): Promise<ProjectIconGroupDto> {
-    const project = await this.requireProject(projectId);
+  async listIconGroups(projectId: string, versionId: string): Promise<ProjectIconGroupDto[]> {
+    return (await this.libraryOf('icon', projectId, versionId)).groups
+      .map((group) => ({ name: group.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async createIconGroup(projectId: string, versionId: string, name: string): Promise<ProjectIconGroupDto> {
     const group = this.assertIconGroupName(name);
-    const existing = await this.listIconGroups(projectId);
-    if (existing.some((item) => item.name === group)) {
-      throw new ConflictException('group already exists');
-    }
-    await this.oss.putObject(this.iconKeepKey(project.key, group), Buffer.alloc(0), 'application/octet-stream');
+    await this.editLibrary('icon', projectId, versionId, (library) => {
+      if (library.groups.some((item) => item.name === group)) {
+        throw new ConflictException('group already exists');
+      }
+      library.groups.push({ name: group, files: [] });
+    });
     return { name: group };
   }
 
-  async renameIconGroup(projectId: string, fromName: string, toName: string): Promise<ProjectIconGroupDto> {
-    const project = await this.requireProject(projectId);
+  async renameIconGroup(projectId: string, versionId: string, fromName: string, toName: string): Promise<ProjectIconGroupDto> {
     const from = this.assertIconGroupName(fromName);
     const to = this.assertIconGroupName(toName);
-    if (from === to) {
-      return { name: to };
-    }
-    const groups = await this.listIconGroups(projectId);
-    if (!groups.some((item) => item.name === from)) {
-      throw new NotFoundException();
-    }
-    if (groups.some((item) => item.name === to)) {
-      throw new ConflictException('group already exists');
-    }
-    const fromPrefix = this.iconGroupPrefix(project.key, from);
-    const objects = await this.oss.listObjects(fromPrefix);
-    for (const item of objects) {
-      const nextKey = this.iconGroupPrefix(project.key, to) + item.key.slice(fromPrefix.length);
-      await this.oss.copyObject(item.key, nextKey);
-    }
-    await this.deleteOssKeys(objects.map((item) => item.key));
+    await this.editLibrary('icon', projectId, versionId, (library) => {
+      this.renameLibraryGroup(library, from, to);
+    });
     return { name: to };
   }
 
-  async deleteIconGroup(projectId: string, name: string): Promise<void> {
-    const project = await this.requireProject(projectId);
+  async deleteIconGroup(projectId: string, versionId: string, name: string): Promise<void> {
     const group = this.assertIconGroupName(name);
-    const objects = await this.oss.listObjects(this.iconGroupPrefix(project.key, group));
-    await this.deleteOssKeys(objects.map((item) => item.key));
+    const removed: string[] = [];
+    await this.editLibrary('icon', projectId, versionId, (library) => {
+      const index = library.groups.findIndex((item) => item.name === group);
+      if (index < 0) {
+        throw new NotFoundException();
+      }
+      removed.push(...library.groups[index].files.map((file) => file.key));
+      library.groups.splice(index, 1);
+    });
+    for (const key of removed) {
+      await this.releaseBlob(key);
+    }
   }
 
-  async listIconFiles(projectId: string, name: string): Promise<ProjectIconFileDto[]> {
-    const project = await this.requireProject(projectId);
+  async listIconFiles(projectId: string, versionId: string, name: string): Promise<ProjectIconFileDto[]> {
     const group = this.assertIconGroupName(name);
-    const prefix = this.iconGroupPrefix(project.key, group);
-    return (await this.oss.listObjects(prefix))
-      .filter((item) => {
-        const fileName = item.key.slice(prefix.length);
-        return fileName && !fileName.includes('/') && fileName !== '.keep';
-      })
-      .map((item) => ({
-        name: item.key.slice(prefix.length),
-        key: item.key,
-        url: this.oss.getPublicUrl(item.key),
-        size: item.size,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    const library = await this.libraryOf('icon', projectId, versionId);
+    return this.libraryFiles(library, group);
   }
 
   async uploadIconFile(
     projectId: string,
+    versionId: string,
     name: string,
     file: Express.Multer.File,
     displayName?: string,
   ): Promise<ProjectIconFileDto> {
     const project = await this.requireProject(projectId);
-    const group = this.assertIconGroupName(name);
     if (!/\.svg$/i.test(file.originalname)) {
       throw new BadRequestException('only svg files are allowed');
     }
+    const group = this.assertIconGroupName(name);
     const fileName = this.assertIconFileName(this.assetUploadName(file.originalname, displayName));
-    const key = this.iconGroupPrefix(project.key, group) + fileName;
-    const existing = await this.oss.getObject(key);
-    if (existing) {
-      throw new ConflictException('file already exists');
-    }
+    const key = this.blobKey(project.key, fileName);
     const stored = await this.oss.putObject(key, file.buffer, file.mimetype || 'image/svg+xml');
-    return {
-      name: fileName,
-      key: stored.key,
-      url: stored.url,
-      size: file.size,
-    };
+    try {
+      await this.editLibrary('icon', projectId, versionId, (library) => {
+        const target = library.groups.find((item) => item.name === group);
+        if (!target) {
+          throw new NotFoundException();
+        }
+        if (target.files.some((item) => item.name === fileName)) {
+          throw new ConflictException('file already exists');
+        }
+        target.files.push({ name: fileName, key: stored.key, size: file.size, contentType: file.mimetype || 'image/svg+xml' });
+      });
+    } catch (error) {
+      await this.releaseBlob(stored.key);
+      throw error;
+    }
+    return { name: fileName, key: stored.key, url: stored.url, size: file.size };
   }
 
-  async deleteIconFile(projectId: string, groupName: string, fileName: string): Promise<void> {
-    const project = await this.requireProject(projectId);
+  async deleteIconFile(projectId: string, versionId: string, groupName: string, fileName: string): Promise<void> {
     const group = this.assertIconGroupName(groupName);
     const name = this.assertIconFileName(fileName);
-    await this.oss.deleteObject(this.iconGroupPrefix(project.key, group) + name);
+    const removed: string[] = [];
+    await this.editLibrary('icon', projectId, versionId, (library) => {
+      removed.push(...this.takeLibraryFile(library, group, name));
+    });
+    for (const key of removed) {
+      await this.releaseBlob(key);
+    }
   }
+
 
   async getMethodCode(projectId: string, methodId: string): Promise<MethodCodeDto> {
     await this.requireProject(projectId);
@@ -992,7 +973,7 @@ export class LowcodeService {
     await this.mongo.deleteEvent(projectId, eventId);
   }
 
-  private catalogOf(record: LangRecord | null): ProjectLangCatalogDto {
+  private catalogOf(record: LangVersionRecord | null): ProjectLangCatalogDto {
     const langRows = [...(record?.langs ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
     const valueRows = [...(record?.langValues ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
     const langs: ProjectLangDto[] = langRows.map((row) => ({
@@ -1102,45 +1083,43 @@ export class LowcodeService {
     return { langs, groups };
   }
 
-  private async syncCurrentLangSnapshots(project: ProjectRecord) {
-    for (const page of project.pages) {
-      if (!page.currentVersionId) {
-        continue;
-      }
-      const version = await this.mongo.getPage(page.currentVersionId);
-      if (version && version.pageId === page.id) {
-        await this.writeLangSnapshots(project, page, version);
+  private async writeLangSnapshots(project: ProjectRecord, version: ProjectVersionRecord) {
+    const catalog = this.catalogOf(await this.mongo.getLangVersion(version.langVersionId));
+    if (catalog.langs.length === 0) {
+      return;
+    }
+    for (const page of version.pages) {
+      for (const lang of catalog.langs) {
+        const values: Record<string, string> = {};
+        for (const group of catalog.groups) {
+          for (const entry of group.entries) {
+            const text = entry.values[lang.key];
+            if (text) {
+              values[`${group.key}.${entry.key}`] = text;
+            }
+          }
+        }
+        const body = JSON.stringify({
+          key: lang.key,
+          name: lang.name,
+          dir: lang.dir,
+          values,
+        });
+        await this.oss.putObject(
+          this.langObjectKey(project.key, page.key, version.versionNo, lang.key),
+          Buffer.from(body, 'utf8'),
+          'application/json',
+        );
       }
     }
   }
 
-  private async writeLangSnapshots(project: ProjectRecord, page: ProjectPageRecord, version: PageVersionRecord) {
-    const catalog = this.catalogOf(await this.mongo.getLang(project._id));
-    if (catalog.langs.length === 0) {
-      return;
-    }
-    for (const lang of catalog.langs) {
-      const values: Record<string, string> = {};
-      for (const group of catalog.groups) {
-        for (const entry of group.entries) {
-          const text = entry.values[lang.key];
-          if (text) {
-            values[`${group.key}.${entry.key}`] = text;
-          }
-        }
-      }
-      const body = JSON.stringify({
-        key: lang.key,
-        name: lang.name,
-        dir: lang.dir,
-        values,
-      });
-      await this.oss.putObject(
-        this.langObjectKey(project.key, page.key, version.versionNo, lang.key),
-        Buffer.from(body, 'utf8'),
-        'application/json',
-      );
-    }
+  private langSnapshotKeys(
+    projectKey: string,
+    version: ProjectVersionRecord,
+    langs: Array<{ key: string }>,
+  ): string[] {
+    return version.pages.flatMap((page) => langs.map((lang) => this.langObjectKey(projectKey, page.key, version.versionNo, lang.key)));
   }
 
   private langObjectKey(projectKey: string, pageKey: string, versionNo: number, langKey: string) {
@@ -1152,29 +1131,467 @@ export class LowcodeService {
     if (!project) {
       throw new NotFoundException();
     }
-    project.pages ??= [];
     return project;
   }
 
-  private async requirePage(
-    projectId: string,
-    pageId: string,
-  ): Promise<{ project: ProjectRecord; page: ProjectPageRecord }> {
-    const project = await this.requireProject(projectId);
-    const page = project.pages.find((item) => item.id === pageId);
+  private async requireProjectVersion(projectId: string, versionId: string): Promise<ProjectVersionRecord> {
+    await this.requireProject(projectId);
+    const version = await this.mongo.getProjectVersion(versionId);
+    if (!version || version.projectId !== projectId) {
+      throw new NotFoundException();
+    }
+    version.pages ??= [];
+    return version;
+  }
+
+  private pageIn(version: ProjectVersionRecord, pageId: string): ProjectPageRecord {
+    const page = version.pages.find((item) => item.id === pageId);
     if (!page) {
       throw new NotFoundException();
     }
-    return { project, page };
+    return page;
   }
 
-  private async requireComponent(projectId: string, componentId: string): Promise<ComponentRecord> {
-    await this.requireProject(projectId);
-    const component = await this.mongo.getComponent(componentId);
-    if (!component || component.projectId !== projectId) {
-      throw new NotFoundException('Component not found');
+  private async pageSnapshot(page: ProjectPageRecord): Promise<PageVersionRecord> {
+    if (!page.currentVersionId) {
+      throw new NotFoundException();
     }
-    return component;
+    const snapshot = await this.mongo.getPage(page.currentVersionId);
+    if (!snapshot || snapshot.pageId !== page.id) {
+      throw new NotFoundException();
+    }
+    return snapshot;
+  }
+
+  private async publishedVersion(project: ProjectRecord): Promise<ProjectVersionRecord | null> {
+    if (!project.currentVersionId) {
+      return null;
+    }
+    const version = await this.mongo.getProjectVersion(project.currentVersionId);
+    if (!version || version.projectId !== project._id) {
+      return null;
+    }
+    version.pages ??= [];
+    return version;
+  }
+
+  /** 这份页面快照被多个工程版本使用时，先复制一份，只改当前工程版本的指针。 */
+  private async writablePage(version: ProjectVersionRecord, page: ProjectPageRecord): Promise<PageVersionRecord> {
+    const snapshot = await this.pageSnapshot(page);
+    if ((snapshot.uses ?? 1) <= 1) {
+      return snapshot;
+    }
+    const now = new Date();
+    const copy = await this.mongo.putPage({
+      ...this.versionBody(snapshot),
+      _id: randomUUID(),
+      uses: 1,
+      pageKey: page.key,
+      createdAt: now,
+    });
+    page.currentVersionId = copy._id;
+    page.updatedAt = now;
+    version.updatedAt = now;
+    await this.mongo.saveProjectVersion(version);
+    const still = version.pages.some((item) => item.currentVersionId === snapshot._id);
+    if (!still) {
+      await this.mongo.addPageUses(snapshot._id, -1);
+    }
+    return copy;
+  }
+
+  private async writableLang(version: ProjectVersionRecord): Promise<LangVersionRecord> {
+    const current = await this.mongo.getLangVersion(version.langVersionId);
+    if (!current) {
+      throw new NotFoundException();
+    }
+    if ((current.uses ?? 1) <= 1) {
+      return current;
+    }
+    const copy: LangVersionRecord = {
+      ...current,
+      _id: randomUUID(),
+      uses: 1,
+      langs: current.langs.map((lang) => ({ ...lang })),
+      langValues: current.langValues.map((row) => ({ ...row })),
+      updatedAt: new Date(),
+    };
+    await this.mongo.saveLangVersion(copy);
+    version.langVersionId = copy._id;
+    version.updatedAt = new Date();
+    await this.mongo.saveProjectVersion(version);
+    await this.mongo.addLangUses(current._id, -1);
+    return copy;
+  }
+
+  private async writableLibrary(kind: 'asset' | 'icon', version: ProjectVersionRecord): Promise<LibraryVersionRecord> {
+    const currentId = kind === 'asset' ? version.assetVersionId : version.iconVersionId;
+    const current = await this.mongo.getLibraryVersion(kind, currentId);
+    if (!current) {
+      throw new NotFoundException();
+    }
+    if ((current.uses ?? 1) <= 1) {
+      return current;
+    }
+    const copy: LibraryVersionRecord = {
+      ...current,
+      _id: randomUUID(),
+      uses: 1,
+      groups: this.cloneGroups(current.groups),
+      updatedAt: new Date(),
+    };
+    await this.mongo.saveLibraryVersion(kind, copy);
+    if (kind === 'asset') {
+      version.assetVersionId = copy._id;
+    } else {
+      version.iconVersionId = copy._id;
+    }
+    version.updatedAt = new Date();
+    await this.mongo.saveProjectVersion(version);
+    await this.mongo.addLibraryUses(kind, current._id, -1);
+    return copy;
+  }
+
+  private async libraryOf(kind: 'asset' | 'icon', projectId: string, versionId: string): Promise<LibraryVersionRecord> {
+    const version = await this.requireProjectVersion(projectId, versionId);
+    const id = kind === 'asset' ? version.assetVersionId : version.iconVersionId;
+    const library = await this.mongo.getLibraryVersion(kind, id);
+    if (!library) {
+      throw new NotFoundException();
+    }
+    return library;
+  }
+
+  private async editLibrary(
+    kind: 'asset' | 'icon',
+    projectId: string,
+    versionId: string,
+    mutate: (library: LibraryVersionRecord) => void,
+  ): Promise<void> {
+    const version = await this.requireProjectVersion(projectId, versionId);
+    const library = await this.writableLibrary(kind, version);
+    mutate(library);
+    library.updatedAt = new Date();
+    await this.mongo.saveLibraryVersion(kind, library);
+  }
+
+  private cloneGroups(groups: LibraryGroupRecord[]): LibraryGroupRecord[] {
+    return groups.map((group) => ({
+      name: group.name,
+      files: group.files.map((file) => ({ ...file })),
+    }));
+  }
+
+  private renameLibraryGroup(library: LibraryVersionRecord, from: string, to: string) {
+    if (from === to) {
+      return;
+    }
+    const group = library.groups.find((item) => item.name === from);
+    if (!group) {
+      throw new NotFoundException();
+    }
+    if (library.groups.some((item) => item.name === to)) {
+      throw new ConflictException('group already exists');
+    }
+    group.name = to;
+  }
+
+  private libraryFiles(library: LibraryVersionRecord, groupName: string): ProjectAssetFileDto[] {
+    const group = library.groups.find((item) => item.name === groupName);
+    if (!group) {
+      throw new NotFoundException();
+    }
+    return group.files
+      .map((file) => ({
+        name: file.name,
+        key: file.key,
+        url: this.oss.getPublicUrl(file.key),
+        size: file.size,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private takeLibraryFile(library: LibraryVersionRecord, groupName: string, fileName: string): string[] {
+    const group = library.groups.find((item) => item.name === groupName);
+    if (!group) {
+      throw new NotFoundException();
+    }
+    const file = group.files.find((item) => item.name === fileName);
+    if (!file) {
+      throw new NotFoundException();
+    }
+    group.files = group.files.filter((item) => item.name !== fileName);
+    return [file.key];
+  }
+
+  private async releaseBlob(key: string) {
+    if ((await this.mongo.countBlobKey(key)) > 0) {
+      return;
+    }
+    try {
+      await this.oss.deleteObject(key);
+    } catch (error) {
+      this.logger.warn(`Failed to delete OSS object ${key}: ${String(error)}`);
+    }
+  }
+
+  private blobKey(projectKey: string, fileName: string) {
+    return `lowcode/${projectKey}/blobs/${randomUUID()}/${fileName}`;
+  }
+
+  private async insertProjectVersion(
+    project: ProjectRecord,
+    versionNo: number,
+    pages: ProjectPageRecord[],
+    shared: { langVersionId: string; assetVersionId: string; iconVersionId: string } | null,
+  ): Promise<ProjectVersionRecord> {
+    const now = new Date();
+    const langId = shared?.langVersionId ?? randomUUID();
+    const assetId = shared?.assetVersionId ?? randomUUID();
+    const iconId = shared?.iconVersionId ?? randomUUID();
+    if (!shared) {
+      await this.mongo.saveLangVersion({
+        _id: langId,
+        projectId: project._id,
+        projectKey: project.key,
+        uses: 1,
+        langs: [],
+        langValues: [],
+        updatedAt: now,
+      });
+      await this.mongo.saveLibraryVersion('asset', {
+        _id: assetId,
+        projectId: project._id,
+        projectKey: project.key,
+        uses: 1,
+        groups: [],
+        updatedAt: now,
+      });
+      await this.mongo.saveLibraryVersion('icon', {
+        _id: iconId,
+        projectId: project._id,
+        projectKey: project.key,
+        uses: 1,
+        groups: [],
+        updatedAt: now,
+      });
+    }
+    const version: ProjectVersionRecord = {
+      _id: randomUUID(),
+      projectId: project._id,
+      projectKey: project.key,
+      versionNo,
+      description: '',
+      pages,
+      langVersionId: langId,
+      assetVersionId: assetId,
+      iconVersionId: iconId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.mongo.saveProjectVersion(version);
+    return version;
+  }
+
+  private async retainVersionShares(version: ProjectVersionRecord) {
+    for (const snapshotId of new Set(version.pages.map((page) => page.currentVersionId).filter((id): id is string => Boolean(id)))) {
+      await this.mongo.addPageUses(snapshotId, 1);
+    }
+    await this.mongo.addLangUses(version.langVersionId, 1);
+    await this.mongo.addLibraryUses('asset', version.assetVersionId, 1);
+    await this.mongo.addLibraryUses('icon', version.iconVersionId, 1);
+  }
+
+  private async releaseVersionShares(version: ProjectVersionRecord) {
+    for (const snapshotId of new Set(version.pages.map((page) => page.currentVersionId).filter((id): id is string => Boolean(id)))) {
+      const uses = await this.mongo.addPageUses(snapshotId, -1);
+      if (uses <= 0) {
+        await this.mongo.deletePage(snapshotId);
+      }
+    }
+    const langUses = await this.mongo.addLangUses(version.langVersionId, -1);
+    if (langUses <= 0) {
+      await this.mongo.deleteLangVersion(version.langVersionId);
+    }
+    await this.releaseLibrary('asset', version.assetVersionId);
+    await this.releaseLibrary('icon', version.iconVersionId);
+  }
+
+  private async releasePageSnapshot(version: ProjectVersionRecord, snapshotId: string) {
+    if (version.pages.some((page) => page.currentVersionId === snapshotId)) {
+      return;
+    }
+    const uses = await this.mongo.addPageUses(snapshotId, -1);
+    if (uses <= 0) {
+      await this.mongo.deletePage(snapshotId);
+    }
+  }
+
+  private async releaseLibrary(kind: 'asset' | 'icon', id: string) {
+    const current = await this.mongo.getLibraryVersion(kind, id);
+    const uses = await this.mongo.addLibraryUses(kind, id, -1);
+    if (uses > 0 || !current) {
+      return;
+    }
+    const keys = current.groups.flatMap((group) => group.files.map((file) => file.key));
+    await this.mongo.deleteLibraryVersion(kind, id);
+    for (const key of keys) {
+      await this.releaseBlob(key);
+    }
+  }
+
+  private async migrateProjectVersions() {
+    const projects = await this.mongo.listProjects();
+    for (const project of projects) {
+      const existing = await this.mongo.listProjectVersions(project._id);
+      if (existing.length > 0) {
+        continue;
+      }
+      const legacy = project as ProjectRecord & { pages?: ProjectPageRecord[] };
+      const pages = Array.isArray(legacy.pages) ? legacy.pages : [];
+      const lang = await this.mongo.getLegacyLang(project._id);
+      const now = new Date();
+      const langVersion: LangVersionRecord = {
+        _id: randomUUID(),
+        projectId: project._id,
+        projectKey: project.key,
+        uses: 1,
+        langs: lang?.langs ?? [],
+        langValues: lang?.langValues ?? [],
+        updatedAt: now,
+      };
+      const assetVersion: LibraryVersionRecord = {
+        _id: randomUUID(),
+        projectId: project._id,
+        projectKey: project.key,
+        uses: 1,
+        groups: await this.manifestFromPrefix(this.assetRoot(project.key)),
+        updatedAt: now,
+      };
+      const iconVersion: LibraryVersionRecord = {
+        _id: randomUUID(),
+        projectId: project._id,
+        projectKey: project.key,
+        uses: 1,
+        groups: await this.manifestFromPrefix(this.iconRoot(project.key)),
+        updatedAt: now,
+      };
+      await this.mongo.saveLangVersion(langVersion);
+      await this.mongo.saveLibraryVersion('asset', assetVersion);
+      await this.mongo.saveLibraryVersion('icon', iconVersion);
+      const version: ProjectVersionRecord = {
+        _id: randomUUID(),
+        projectId: project._id,
+        projectKey: project.key,
+        versionNo: 1,
+        description: '',
+        pages,
+        langVersionId: langVersion._id,
+        assetVersionId: assetVersion._id,
+        iconVersionId: iconVersion._id,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await this.mongo.saveProjectVersion(version);
+      const seen = new Set(pages.map((page) => page.currentVersionId).filter((id): id is string => Boolean(id)));
+      for (const snapshotId of seen) {
+        await this.mongo.setPageUses(snapshotId, 1);
+      }
+      for (const snapshot of await this.mongo.listProjectPageSnapshots(project._id)) {
+        if (!seen.has(snapshot._id)) {
+          await this.mongo.setPageUses(snapshot._id, 0);
+        }
+      }
+      await this.mongo.finishProjectMigration(project._id, version._id);
+      project.currentVersionId = version._id;
+      await this.writeLangSnapshots(project, version);
+    }
+    for (const project of await this.mongo.listProjects()) {
+      await this.recountCodeUses(project._id);
+    }
+  }
+
+  private async manifestFromPrefix(prefix: string): Promise<LibraryGroupRecord[]> {
+    const groups = new Map<string, LibraryFileRecord[]>();
+    for (const item of await this.oss.listObjects(prefix)) {
+      const rest = item.key.slice(prefix.length);
+      const slash = rest.indexOf('/');
+      if (slash <= 0) {
+        continue;
+      }
+      const name = rest.slice(0, slash);
+      const file = rest.slice(slash + 1);
+      if (!file || file.includes('/')) {
+        continue;
+      }
+      const files = groups.get(name) ?? [];
+      if (file !== '.keep') {
+        files.push({ name: file, key: item.key, size: item.size });
+      }
+      groups.set(name, files);
+    }
+    return [...groups.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, files]) => ({
+        name,
+        files: files.sort((a, b) => a.name.localeCompare(b.name)),
+      }));
+  }
+
+  /** 方法、事件按工程版本计一次。同一个工程版本里重复出现不算第二次。组件版本仍各计一次。 */
+  private async recountCodeUses(projectId: string) {
+    const methodCounts = new Map<string, number>();
+    const eventCounts = new Map<string, number>();
+    const add = (bucket: Map<string, number>, ids: string[]) => {
+      for (const id of ids) {
+        bucket.set(id, (bucket.get(id) ?? 0) + 1);
+      }
+    };
+    for (const version of await this.mongo.listProjectVersions(projectId)) {
+      const methods = new Set<string>();
+      const events = new Set<string>();
+      for (const page of version.pages ?? []) {
+        if (!page.currentVersionId) {
+          continue;
+        }
+        const snapshot = await this.mongo.getPage(page.currentVersionId);
+        if (!snapshot) {
+          continue;
+        }
+        for (const id of documentMethodIds(snapshot)) {
+          methods.add(id);
+        }
+        for (const id of documentEventIds(snapshot)) {
+          events.add(id);
+        }
+      }
+      add(methodCounts, [...methods]);
+      add(eventCounts, [...events]);
+    }
+    const components = await this.mongo.listComponents(projectId);
+    for (const component of components) {
+      for (const version of await this.mongo.listComponentVersions(component._id)) {
+        add(methodCounts, documentMethodIds(version));
+        add(eventCounts, documentEventIds(version));
+      }
+    }
+    const functions = await this.mongo.listFunctions(projectId);
+    const events = await this.mongo.listEvents(projectId);
+    const seenMethods = new Set<string>();
+    const seenEvents = new Set<string>();
+    for (const row of functions) {
+      seenMethods.add(row.id);
+      await this.mongo.setFunctionUses(projectId, row.id, methodCounts.get(row.id) ?? 0);
+    }
+    for (const row of events) {
+      seenEvents.add(row.id);
+      await this.mongo.setEventUses(projectId, row.id, eventCounts.get(row.id) ?? 0);
+    }
+    for (const [id, uses] of methodCounts) {
+      if (!seenMethods.has(id) && uses > 0) {
+        await this.mongo.setFunctionUses(projectId, id, uses);
+      }
+    }
   }
 
   private async requireComponentVersion(
@@ -1190,17 +1607,17 @@ export class LowcodeService {
     return version;
   }
 
-  private async requireVersion(projectId: string, pageId: string, versionId: string): Promise<PageVersionRecord> {
-    await this.requirePage(projectId, pageId);
-    const version = await this.mongo.getPage(versionId);
-    if (!version || version.pageId !== pageId || version.projectId !== projectId) {
-      throw new NotFoundException();
+  private async requireComponent(projectId: string, componentId: string): Promise<ComponentRecord> {
+    await this.requireProject(projectId);
+    const component = await this.mongo.getComponent(componentId);
+    if (!component || component.projectId !== projectId) {
+      throw new NotFoundException('Component not found');
     }
-    return version;
+    return component;
   }
 
-  private sortedPages(project: ProjectRecord): ProjectPageRecord[] {
-    return [...project.pages].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  private sortedPages(pages: ProjectPageRecord[]): ProjectPageRecord[] {
+    return [...pages].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   }
 
   private versionBody(version: PageVersionRecord): Omit<PageVersionRecord, 'updatedAt'> {
@@ -1210,16 +1627,9 @@ export class LowcodeService {
       projectKey: version.projectKey,
       pageId: version.pageId,
       pageKey: version.pageKey,
-      versionNo: version.versionNo,
-      description: version.description,
+      uses: version.uses ?? 0,
       createdAt: version.createdAt,
-      widgets: version.widgets,
-      ...(version.style ? { style: version.style } : {}),
-      ...(version.data && version.data.length > 0 ? { data: version.data } : {}),
-      ...(version.events ? { events: version.events } : {}),
-      ...(version.methods && version.methods.length > 0 ? { methods: version.methods } : {}),
-      ...(version.props && version.props.length > 0 ? { props: version.props } : {}),
-      ...(version.emits && version.emits.length > 0 ? { emits: version.emits } : {}),
+      ...this.contentOf(version),
     };
   }
 
@@ -1264,10 +1674,20 @@ export class LowcodeService {
     } else {
       delete version.props;
     }
+    if (next.query && next.query.length > 0) {
+      version.query = next.query;
+    } else {
+      delete version.query;
+    }
     if (next.emits && next.emits.length > 0) {
       version.emits = next.emits;
     } else {
       delete version.emits;
+    }
+    if (next.testData) {
+      version.testData = next.testData;
+    } else {
+      delete version.testData;
     }
   }
 
@@ -1290,7 +1710,9 @@ export class LowcodeService {
       ...(record.events ? { events: record.events } : {}),
       ...(record.methods && record.methods.length > 0 ? { methods: record.methods } : {}),
       ...(record.props && record.props.length > 0 ? { props: record.props } : {}),
+      ...(record.query && record.query.length > 0 ? { query: record.query } : {}),
       ...(record.emits && record.emits.length > 0 ? { emits: record.emits } : {}),
+      ...(record.testData ? { testData: record.testData } : {}),
     };
   }
 
@@ -1311,57 +1733,12 @@ export class LowcodeService {
     }
   }
 
-  /** 页面版本文档里方法、事件 id 的增减，就是这个版本对共享代码的引用增减。 */
-  private async syncMethodUses(projectId: string, previousPage: PageXmlDocument, nextPage: PageXmlDocument) {
-    await this.syncUses(documentMethodIds(previousPage), documentMethodIds(nextPage), (id, delta) =>
-      this.mongo.addFunctionUses(projectId, id, delta),
-    );
-    await this.syncUses(documentEventIds(previousPage), documentEventIds(nextPage), (id, delta) =>
-      this.mongo.addEventUses(projectId, id, delta),
-    );
-  }
-
-  private async syncUses(
-    previousIds: string[],
-    nextIds: string[],
-    apply: (id: string, delta: number) => Promise<number>,
-  ) {
-    const previous = new Set(previousIds);
-    const next = new Set(nextIds);
-    for (const id of previous) {
-      if (!next.has(id)) {
-        await apply(id, -1);
-      }
-    }
-    for (const id of next) {
-      if (!previous.has(id)) {
-        await apply(id, 1);
-      }
-    }
-  }
-
   private assetRoot(projectKey: string) {
     return `lowcode/${projectKey}/assets/`;
   }
 
-  private assetGroupPrefix(projectKey: string, group: string) {
-    return `${this.assetRoot(projectKey)}${group}/`;
-  }
-
-  private assetKeepKey(projectKey: string, group: string) {
-    return `${this.assetGroupPrefix(projectKey, group)}.keep`;
-  }
-
   private iconRoot(projectKey: string) {
     return `lowcode/${projectKey}/icons/`;
-  }
-
-  private iconGroupPrefix(projectKey: string, group: string) {
-    return `${this.iconRoot(projectKey)}${group}/`;
-  }
-
-  private iconKeepKey(projectKey: string, group: string) {
-    return `${this.iconGroupPrefix(projectKey, group)}.keep`;
   }
 
   private assertIconGroupName(name: string) {
@@ -1441,6 +1818,7 @@ export class LowcodeService {
       name: project.name,
       key: project.key,
       description: project.description,
+      currentVersionId: project.currentVersionId ?? null,
       createdAt: toIso(project.createdAt),
       updatedAt: toIso(project.updatedAt),
     };
@@ -1485,16 +1863,26 @@ export class LowcodeService {
     };
   }
 
-  private toVersionDto(version: PageVersionRecord): ProjectPageVersionDto {
+  private toProjectVersionDto(version: ProjectVersionRecord): ProjectVersionDto {
     return {
       id: version._id,
-      pageId: version.pageId,
+      projectId: version.projectId,
       versionNo: version.versionNo,
       description: version.description ?? '',
-      document: this.contentOf(version),
-      createdAt: toIso(version.createdAt ?? version.updatedAt),
+      createdAt: toIso(version.createdAt),
       updatedAt: toIso(version.updatedAt),
       lastModified: toIso(version.updatedAt),
+    };
+  }
+
+  private toSnapshotDto(snapshot: PageVersionRecord, forked: boolean): ProjectPageSnapshotDto {
+    return {
+      id: snapshot._id,
+      pageId: snapshot.pageId,
+      forked,
+      document: this.contentOf(snapshot),
+      updatedAt: toIso(snapshot.updatedAt),
+      lastModified: toIso(snapshot.updatedAt),
     };
   }
 

@@ -1,7 +1,7 @@
 import './styles.less';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { renderPage } from '@vanstack/lowcode-runtime';
+import { installPageNavigation, renderPage } from '@vanstack/lowcode-runtime';
 import { api } from '../../apis/api';
 import { eventScriptJavaScript } from '../../utils/eventScript';
 import type { PageI18n } from '@vanstack/xml';
@@ -29,6 +29,7 @@ export function PreviewPage() {
   const viewingStatesRef = useRef('');
   const projectIdRef = useRef<string | null>(null);
   const pageIdRef = useRef<string | null>(null);
+  const queryKeyRef = useRef('{}');
   const tableLayoutRef = useRef(false);
   const spacingDragRef = useRef<BoxDragKind | 'border' | null>(null);
   const rasterScaleRef = useRef(1);
@@ -166,7 +167,10 @@ export function PreviewPage() {
           return;
         }
         const page = mountRef.current?.querySelector<HTMLElement>('.lowcode-page');
-        const mark = page ? `${page.offsetWidth}:${page.offsetHeight}:${page.scrollWidth}:${page.scrollHeight}` : '';
+        const scroller = mountRef.current?.querySelector<HTMLElement>('.lowcode-page-scroll');
+        const mark = page
+          ? `${page.offsetWidth}:${page.offsetHeight}:${scroller?.scrollWidth ?? page.scrollWidth}:${scroller?.scrollHeight ?? page.scrollHeight}`
+          : '';
         if (imagesReady && mark === last) {
           stable += 1;
         } else {
@@ -263,6 +267,7 @@ export function PreviewPage() {
         catalog,
         projectId,
         pageId,
+        query,
         viewingOwnerId,
         viewingState,
         viewingStates,
@@ -285,6 +290,9 @@ export function PreviewPage() {
       const nextViewingStates = JSON.stringify(viewingStates ?? null);
       const nextProjectId = projectId || null;
       const nextPageId = pageId || null;
+      const nextQuery =
+        query && typeof query === 'object' && !Array.isArray(query) ? query : {};
+      const nextQueryKey = JSON.stringify(nextQuery);
       const nextTableLayout = Boolean(tableLayout) && nextEditing;
       const nextDocumentKey = JSON.stringify(document);
       const nextComponentsKey = JSON.stringify(components ?? null);
@@ -303,7 +311,8 @@ export function PreviewPage() {
         nextViewingState !== viewingStateRef.current ||
         nextViewingStates !== viewingStatesRef.current ||
         nextProjectId !== projectIdRef.current ||
-        nextPageId !== pageIdRef.current;
+        nextPageId !== pageIdRef.current ||
+        nextQueryKey !== queryKeyRef.current;
       editingRef.current = nextEditing;
       const nextTableEditing = nextEditing && Boolean(tableEditing);
       tableEditingRef.current = nextTableEditing;
@@ -317,6 +326,19 @@ export function PreviewPage() {
       viewingStatesRef.current = nextViewingStates;
       projectIdRef.current = nextProjectId;
       pageIdRef.current = nextPageId;
+      queryKeyRef.current = nextQueryKey;
+      installPageNavigation(
+        nextEditing
+          ? null
+          : {
+              navigateTo(pageKey, next) {
+                postToParent({ type: 'navigate', action: 'to', pageKey, query: next ?? {} });
+              },
+              navigateBack(times) {
+                postToParent({ type: 'navigate', action: 'back', times: times ?? 1 });
+              },
+            },
+      );
       centerContentRef.current = nextCenterContent;
       useComponentTestDataRef.current = nextUseComponentTestData;
       spacingDragRef.current = nextEditing ? nextSpacing : null;
@@ -376,7 +398,8 @@ export function PreviewPage() {
                 }
               }
             : undefined,
-          pageId: nextPageId,
+          query: nextEditing ? undefined : nextQuery,
+          pageId: nextPageId ? `${nextPageId}:${nextQueryKey}` : null,
           components,
           centerContent: nextCenterContent,
           useComponentTestData: nextUseComponentTestData,

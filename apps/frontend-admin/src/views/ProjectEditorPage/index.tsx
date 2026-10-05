@@ -12,13 +12,14 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
-import type { ProjectComponentDto, ProjectDto, ProjectPageDto, ProjectPageVersionDto } from '@vanstack/shared';
+import type { ProjectComponentDto, ProjectDto, ProjectPageDto, ProjectPageVersionDto, ProjectVersionDto } from '@vanstack/shared';
 import {
   DEFAULT_TABLE_HEADER_HEIGHT,
   EMPTY_PAGE_DOCUMENT,
   applyTestValues,
   buildPageDataScope,
   buildPropsRecord,
+  defaultPageDataValue,
   compactPageI18n,
   compactPageTestData,
   compactWidgetStyle,
@@ -40,6 +41,7 @@ import {
   type WidgetStyle,
 } from '@vanstack/xml';
 import { api } from '../../apis/api';
+import { ProjectVersionProvider } from '../../utils/projectVersion';
 import { deleteDraft, getDraft, putDraft, putDraftNow } from '../../utils/draftStore';
 import {
   putCachedVersion,
@@ -215,6 +217,19 @@ function presentCanvasDocument(
   };
 }
 
+function asPreviewQuery(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const query: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key && item !== undefined) {
+      query[key] = item;
+    }
+  }
+  return query;
+}
+
 export function ProjectEditorPage() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
@@ -224,9 +239,14 @@ export function ProjectEditorPage() {
   const [components, setComponents] = useState<ProjectComponentDto[]>([]);
   const [catalogKind, setCatalogKind] = useState<CatalogKind>('page');
   const [versions, setVersions] = useState<ProjectPageVersionDto[]>([]);
+  const [projectVersions, setProjectVersions] = useState<ProjectVersionDto[]>([]);
+  const [projectVersionId, setProjectVersionId] = useState<string | null>(null);
+  const [pageSnapshotId, setPageSnapshotId] = useState<string | null>(null);
+  const [pageLoadToken, setPageLoadToken] = useState(0);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
   const [componentProps, setComponentProps] = useState<ComponentProp[]>([]);
+  const [pageQuery, setPageQuery] = useState<ComponentProp[]>([]);
   const [componentEmits, setComponentEmits] = useState<ComponentEmit[]>([]);
   const [componentDocsKey, setComponentDocsKey] = useState('');
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
@@ -281,6 +301,13 @@ export function ProjectEditorPage() {
   const [canvasSettling, setCanvasSettling] = useState(false);
   const [settleArm, setSettleArm] = useState(0);
   const modeRef = useRef<CanvasMode>('edit');
+  const previewNavRef = useRef<Array<{ pageId: string; query: Record<string, unknown> }>>([]);
+  const previewQueryRef = useRef<Record<string, unknown>>({});
+  const pagesRef = useRef<ProjectPageDto[]>([]);
+  const navigatePreviewRef = useRef<
+    (message: { action: 'to' | 'back'; pageKey?: string; query?: Record<string, unknown>; times?: number }) => void
+  >(() => {});
+  const [previewQuery, setPreviewQuery] = useState<Record<string, unknown>>({});
   const canvasSettlingRef = useRef(false);
   const settleGenRef = useRef(0);
   const ownerSwitchRef = useRef(false);
@@ -422,11 +449,15 @@ export function ProjectEditorPage() {
   const selectedComponentIdRef = useRef(selectedComponentId);
   const catalogKindRef = useRef(catalogKind);
   const componentPropsRef = useRef(componentProps);
+  const pageQueryRef = useRef(pageQuery);
   const componentEmitsRef = useRef(componentEmits);
   const componentDocsRef = useRef<Record<string, PageXmlDocument>>({});
   const liveComponentDocsRef = useRef<Record<string, PageXmlDocument>>({});
   const liveComponentPropsRef = useRef<Record<string, ComponentProp[]>>({});
   const selectedVersionIdRef = useRef(selectedVersionId);
+  const projectVersionIdRef = useRef(projectVersionId);
+  const pageSnapshotIdRef = useRef(pageSnapshotId);
+  const pagesVersionRef = useRef<string | null>(null);
   const saveCurrentVersionRef = useRef<(options?: { silent?: boolean }) => Promise<void>>(async () => undefined);
 
   const pageDocument = useMemo(
@@ -438,10 +469,11 @@ export function ProjectEditorPage() {
         events: pageEvents,
         methods: pageMethods.length > 0 ? pageMethods : undefined,
         props: componentProps.length > 0 ? componentProps : undefined,
+        query: pageQuery.length > 0 ? pageQuery : undefined,
         emits: componentEmits.length > 0 ? componentEmits : undefined,
-        testData: compactPageTestData(testData, componentProps, pageData),
+        testData: compactPageTestData(testData, componentProps, pageData, pageQuery),
       }),
-    [widgets, pageStyle, pageData, pageEvents, pageMethods, componentProps, componentEmits, testData],
+    [widgets, pageStyle, pageData, pageEvents, pageMethods, componentProps, pageQuery, componentEmits, testData],
   );
   const documentKey = JSON.stringify(pageDocument);
   documentRef.current = pageDocument;
@@ -456,15 +488,61 @@ export function ProjectEditorPage() {
   const readOnly = previewing;
   inspectorInvalidRef.current = inspectorInvalid;
   selectedPageIdRef.current = selectedPageId;
+  pagesRef.current = pages;
+  navigatePreviewRef.current = (message) => {
+    if (modeRef.current !== 'preview' || catalogKindRef.current !== 'page') {
+      return;
+    }
+    if (message.action === 'back') {
+      const requested = message.times == null ? 1 : Math.floor(message.times);
+      if (!Number.isFinite(requested) || requested < 1) {
+        return;
+      }
+      const stack = previewNavRef.current;
+      const steps = Math.min(requested, stack.length);
+      if (steps < 1) {
+        return;
+      }
+      const entry = stack[stack.length - steps];
+      previewNavRef.current = stack.slice(0, -steps);
+      previewQueryRef.current = entry.query;
+      setPreviewQuery(entry.query);
+      setSelectedWidgetId(null);
+      if (entry.pageId !== selectedPageIdRef.current) {
+        setSelectedPageId(entry.pageId);
+      }
+      return;
+    }
+    const key = message.pageKey?.trim() ?? '';
+    const page = pagesRef.current.find((item) => item.key === key);
+    const currentId = selectedPageIdRef.current;
+    if (!page || !currentId) {
+      return;
+    }
+    const nextQuery = asPreviewQuery(message.query);
+    if (page.id === currentId && JSON.stringify(previewQueryRef.current) === JSON.stringify(nextQuery)) {
+      return;
+    }
+    previewNavRef.current.push({ pageId: currentId, query: previewQueryRef.current });
+    previewQueryRef.current = nextQuery;
+    setPreviewQuery(nextQuery);
+    setSelectedWidgetId(null);
+    if (page.id !== currentId) {
+      setSelectedPageId(page.id);
+    }
+  };
   selectedComponentIdRef.current = selectedComponentId;
   catalogKindRef.current = catalogKind;
   componentPropsRef.current = componentProps;
+  pageQueryRef.current = pageQuery;
   if (catalogKind === 'component' && selectedComponentId) {
     liveComponentPropsRef.current[selectedComponentId] = componentProps;
     liveComponentDocsRef.current[selectedComponentId] = pageDocument;
   }
   componentEmitsRef.current = componentEmits;
   selectedVersionIdRef.current = selectedVersionId;
+  projectVersionIdRef.current = projectVersionId;
+  pageSnapshotIdRef.current = pageSnapshotId;
   widgetsRef.current = widgets;
   pageStyleRef.current = pageStyle;
   pageDataRef.current = pageData;
@@ -802,6 +880,10 @@ export function ProjectEditorPage() {
         catalog: pageI18n,
         projectId: project?.id ?? null,
         pageId: selectedPageId,
+        query: {
+          ...buildPropsRecord(applyTestValues(documentRef.current.query, documentRef.current.testData?.query)),
+          ...(mode === 'preview' ? previewQuery : {}),
+        },
         viewingOwnerId: mode === 'edit' ? viewingOwnerId : null,
         viewingState: mode === 'edit' ? viewingState : null,
         viewingStates: mode === 'edit' ? viewingListFromMap(viewingByOwner) : null,
@@ -830,7 +912,7 @@ export function ProjectEditorPage() {
       },
       window.location.origin,
     );
-  }, [mode, previewLocale, pageI18n, project?.id, selectedPageId, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, tableRange, tableEditId, componentDocsKey]);
+  }, [mode, previewLocale, previewQuery, pageI18n, project?.id, selectedPageId, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, tableRange, tableEditId, componentDocsKey]);
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -846,6 +928,10 @@ export function ProjectEditorPage() {
       }
       if (event.data.type === 'model-value') {
         commitModelRef.current(event.data.name, event.data.value, event.data.done);
+        return;
+      }
+      if (event.data.type === 'navigate') {
+        navigatePreviewRef.current(event.data);
         return;
       }
       if (event.data.type === 'ready') {
@@ -1051,7 +1137,8 @@ export function ProjectEditorPage() {
   }, [previewLangKeys.join('\0')]);
 
   useEffect(() => {
-    if (!id || !activeOwnerId || !selectedVersionId || !persistEnabledRef.current) {
+    const draftVersionId = catalogKind === 'component' ? selectedVersionId : pageSnapshotId;
+    if (!id || !activeOwnerId || !draftVersionId || !persistEnabledRef.current) {
       if (idleTimerRef.current) {
         clearTimeout(idleTimerRef.current);
         idleTimerRef.current = null;
@@ -1070,7 +1157,7 @@ export function ProjectEditorPage() {
     }
     setSaveStatus('unsaved');
     const draftId = catalogKind === 'component' ? `component:${activeOwnerId}` : activeOwnerId;
-    void putDraft(id, draftId, selectedVersionId, documentKey);
+    void putDraft(id, draftId, draftVersionId, documentKey);
     if (inspectorInvalid) {
       if (idleTimerRef.current) {
         clearTimeout(idleTimerRef.current);
@@ -1091,15 +1178,16 @@ export function ProjectEditorPage() {
         idleTimerRef.current = null;
       }
     };
-  }, [documentKey, id, activeOwnerId, catalogKind, selectedVersionId, inspectorInvalid, hydrateEpoch]);
+  }, [documentKey, id, activeOwnerId, catalogKind, selectedVersionId, pageSnapshotId, inspectorInvalid, hydrateEpoch]);
 
   useEffect(() => {
     function onPageHide() {
       const ownerId = catalogKindRef.current === 'component' ? selectedComponentIdRef.current : selectedPageIdRef.current;
-      if (!id || !ownerId || !selectedVersionIdRef.current || !persistEnabledRef.current) {
+      const versionId = catalogKindRef.current === 'component' ? selectedVersionIdRef.current : pageSnapshotIdRef.current;
+      const projectVersion = projectVersionIdRef.current;
+      if (!id || !ownerId || !versionId || !persistEnabledRef.current) {
         return;
       }
-      const versionId = selectedVersionIdRef.current;
       const draftId = catalogKindRef.current === 'component' ? `component:${ownerId}` : ownerId;
       void putDraftNow(id, draftId, versionId, documentKeyRef.current);
       if (inspectorInvalidRef.current || documentKeyRef.current === lastServerKeyRef.current) {
@@ -1107,8 +1195,8 @@ export function ProjectEditorPage() {
       }
       if (catalogKindRef.current === 'component') {
         api.updateComponentVersionKeepalive(id, ownerId, versionId, { document: documentRef.current });
-      } else {
-        api.updateVersionKeepalive(id, ownerId, versionId, { document: documentRef.current });
+      } else if (projectVersion) {
+        api.updatePageDocumentKeepalive(id, projectVersion, ownerId, { document: documentRef.current });
       }
     }
     window.addEventListener('pagehide', onPageHide);
@@ -1519,22 +1607,22 @@ export function ProjectEditorPage() {
     }
     setLoading(true);
     try {
-      const [nextProject, nextPages, nextComponents, nextLangs] = await Promise.all([
+      const [nextProject, nextVersions, nextComponents] = await Promise.all([
         api.getProject(id),
-        api.listPages(id),
+        api.listProjectVersions(id),
         api.listComponents(id),
-        api.getProjectLangs(id),
       ]);
       setProject(nextProject);
-      setPages(nextPages);
+      setProjectVersions(nextVersions);
       setComponents(nextComponents);
-      setPageI18n(compactPageI18n(nextLangs));
       setMissing(false);
-      const rememberedPage = pickRememberedId(nextPages, getRememberedPageId(id));
-      const rememberedComponent = pickRememberedId(nextComponents, getRememberedComponentId(id));
-      setSelectedPageId((current) =>
-        nextPages.some((page) => page.id === current) ? current : (rememberedPage?.id ?? null),
+      const rememberedVersion = pickRememberedId(
+        nextVersions,
+        getRememberedVersionId(id, 'project'),
+        nextProject.currentVersionId,
       );
+      setProjectVersionId(rememberedVersion?.id ?? nextVersions[nextVersions.length - 1]?.id ?? null);
+      const rememberedComponent = pickRememberedId(nextComponents, getRememberedComponentId(id));
       setSelectedComponentId((current) =>
         nextComponents.some((item) => item.id === current) ? current : (rememberedComponent?.id ?? null),
       );
@@ -1549,6 +1637,43 @@ export function ProjectEditorPage() {
   useEffect(() => {
     void loadProject();
   }, [id]);
+
+  useEffect(() => {
+    if (!id || !projectVersionId) {
+      pagesVersionRef.current = null;
+      setPages([]);
+      return;
+    }
+    const projectId = id;
+    const versionId = projectVersionId;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [nextPages, langs] = await Promise.all([
+          api.listPages(projectId, versionId),
+          api.getProjectLangs(projectId, versionId),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setPages(nextPages);
+        setPageI18n(compactPageI18n(langs));
+        const remembered = pickRememberedId(nextPages, getRememberedPageId(projectId));
+        setSelectedPageId((current) =>
+          nextPages.some((page) => page.id === current) ? current : (remembered?.id ?? nextPages[0]?.id ?? null),
+        );
+        pagesVersionRef.current = versionId;
+        setPageLoadToken((token) => token + 1);
+      } catch (error) {
+        if (!cancelled) {
+          message.error(error instanceof Error ? error.message : t('lowcode.loadFailed'));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, projectVersionId, t]);
 
   useEffect(() => {
     if (!id) {
@@ -1571,7 +1696,8 @@ export function ProjectEditorPage() {
           const cached = await readOwnerVersionCache(projectId, `component:${component.id}`);
           const current =
             cached.find((version) => version.id === component.currentVersionId) ?? cached[cached.length - 1];
-          return [component.id, current ? normalizePageDocument(current.document) : null] as const;
+          const document = await componentDocumentForCanvas(projectId, component.id, current);
+          return [component.id, document] as const;
         }),
       );
       if (!cancelled && cachedRows.some(([, document]) => document)) {
@@ -1598,7 +1724,8 @@ export function ProjectEditorPage() {
           );
           const current =
             versions.find((version) => version.id === component.currentVersionId) ?? versions[versions.length - 1];
-          const document = current ? normalizePageDocument(current.document) : { widgets: [] };
+          const document =
+            (await componentDocumentForCanvas(projectId, component.id, current)) ?? { widgets: [] };
           return [component.id, document] as const;
         }),
       );
@@ -1614,6 +1741,17 @@ export function ProjectEditorPage() {
   }, [id, components, catalogKind]);
 
   useEffect(() => {
+    if (mode === 'preview') {
+      return;
+    }
+    previewNavRef.current = [];
+    if (Object.keys(previewQueryRef.current).length > 0) {
+      previewQueryRef.current = {};
+      setPreviewQuery({});
+    }
+  }, [mode]);
+
+  useEffect(() => {
     if (!id) {
       return;
     }
@@ -1624,10 +1762,6 @@ export function ProjectEditorPage() {
       rememberComponentId(id, selectedComponentId);
     }
   }, [id, catalogKind, selectedPageId, selectedComponentId]);
-
-  function draftOwnerId(ownerId: string) {
-    return catalogKindRef.current === 'component' ? `component:${ownerId}` : ownerId;
-  }
 
   function beginOwnerCanvas() {
     settleGenRef.current += 1;
@@ -1663,7 +1797,7 @@ export function ProjectEditorPage() {
     const projectId = id;
     const kind = catalogKindRef.current;
     const loadSeq = ++ownerLoadSeqRef.current;
-    const ownerKey = kind === 'component' ? `component:${ownerId}` : ownerId;
+    const ownerKey = `component:${ownerId}`;
     const stillCurrent = () => ownerLoadSeqRef.current === loadSeq && catalogKindRef.current === kind;
     persistEnabledRef.current = false;
     let showedCache = false;
@@ -1686,23 +1820,15 @@ export function ProjectEditorPage() {
         showedCache = true;
       }
       const [entity, metas] = await Promise.all([
-        kind === 'component' ? api.getComponent(projectId, ownerId) : api.getPage(projectId, ownerId),
-        kind === 'component'
-          ? api.listComponentVersionMeta(projectId, ownerId)
-          : api.listVersionMeta(projectId, ownerId),
+        api.getComponent(projectId, ownerId),
+        api.listComponentVersionMeta(projectId, ownerId),
       ]);
       if (!stillCurrent()) {
         return;
       }
-      if (kind === 'component') {
-        setComponents((current) => current.map((item) => (item.id === entity.id ? entity : item)));
-      } else {
-        setPages((current) => current.map((item) => (item.id === entity.id ? entity : item)));
-      }
+      setComponents((current) => current.map((item) => (item.id === entity.id ? entity : item)));
       const { versions, changedIds } = await reconcileOwnerVersions(projectId, ownerKey, metas, (versionId) =>
-        kind === 'component'
-          ? api.getComponentVersion(projectId, ownerId, versionId)
-          : api.getVersion(projectId, ownerId, versionId),
+        api.getComponentVersion(projectId, ownerId, versionId),
       );
       if (!stillCurrent()) {
         return;
@@ -1779,13 +1905,42 @@ export function ProjectEditorPage() {
     fitCanvas(false);
   }, [catalogKind, activeOwnerId, fitCanvas, loading, missing]);
 
+  async function loadPageSnapshot(pageId: string, versionId: string) {
+    if (!id) {
+      return;
+    }
+    try {
+      const snapshot = await api.getPageDocument(id, versionId, pageId);
+      setPageSnapshotId(snapshot.id);
+      await hydrateVersion(
+        {
+          id: snapshot.id,
+          pageId,
+          versionNo: 0,
+          description: '',
+          document: snapshot.document,
+          createdAt: snapshot.updatedAt,
+          updatedAt: snapshot.updatedAt,
+          lastModified: snapshot.lastModified,
+        },
+        pageId,
+      );
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t('lowcode.loadFailed'));
+      cancelOwnerCanvas();
+    }
+  }
+
   useEffect(() => {
+    if (catalogKind !== 'component') {
+      return;
+    }
     persistEnabledRef.current = false;
     clipboardRef.current = null;
     setClipboardTick((tick) => tick + 1);
     resetHistory();
     if (activeOwnerId) {
-      if (sawOwnerRef.current) {
+      if (sawOwnerRef.current && modeRef.current !== 'preview') {
         beginOwnerCanvas();
       }
       sawOwnerRef.current = true;
@@ -1799,6 +1954,32 @@ export function ProjectEditorPage() {
       resetWidgetSession([], undefined);
     }
   }, [catalogKind, activeOwnerId]);
+
+  useEffect(() => {
+    if (catalogKind !== 'page') {
+      return;
+    }
+    if (!id || !projectVersionId || pagesVersionRef.current !== projectVersionId) {
+      return;
+    }
+    persistEnabledRef.current = false;
+    clipboardRef.current = null;
+    setClipboardTick((tick) => tick + 1);
+    resetHistory();
+    if (!selectedPageId) {
+      cancelOwnerCanvas();
+      setPageSnapshotId(null);
+      lastServerKeyRef.current = '';
+      setSaveStatus('saved');
+      resetWidgetSession([], undefined);
+      return;
+    }
+    if (sawOwnerRef.current && modeRef.current !== 'preview') {
+      beginOwnerCanvas();
+    }
+    sawOwnerRef.current = true;
+    void loadPageSnapshot(selectedPageId, projectVersionId);
+  }, [catalogKind, selectedPageId, projectVersionId, pageLoadToken]);
 
   function resetHistory() {
     pastRef.current = [];
@@ -1817,6 +1998,7 @@ export function ProjectEditorPage() {
     nextProps: ComponentProp[] = [],
     nextEmits: ComponentEmit[] = [],
     nextTestData?: PageTestData,
+    nextQuery: ComponentProp[] = [],
   ) {
     const selectedId = nextSelectedId === undefined ? (nextWidgets[0]?.id ?? null) : nextSelectedId;
     widgetsRef.current = nextWidgets;
@@ -1825,6 +2007,7 @@ export function ProjectEditorPage() {
     pageEventsRef.current = nextPageEvents;
     pageMethodsRef.current = nextPageMethods;
     componentPropsRef.current = nextProps;
+    pageQueryRef.current = nextQuery;
     componentEmitsRef.current = nextEmits;
     testDataRef.current = nextTestData;
     previewDataEditsRef.current = {};
@@ -1836,6 +2019,7 @@ export function ProjectEditorPage() {
     setPageEvents(nextPageEvents);
     setPageMethods(nextPageMethods);
     setComponentProps(nextProps);
+    setPageQuery(nextQuery);
     setComponentEmits(nextEmits);
     setTestData(nextTestData);
     setSelectedWidgetId(selectedId);
@@ -1859,6 +2043,23 @@ export function ProjectEditorPage() {
     }
   }
 
+  async function componentDocumentForCanvas(
+    projectId: string,
+    componentId: string,
+    version: { id: string; document: unknown } | null | undefined,
+  ): Promise<PageXmlDocument | null> {
+    if (!version) {
+      return null;
+    }
+    const saved = readPageDocument(version.document);
+    const local = await getDraft(projectId, `component:${componentId}`, version.id);
+    const draft = local ? readDraftDocument(local) : null;
+    if (draft && JSON.stringify(draft) !== JSON.stringify(saved)) {
+      return draft;
+    }
+    return saved;
+  }
+
   function applyDocument(next: PageXmlDocument) {
     try {
       const parsed = normalizePageDocument(next);
@@ -1872,6 +2073,7 @@ export function ProjectEditorPage() {
         parsed.props ?? [],
         parsed.emits ?? [],
         parsed.testData,
+        parsed.query ?? [],
       );
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.invalidXml'));
@@ -1896,6 +2098,7 @@ export function ProjectEditorPage() {
         pageEvents: pageEventsRef.current,
         pageMethods: pageMethodsRef.current,
         componentProps: componentPropsRef.current,
+        pageQuery: pageQueryRef.current,
         componentEmits: componentEmitsRef.current,
         selectedWidgetId: selectedWidgetIdRef.current,
       },
@@ -2378,10 +2581,12 @@ export function ProjectEditorPage() {
     nextProps?: ComponentProp[],
     nextEmits?: ComponentEmit[],
     nextTestData?: PageTestData | null,
+    nextQuery?: ComponentProp[],
   ) {
     const events = nextPageEvents === undefined ? pageEventsRef.current : nextPageEvents ?? undefined;
     const methods = nextPageMethods === undefined ? pageMethodsRef.current : nextPageMethods;
     const props = nextProps === undefined ? componentPropsRef.current : nextProps;
+    const query = nextQuery === undefined ? pageQueryRef.current : nextQuery;
     const emits = nextEmits === undefined ? componentEmitsRef.current : nextEmits;
     const nextTest = nextTestData === undefined ? testDataRef.current : nextTestData ?? undefined;
     const coalescing = Boolean(coalesceKey && coalesceKey === coalesceKeyRef.current);
@@ -2395,6 +2600,7 @@ export function ProjectEditorPage() {
           pageEvents: pageEventsRef.current,
           pageMethods: pageMethodsRef.current,
           componentProps: componentPropsRef.current,
+          pageQuery: pageQueryRef.current,
           componentEmits: componentEmitsRef.current,
           testData: testDataRef.current,
           selectedWidgetId: selectedWidgetIdRef.current,
@@ -2412,6 +2618,7 @@ export function ProjectEditorPage() {
     pageEventsRef.current = events;
     pageMethodsRef.current = methods;
     componentPropsRef.current = props;
+    pageQueryRef.current = query;
     componentEmitsRef.current = emits;
     testDataRef.current = nextTest;
     selectedWidgetIdRef.current = nextSelectedId;
@@ -2421,6 +2628,7 @@ export function ProjectEditorPage() {
     setPageEvents(events);
     setPageMethods(methods);
     setComponentProps(props);
+    setPageQuery(query);
     setComponentEmits(emits);
     setTestData(nextTest);
     setSelectedWidgetId(nextSelectedId);
@@ -2484,6 +2692,37 @@ export function ProjectEditorPage() {
     );
   }
 
+  function commitPageQuery(next: ComponentProp[], coalesceKey?: string) {
+    if (readOnlyRef.current) {
+      return;
+    }
+    commitDraft(
+      widgetsRef.current,
+      pageStyleRef.current,
+      pageDataRef.current,
+      selectedWidgetIdRef.current,
+      coalesceKey,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      next,
+    );
+  }
+
+  function addPageQuery() {
+    const list = pageQueryRef.current;
+    const used = new Set(list.map((item) => item.name));
+    let index = list.length + 1;
+    let name = `query${index}`;
+    while (used.has(name)) {
+      index += 1;
+      name = `query${index}`;
+    }
+    commitPageQuery([...list, { type: 'str', name, value: defaultPageDataValue('str') }]);
+  }
+
   function commitComponentProps(next: ComponentProp[], coalesceKey?: string) {
     if (readOnlyRef.current) {
       return;
@@ -2532,11 +2771,13 @@ export function ProjectEditorPage() {
     );
   }
 
-  function commitTestField(section: 'props' | 'data', name: string, stored: string, coalesceKey?: string) {
+  function commitTestField(section: 'props' | 'data' | 'query', name: string, stored: string, coalesceKey?: string) {
     const schema =
       section === 'props'
         ? componentPropsRef.current.find((item) => item.name === name)?.value
-        : pageDataRef.current.find((item) => item.name === name)?.value;
+        : section === 'query'
+          ? pageQueryRef.current.find((item) => item.name === name)?.value
+          : pageDataRef.current.find((item) => item.name === name)?.value;
     const current = testDataRef.current;
     const bag = { ...(current?.[section] ?? {}) };
     if (schema !== undefined && stored === schema) {
@@ -2551,13 +2792,16 @@ export function ProjectEditorPage() {
     }
     const props = section === 'props' ? bag : current?.props;
     const data = section === 'data' ? bag : current?.data;
+    const query = section === 'query' ? bag : current?.query;
     const next = compactPageTestData(
       {
         ...(props && Object.keys(props).length > 0 ? { props } : {}),
+        ...(query && Object.keys(query).length > 0 ? { query } : {}),
         ...(data && Object.keys(data).length > 0 ? { data } : {}),
       },
       componentPropsRef.current,
       pageDataRef.current,
+      pageQueryRef.current,
     );
     commitDraft(
       widgetsRef.current,
@@ -2588,13 +2832,14 @@ export function ProjectEditorPage() {
     sendPreview();
   }
 
-  function commitPreviewTest(section: 'props' | 'data', name: string, type: string, text: string) {
+  function commitPreviewTest(section: 'props' | 'data' | 'query', name: string, type: string, text: string) {
     const testProps = buildPropsRecord(applyTestValues(componentPropsRef.current, testDataRef.current?.props));
     const schemaProps = buildPropsRecord(componentPropsRef.current);
+    const queryScope = buildPropsRecord(applyTestValues(pageQueryRef.current, testDataRef.current?.query));
     const variables = pageDataRef.current;
     const index = section === 'data' ? variables.findIndex((item) => item.name === name) : -1;
     const props = section === 'data' ? schemaProps : testProps;
-    const data = buildPageDataScope(variables, index < 0 ? 0 : index, props);
+    const data = buildPageDataScope(variables, index < 0 ? 0 : index, props, queryScope);
     let stored: string | null = null;
     if (type === 'bool') {
       stored = text === '1' || text === 'true' ? '1' : '0';
@@ -2602,7 +2847,7 @@ export function ProjectEditorPage() {
       stored = normalizeInputModelValue('number', text);
     } else if (type === 'str' || type === 'widget') {
       stored = text;
-    } else if ((type === 'arr' || type === 'obj') && validateDataLiteral(text, type, data, props)) {
+    } else if ((type === 'arr' || type === 'obj') && validateDataLiteral(text, type, data, props, queryScope)) {
       stored = text.trim();
     }
     if (stored == null) {
@@ -2711,7 +2956,11 @@ export function ProjectEditorPage() {
     langsAgainRef.current = false;
     const payload = pageI18nRef.current ?? { langs: [], groups: [] };
     try {
-      await api.putProjectLangs(id, payload);
+      const versionId = projectVersionIdRef.current;
+      if (!versionId) {
+        return;
+      }
+      await api.putProjectLangs(id, versionId, payload);
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.saveFailed'));
     } finally {
@@ -3814,6 +4063,7 @@ export function ProjectEditorPage() {
       pageEvents: pageEventsRef.current,
       pageMethods: pageMethodsRef.current,
       componentProps: componentPropsRef.current,
+      pageQuery: pageQueryRef.current,
       componentEmits: componentEmitsRef.current,
       testData: testDataRef.current,
       selectedWidgetId: selectedWidgetIdRef.current,
@@ -3828,6 +4078,7 @@ export function ProjectEditorPage() {
     pageEventsRef.current = previous.pageEvents;
     pageMethodsRef.current = previous.pageMethods;
     componentPropsRef.current = previous.componentProps;
+    pageQueryRef.current = previous.pageQuery;
     componentEmitsRef.current = previous.componentEmits;
     testDataRef.current = previous.testData;
     selectedWidgetIdRef.current = previous.selectedWidgetId;
@@ -3838,6 +4089,7 @@ export function ProjectEditorPage() {
     setPageEvents(previous.pageEvents);
     setPageMethods(previous.pageMethods);
     setComponentProps(previous.componentProps);
+    setPageQuery(previous.pageQuery);
     setComponentEmits(previous.componentEmits);
     setTestData(previous.testData);
     setSelectedWidgetId(previous.selectedWidgetId);
@@ -3857,6 +4109,7 @@ export function ProjectEditorPage() {
       pageEvents: pageEventsRef.current,
       pageMethods: pageMethodsRef.current,
       componentProps: componentPropsRef.current,
+      pageQuery: pageQueryRef.current,
       componentEmits: componentEmitsRef.current,
       testData: testDataRef.current,
       selectedWidgetId: selectedWidgetIdRef.current,
@@ -3871,6 +4124,7 @@ export function ProjectEditorPage() {
     pageEventsRef.current = next.pageEvents;
     pageMethodsRef.current = next.pageMethods;
     componentPropsRef.current = next.componentProps;
+    pageQueryRef.current = next.pageQuery;
     componentEmitsRef.current = next.componentEmits;
     testDataRef.current = next.testData;
     selectedWidgetIdRef.current = next.selectedWidgetId;
@@ -3881,6 +4135,7 @@ export function ProjectEditorPage() {
     setPageEvents(next.pageEvents);
     setPageMethods(next.pageMethods);
     setComponentProps(next.componentProps);
+    setPageQuery(next.pageQuery);
     setComponentEmits(next.componentEmits);
     setTestData(next.testData);
     setSelectedWidgetId(next.selectedWidgetId);
@@ -3989,11 +4244,11 @@ export function ProjectEditorPage() {
           setComponents((current) => [...current, created]);
           setSelectedComponentId(created.id);
         }
-      } else if (editingPage) {
-        const updated = await api.updatePage(id, editingPage.id, values);
+      } else if (editingPage && projectVersionId) {
+        const updated = await api.updatePage(id, projectVersionId, editingPage.id, values);
         setPages((current) => current.map((page) => (page.id === updated.id ? updated : page)));
-      } else {
-        const created = await api.createPage(id, values);
+      } else if (projectVersionId) {
+        const created = await api.createPage(id, projectVersionId, values);
         setPages((current) => [...current, created]);
         setSelectedPageId(created.id);
       }
@@ -4016,7 +4271,10 @@ export function ProjectEditorPage() {
           setSelectedComponentId(null);
         }
       } else {
-        await api.deletePage(id, page.id);
+        if (!projectVersionId) {
+          return;
+        }
+        await api.deletePage(id, projectVersionId, page.id);
         forgetPageSelection(id, page.id);
         setPages((current) => current.filter((item) => item.id !== page.id));
         if (selectedPageId === page.id) {
@@ -4031,30 +4289,24 @@ export function ProjectEditorPage() {
   function openCreateVersion() {
     versionForm.setFieldsValue({
       source: 'blank',
-      copyFromId: selectedVersionId ?? versions[0]?.id,
+      copyFromId: projectVersionId ?? projectVersions[0]?.id,
     });
     setVersionModalOpen(true);
   }
 
   async function submitCreateVersion() {
-    if (!id || !activeOwnerId) {
+    if (!id) {
       return;
     }
     const values = await versionForm.validateFields();
-    const nextDocument =
-      values.source === 'copy'
-        ? readPageDocument(versions.find((version) => version.id === values.copyFromId)?.document)
-        : EMPTY_PAGE_DOCUMENT;
-    const draftId = draftOwnerId(activeOwnerId);
     try {
-      const created =
-        catalogKind === 'component'
-          ? await api.createComponentVersion(id, activeOwnerId, { document: nextDocument, description: '' })
-          : await api.createVersion(id, activeOwnerId, { document: nextDocument, description: '' });
-      setVersions((current) => [...current, created]);
-      setSelectedVersionId(created.id);
-      rememberVersionId(id, draftId, created.id);
-      await hydrateVersion(created, draftId);
+      const created = await api.createProjectVersion(id, {
+        source: values.source,
+        copyFromId: values.source === 'copy' ? values.copyFromId : undefined,
+      });
+      setProjectVersions((current) => [...current, created]);
+      setProjectVersionId(created.id);
+      rememberVersionId(id, 'project', created.id);
       setVersionModalOpen(false);
       message.success(t('lowcode.versionCreated'));
     } catch (error) {
@@ -4064,7 +4316,8 @@ export function ProjectEditorPage() {
 
   async function saveCurrentVersion(options?: { silent?: boolean }) {
     const ownerId = catalogKindRef.current === 'component' ? selectedComponentIdRef.current : selectedPageIdRef.current;
-    if (!id || !ownerId || !selectedVersionIdRef.current) {
+    const savingProjectVersion = projectVersionIdRef.current;
+    if (!id || !ownerId || (catalogKindRef.current === 'component' ? !selectedVersionIdRef.current : !savingProjectVersion)) {
       return;
     }
     if (readOnlyRef.current || inspectorInvalidRef.current) {
@@ -4077,23 +4330,35 @@ export function ProjectEditorPage() {
       saveAgainRef.current = true;
       return;
     }
-    const versionId = selectedVersionIdRef.current;
+    const versionId = catalogKindRef.current === 'component' ? selectedVersionIdRef.current : pageSnapshotIdRef.current;
     const draftId = catalogKindRef.current === 'component' ? `component:${ownerId}` : ownerId;
     const documentToSave = documentRef.current;
     const keyToSave = documentKeyRef.current;
+    if (!versionId) {
+      return;
+    }
     saveInFlightRef.current = true;
     setSaveStatus('saving');
     try {
-      const updated =
-        catalogKindRef.current === 'component'
-          ? await api.updateComponentVersion(id, ownerId, versionId, { document: documentToSave })
-          : await api.updateVersion(id, ownerId, versionId, { document: documentToSave });
-      lastServerKeyRef.current = keyToSave;
-      await deleteDraft(id, draftId, versionId);
-      void putCachedVersion(id, draftId, { ...updated, document: documentToSave });
-      setVersions((current) =>
-        current.map((version) => (version.id === updated.id ? { ...updated, document: documentToSave } : version)),
-      );
+      if (catalogKindRef.current === 'component') {
+        const updated = await api.updateComponentVersion(id, ownerId, versionId, { document: documentToSave });
+        lastServerKeyRef.current = keyToSave;
+        await deleteDraft(id, draftId, versionId);
+        void putCachedVersion(id, draftId, { ...updated, document: documentToSave });
+        setVersions((current) =>
+          current.map((version) => (version.id === updated.id ? { ...updated, document: documentToSave } : version)),
+        );
+      } else if (savingProjectVersion) {
+        const updated = await api.updatePageDocument(id, savingProjectVersion, ownerId, { document: documentToSave });
+        lastServerKeyRef.current = keyToSave;
+        await deleteDraft(id, draftId, versionId);
+        if (updated.id !== versionId) {
+          setPageSnapshotId(updated.id);
+          setPages((current) =>
+            current.map((page) => (page.id === ownerId ? { ...page, currentVersionId: updated.id } : page)),
+          );
+        }
+      }
       if (!options?.silent) {
         message.success(t('lowcode.versionUpdated'));
       }
@@ -4113,35 +4378,27 @@ export function ProjectEditorPage() {
   }
   saveCurrentVersionRef.current = saveCurrentVersion;
 
-  async function removeVersion(version: ProjectPageVersionDto) {
-    if (!id || !activeOwnerId) {
+  async function removeVersion(version: { id: string }) {
+    if (!id) {
       return;
     }
     try {
-      if (catalogKind === 'component') {
-        await api.deleteComponentVersion(id, activeOwnerId, version.id);
-      } else {
-        await api.deleteVersion(id, activeOwnerId, version.id);
-      }
-      setVersions((current) => current.filter((item) => item.id !== version.id));
-      if (selectedVersionId === version.id) {
-        setSelectedVersionId(null);
+      await api.deleteProjectVersion(id, version.id);
+      const rest = projectVersions.filter((item) => item.id !== version.id);
+      setProjectVersions(rest);
+      if (projectVersionId === version.id) {
+        setProjectVersionId(rest[rest.length - 1]?.id ?? null);
       }
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.deleteFailed'));
     }
   }
 
-  function selectVersion(version: ProjectPageVersionDto) {
-    persistEnabledRef.current = false;
-    setSelectedVersionId(version.id);
-    if (id && activeOwnerId) {
-      const draftId = draftOwnerId(activeOwnerId);
-      rememberVersionId(id, draftId, version.id);
-      void hydrateVersion(version, draftId);
-      return;
+  function selectVersion(version: { id: string }) {
+    if (id) {
+      rememberVersionId(id, 'project', version.id);
     }
-    applyDocument(readPageDocument(version.document));
+    setProjectVersionId(version.id);
   }
 
   if (loading) {
@@ -4242,12 +4499,13 @@ export function ProjectEditorPage() {
   const showStyleChrome = !previewing && centerTab === 'layout';
 
   return (
+    <ProjectVersionProvider versionId={projectVersionId}>
     <div className="editor-shell">
       <EditorHeader
         project={project}
         versionsOpen={versionsOpen}
         modifier={modifier}
-        saveDisabled={!selectedVersion}
+        saveDisabled={catalogKind === 'component' ? !selectedVersion : !pageSnapshotId}
         onShowVersions={() => setVersionsOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
         onSave={() => void saveCurrentVersion()}
@@ -4255,14 +4513,9 @@ export function ProjectEditorPage() {
       <div className="editor-body">
         <EditorRail value={leftNav} onChange={setLeftNav} />
         <div className="editor-main">
-          <div
-            className={[
-              versionsOpen ? 'editor-grid' : 'editor-grid is-versions-collapsed',
-              leftNav !== 'develop' ? 'is-covered' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
-          >
+          <div className={versionsOpen ? 'editor-workspace' : 'editor-workspace is-versions-collapsed'}>
+          <div className="editor-work">
+          <div className={['editor-grid', leftNav !== 'develop' ? 'is-covered' : ''].filter(Boolean).join(' ')}>
             <div className="editor-left">
               <PageListPanel
                 kind={catalogKind}
@@ -4282,10 +4535,17 @@ export function ProjectEditorPage() {
                   if (nextId === activeOwnerId) {
                     return;
                   }
-                  beginOwnerCanvas();
+                  if (modeRef.current !== 'preview') {
+                    beginOwnerCanvas();
+                  }
                   if (catalogKind === 'component') {
                     setSelectedComponentId(nextId);
                     return;
+                  }
+                  previewNavRef.current = [];
+                  if (Object.keys(previewQueryRef.current).length > 0) {
+                    previewQueryRef.current = {};
+                    setPreviewQuery({});
                   }
                   setSelectedPageId(nextId);
                 }}
@@ -4366,6 +4626,9 @@ export function ProjectEditorPage() {
               previewDataEdits={previewDataEdits}
               commitPreviewTest={commitPreviewTest}
               componentMode={catalogKind === 'component'}
+              pageQuery={pageQuery}
+              addPageQuery={addPageQuery}
+              commitPageQuery={commitPageQuery}
               componentProps={componentProps}
               componentEmits={componentEmits}
               commitComponentProps={commitComponentProps}
@@ -4408,17 +4671,6 @@ export function ProjectEditorPage() {
               commitPageData={commitPageData}
               endCoalesce={endCoalesce}
             />
-            {versionsOpen ? (
-              <VersionListPanel
-                versions={versions}
-                selectedVersionId={selectedVersionId}
-                createDisabled={!selectedOwner}
-                onCollapse={() => setVersionsOpen(false)}
-                onCreate={openCreateVersion}
-                onSelect={selectVersion}
-                onDelete={removeVersion}
-              />
-            ) : null}
           </div>
           <EditorLibraries
             leftNav={leftNav}
@@ -4426,6 +4678,19 @@ export function ProjectEditorPage() {
             catalog={pageI18n}
             onI18nChange={commitPageI18n}
           />
+          </div>
+            {versionsOpen ? (
+              <VersionListPanel
+                versions={projectVersions}
+                selectedVersionId={projectVersionId}
+                createDisabled={false}
+                onCollapse={() => setVersionsOpen(false)}
+                onCreate={openCreateVersion}
+                onSelect={selectVersion}
+                onDelete={removeVersion}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
       <EditorInspector
@@ -4473,10 +4738,11 @@ export function ProjectEditorPage() {
       <CreateVersionModal
         open={versionModalOpen}
         form={versionForm}
-        versions={versions}
+        versions={projectVersions}
         onOk={() => void submitCreateVersion()}
         onCancel={() => setVersionModalOpen(false)}
       />
     </div>
+    </ProjectVersionProvider>
   );
 }

@@ -24,6 +24,7 @@ export type EventEditorCopy = {
 
 const FILE = '/event.ts';
 const SIGNATURE = '(text: string, duration?: 0 | 1): void';
+const RUNTIME_FUNCTIONS = new Set(['$toast', '$navigateTo', '$navigateBack']);
 
 const libLoaders = import.meta.glob(
   [
@@ -138,7 +139,7 @@ function completionOptions(
       label: entry.filterText || entry.name,
       type: completionType(entry.kind),
       detail: entry.name === '$toast' ? SIGNATURE : signature || entry.labelDetails?.detail,
-      boost: entry.isRecommended || entry.name === '$toast' ? 20 : 0,
+      boost: entry.isRecommended || RUNTIME_FUNCTIONS.has(entry.name) || entry.name === '$query' ? 20 : 0,
       info:
         entry.name === '$toast'
           ? copy.info
@@ -163,8 +164,8 @@ function pushDuration(options: Completion[], copy: EventEditorCopy) {
 }
 
 function completionApply(entry: ts.CompletionEntry, member: boolean): Completion['apply'] {
-  if (!member && entry.name === '$toast') {
-    return '$toast(';
+  if (!member && RUNTIME_FUNCTIONS.has(entry.name)) {
+    return `${entry.name}(`;
   }
   if (entry.isSnippet && entry.insertText) {
     return snippet(entry.insertText);
@@ -264,7 +265,15 @@ function completionType(kind: string) {
 
 function virtualHeader(params: EventEditorParam[]) {
   const args = params.map((param) => `${param.name}: ${param.type}`).join(', ');
-  return `${WIDGET_EVENT_DECLARATIONS}\ndeclare function $toast(text: string, duration?: 0 | 1): void\nfunction handler(${args}) {\n`;
+  return `${WIDGET_EVENT_DECLARATIONS}
+declare function $toast(text: string, duration?: 0 | 1): void
+/** 返回上一层或多层。1 是上一页，更大的数字继续往前，停在本次打开时的首页。 */
+declare function $navigateBack(times?: number): void
+/** 打开指定页面，并带上查询参数。页面里用 $query.参数名 读取。 */
+declare function $navigateTo(pageKey: string, query?: Record<string, any>): void
+/** 当前页的查询参数。 */
+declare const $query: Record<string, any>
+function handler(${args}) {\n`;
 }
 
 function loadLibs() {

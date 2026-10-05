@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ProjectAssetFileDto, ProjectAssetGroupDto } from '@vanstack/shared';
 import { api } from '../apis/api';
+import { useProjectVersionId } from '../utils/projectVersion';
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i;
 
@@ -49,6 +50,7 @@ export function AssetLibraryBrowser({
   onPick?: (url: string) => void;
 }) {
   const { t } = useTranslation();
+  const versionId = useProjectVersionId();
   const [groups, setGroups] = useState<ProjectAssetGroupDto[]>([]);
   const [groupName, setGroupName] = useState<string | null>(null);
   const [files, setFiles] = useState<ProjectAssetFileDto[]>([]);
@@ -65,7 +67,12 @@ export function AssetLibraryBrowser({
   const loadGroups = useCallback(async () => {
     setLoadingGroups(true);
     try {
-      const next = await api.listAssetGroups(projectId);
+      if (!versionId) {
+        setGroups([]);
+        setGroupName(null);
+        return;
+      }
+      const next = await api.listAssetGroups(projectId, versionId);
       setGroups(next);
       setGroupName((prev) => next.find((item) => item.name === prev)?.name ?? next[0]?.name ?? null);
     } catch (error) {
@@ -73,7 +80,7 @@ export function AssetLibraryBrowser({
     } finally {
       setLoadingGroups(false);
     }
-  }, [projectId, t]);
+  }, [projectId, t, versionId]);
 
   const loadFiles = useCallback(
     async (name: string | null) => {
@@ -83,7 +90,11 @@ export function AssetLibraryBrowser({
       }
       setLoadingFiles(true);
       try {
-        const next = await api.listAssetFiles(projectId, name);
+        if (!versionId) {
+          setFiles([]);
+          return;
+        }
+        const next = await api.listAssetFiles(projectId, versionId, name);
         setFiles(imagesOnly ? next.filter((file) => isImageAsset(file.name)) : next);
       } catch (error) {
         message.error(error instanceof Error ? error.message : t('lowcode.assetsLoadFailed'));
@@ -91,7 +102,7 @@ export function AssetLibraryBrowser({
         setLoadingFiles(false);
       }
     },
-    [imagesOnly, projectId, t],
+    [imagesOnly, projectId, t, versionId],
   );
 
   useEffect(() => {
@@ -108,7 +119,10 @@ export function AssetLibraryBrowser({
       return;
     }
     try {
-      const created = await api.createAssetGroup(projectId, { name });
+      if (!versionId) {
+        return;
+      }
+      const created = await api.createAssetGroup(projectId, versionId, { name });
       setNewGroup('');
       setCreating(false);
       await loadGroups();
@@ -127,7 +141,10 @@ export function AssetLibraryBrowser({
       return;
     }
     try {
-      const renamed = await api.renameAssetGroup(projectId, groupName, { name });
+      if (!versionId) {
+        return;
+      }
+      const renamed = await api.renameAssetGroup(projectId, versionId, groupName, { name });
       setRenameOpen(false);
       await loadGroups();
       setGroupName(renamed.name);
@@ -141,7 +158,10 @@ export function AssetLibraryBrowser({
       return;
     }
     try {
-      await api.deleteAssetGroup(projectId, groupName);
+      if (!versionId) {
+        return;
+      }
+      await api.deleteAssetGroup(projectId, versionId, groupName);
       await loadGroups();
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.assetsGroupFailed'));
@@ -173,7 +193,10 @@ export function AssetLibraryBrowser({
     }
     setUploading(true);
     try {
-      const stored = await api.uploadAssetFile(projectId, groupName, pendingFile, name);
+      if (!versionId) {
+        return;
+      }
+      const stored = await api.uploadAssetFile(projectId, versionId, groupName, pendingFile, name);
       setPendingFile(null);
       setUploadName('');
       await loadFiles(groupName);
@@ -192,7 +215,10 @@ export function AssetLibraryBrowser({
       return;
     }
     try {
-      await api.deleteAssetFile(projectId, groupName, file.name);
+      if (!versionId) {
+        return;
+      }
+      await api.deleteAssetFile(projectId, versionId, groupName, file.name);
       await loadFiles(groupName);
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.assetsDeleteFailed'));

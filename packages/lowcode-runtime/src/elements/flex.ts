@@ -1,7 +1,19 @@
-import { createElement, type ReactElement } from 'react';
+import { createElement, type CSSProperties, type ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
 import { dynamicStyleCss, flexContainerCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
 import { widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
+
+/** 预览页高度固定，未写高度的弹性盒不要被压到比内容更矮。 */
+function flexContentLock(widget: Extract<PageWidget, { type: 'flex' }>): CSSProperties | undefined {
+  const css: CSSProperties = {};
+  if (widget.item?.flexShrink == null) {
+    css.flexShrink = 0;
+  }
+  if (widget.style?.height == null) {
+    css.minHeight = 'min-content';
+  }
+  return css;
+}
 
 export function renderFlex(
   widget: Extract<PageWidget, { type: 'flex' }>,
@@ -19,6 +31,7 @@ export function renderFlex(
         dynamicStyleCss(widget.style, widgetCssOptions(ctx)),
         flexContainerCss(widget.flex, widgetCssOptions(ctx)),
         flexItemCss(widget.item, widgetCssOptions(ctx)),
+        flexContentLock(widget),
         hiddenCss(widget.hidden, ctx.editing),
       ),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,

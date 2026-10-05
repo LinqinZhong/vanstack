@@ -3,6 +3,7 @@ import { isJsIdentifier, ownedStateIds, type PageWidget } from './page';
 export type BindingScope = {
   data: Record<string, unknown>;
   props?: Record<string, unknown>;
+  query?: Record<string, unknown>;
   aliases?: Record<string, unknown>;
 };
 
@@ -38,18 +39,21 @@ export function bindingToString(value: unknown): string {
   }
 }
 
-const BINDING_PARAMS = new Set(['data', '$data', 'props', '$props']);
+const BINDING_PARAMS = new Set(['data', '$data', 'props', '$props', 'query', '$query']);
 
 export function evaluateBindingExpression(expr: string, scope: BindingScope): unknown {
   const aliases = scope.aliases ?? {};
   const names = Object.keys(aliases).filter((name) => isJsIdentifier(name) && !BINDING_PARAMS.has(name));
   const values = names.map((name) => aliases[name]);
   const props = scope.props ?? {};
-  return new Function('data', '$data', 'props', '$props', ...names, `"use strict"; return (${expr});`)(
+  const query = scope.query ?? {};
+  return new Function('data', '$data', 'props', '$props', 'query', '$query', ...names, `"use strict"; return (${expr});`)(
     scope.data,
     scope.data,
     props,
     props,
+    query,
+    query,
     ...values,
   );
 }
@@ -68,8 +72,15 @@ export function evaluateStateFunction(body: string, scope: BindingScope): unknow
     '$item',
     '$index',
     '$props',
+    '$query',
     `"use strict";\n${body}`,
-  )(scope.data, aliasValue(scope, '$item', 'item'), aliasValue(scope, '$index', 'index'), scope.props ?? {});
+  )(
+    scope.data,
+    aliasValue(scope, '$item', 'item'),
+    aliasValue(scope, '$index', 'index'),
+    scope.props ?? {},
+    scope.query ?? {},
+  );
 }
 
 export function resolveStateFnId(widget: PageWidget, scope?: BindingScope): string | null {
@@ -134,8 +145,8 @@ export function resolveCopyValue(raw: string, scope: BindingScope): unknown {
   const head = pathMatch[1];
   const parts = pathMatch[2] ? pathMatch[2].slice(1).split('.').filter(Boolean) : [];
   try {
-    if (head === 'data' || head === 'props') {
-      const root = head === 'props' ? (scope.props ?? {}) : scope.data;
+    if (head === 'data' || head === 'props' || head === 'query') {
+      const root = head === 'props' ? (scope.props ?? {}) : head === 'query' ? (scope.query ?? {}) : scope.data;
       if (parts.length === 0) {
         return root;
       }

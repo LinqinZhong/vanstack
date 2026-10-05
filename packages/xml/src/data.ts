@@ -23,7 +23,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /** 纯表达式走 `return (expr)`。带语句的函数体原样执行，由函数自己 return。 */
 export function isDataExpression(expr: string): boolean {
   try {
-    new Function('$data', '$props', `"use strict"; return (${expr.trim()});`);
+    new Function('$data', '$props', '$query', `"use strict"; return (${expr.trim()});`);
     return true;
   } catch {
     return false;
@@ -34,6 +34,7 @@ export function evaluateDataExpression(
   expr: string,
   data: Record<string, unknown>,
   props: Record<string, unknown> = Object.create(null),
+  query: Record<string, unknown> = Object.create(null),
 ): unknown {
   const scope = new Proxy(data, {
     get(target, prop) {
@@ -48,13 +49,14 @@ export function evaluateDataExpression(
   });
   const trimmed = expr.trim();
   const program = isDataExpression(trimmed) ? `"use strict"; return (${trimmed});` : `"use strict";\n${trimmed}`;
-  return new Function('$data', '$props', program)(scope, props);
+  return new Function('$data', '$props', '$query', program)(scope, props, query);
 }
 
 export function readVariableValue(
   variable: PageVariable,
   data: Record<string, unknown>,
   props: Record<string, unknown> = Object.create(null),
+  query: Record<string, unknown> = Object.create(null),
 ): unknown {
   if (variable.type === 'num') {
     const parsed = Number(variable.value);
@@ -67,7 +69,7 @@ export function readVariableValue(
     return variable.value === '1';
   }
   try {
-    return evaluateDataExpression(variable.value || defaultPageDataValue(variable.type), data, props);
+    return evaluateDataExpression(variable.value || defaultPageDataValue(variable.type), data, props, query);
   } catch {
     return variable.type === 'arr' ? [] : {};
   }
@@ -86,13 +88,17 @@ export function applyTestValues<T extends { name: string; value: string }>(
   );
 }
 
-export function buildPropsRecord(props: ComponentProp[] | undefined): Record<string, unknown> {
+export function buildPropsRecord(
+  props: ComponentProp[] | undefined,
+  query: Record<string, unknown> = Object.create(null),
+): Record<string, unknown> {
   const record: Record<string, unknown> = Object.create(null);
   for (const prop of props ?? []) {
     record[prop.name] = readVariableValue(
       { type: prop.type, name: prop.name, value: prop.value },
       Object.create(null),
       record,
+      query,
     );
   }
   return record;
@@ -102,13 +108,14 @@ export function buildPageDataScope(
   variables: PageVariable[] | undefined,
   untilIndex?: number,
   props: Record<string, unknown> = Object.create(null),
+  query: Record<string, unknown> = Object.create(null),
 ): Record<string, unknown> {
   const list = variables ?? [];
   const data: Record<string, unknown> = Object.create(null);
   const end = untilIndex == null ? list.length : Math.max(0, Math.min(untilIndex, list.length));
   for (let i = 0; i < end; i += 1) {
     const variable = list[i];
-    data[variable.name] = readVariableValue(variable, data, props);
+    data[variable.name] = readVariableValue(variable, data, props, query);
   }
   return data;
 }
@@ -127,7 +134,7 @@ function snapshotLiteral(value: unknown, type: 'arr' | 'obj'): string | null {
 }
 
 /**
- * 未开计算属性的数组和对象，只按创建时的 `$props` 和变量初始值求值一次。
+ * 未开计算属性的数组和对象，只按创建时的 `$props`、`$query` 和变量初始值求值一次。
  * `overrides` 只替换被写入的非计算变量。
  * 计算属性按当前变量值和 `liveProps` 重新求值。
  */
@@ -136,9 +143,10 @@ export function resolvePageData(
   overrides?: Readonly<Record<string, string>>,
   props: Record<string, unknown> = Object.create(null),
   liveProps: Record<string, unknown> = props,
+  query: Record<string, unknown> = Object.create(null),
 ): Record<string, unknown> {
   const list = variables ?? [];
-  const initial = buildPageDataScope(list, undefined, props);
+  const initial = buildPageDataScope(list, undefined, props, query);
   const hasComputed = list.some(isComputedData);
   if (!overrides && !hasComputed) {
     return initial;
@@ -148,7 +156,7 @@ export function resolvePageData(
   for (const variable of list) {
     if (isComputedData(variable)) {
       changed = true;
-      data[variable.name] = readVariableValue(variable, data, liveProps);
+      data[variable.name] = readVariableValue(variable, data, liveProps, query);
       continue;
     }
     if (overrides && Object.prototype.hasOwnProperty.call(overrides, variable.name)) {
@@ -157,6 +165,7 @@ export function resolvePageData(
         { ...variable, value: overrides[variable.name] },
         initial,
         props,
+        query,
       );
       continue;
     }
@@ -206,9 +215,10 @@ export function validateDataLiteral(
   type: 'arr' | 'obj',
   data: Record<string, unknown> = {},
   props: Record<string, unknown> = Object.create(null),
+  query: Record<string, unknown> = Object.create(null),
 ): boolean {
   try {
-    const result = evaluateDataExpression(expr, data, props);
+    const result = evaluateDataExpression(expr, data, props, query);
     if (type === 'arr') {
       return Array.isArray(result);
     }

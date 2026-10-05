@@ -36,6 +36,7 @@ export type HistoryEntry = {
   pageEvents?: WidgetEvents;
   pageMethods: PageMethod[];
   componentProps: ComponentProp[];
+  pageQuery: ComponentProp[];
   componentEmits: ComponentEmit[];
   testData?: PageTestData;
   selectedWidgetId: string | null;

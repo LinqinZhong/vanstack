@@ -14,6 +14,7 @@ import {
   type PageXmlDocument,
 } from '@vanstack/xml';
 import { cssMeasure, cssText, dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, pageCssText, widgetClassName, type WidgetCssOptions } from '../css';
+import { resolveRuntimeOwnState } from '../hover';
 import { expandLoopTree, widgetInstanceKey } from '../loop';
 import { widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
@@ -166,8 +167,10 @@ function ComponentView({
   const definedProps = ctx.useComponentTestData
     ? applyTestValues(nested?.props, nested?.testData?.props)
     : nested?.props;
+  const query = ctx.bindingScope.query;
   const propsScope = buildPropsRecord(
     propsWithArgs(definedProps, widget.args, ctx.bindingScope, ctx.evaluateBindings),
+    query,
   );
   const dataKey = `${componentDataKey(nested?.data, definedProps, widget.args, ctx.evaluateBindings)}\0${ctx.useComponentTestData ? 1 : 0}`;
   const createdRef = useRef<{ key: string; props: Record<string, unknown> } | null>(null);
@@ -179,14 +182,24 @@ function ComponentView({
     ctx.useComponentTestData ? nested?.testData?.data : undefined,
     createdRef.current.props,
     propsScope,
+    query,
   );
-  const scope = { data: dataScope, props: propsScope };
+  const scope = { data: dataScope, props: propsScope, query };
   const options = widgetCssOptions(ctx);
   const prefix = `${widget.id}__`;
+  const expanded = nested
+    ? expandLoopTree(prefixTree(nested.widgets, prefix), scope, false, widgetInstanceKey(widget))
+    : [];
   const innerWidgets = nested
     ? resolveWidgetTree(
-        expandLoopTree(prefixTree(nested.widgets, prefix), scope, false, widgetInstanceKey(widget)),
+        expanded,
         null,
+        ctx.editing
+          ? undefined
+          : {
+              appliedStateFor: (child) => resolveRuntimeOwnState(child, ctx.hoverInstanceKeys ?? []),
+              stateLayersSink: ctx.stateLayers,
+            },
       )
     : [];
 
@@ -217,6 +230,8 @@ function ComponentView({
         innerWidgets.length === 0 ? { minHeight: '72px', alignItems: 'center', justifyContent: 'center' } : undefined,
         dynamicStyleCss(widget.style, options),
         flexItemCss(widget.item, options),
+        widget.item?.flexShrink == null ? { flexShrink: 0 } : undefined,
+        widget.style?.height == null ? { minHeight: 'min-content' } : undefined,
         hiddenCss(widget.hidden, ctx.editing),
       ),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,

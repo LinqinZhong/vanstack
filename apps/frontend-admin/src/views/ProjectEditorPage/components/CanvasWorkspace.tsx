@@ -140,14 +140,20 @@ function PreviewScopeSection({
   rows,
   dataScope,
   propScope,
+  queryScope,
   onCommit,
+  onAdd,
+  addLabel,
 }: {
   title: string;
   empty: string;
   rows: ScopeRow[];
   dataScope: Record<string, unknown>;
   propScope: Record<string, unknown>;
+  queryScope: Record<string, unknown>;
   onCommit: (name: string, type: string, text: string) => boolean;
+  onAdd?: () => void;
+  addLabel?: string;
 }) {
   const { t } = useTranslation();
   const [editor, setEditor] = useState<ScopeEditor | null>(null);
@@ -181,7 +187,7 @@ function PreviewScopeSection({
     }
     let value: unknown;
     try {
-      value = evaluateDataExpression(editor.draft, dataScope, propScope);
+      value = evaluateDataExpression(editor.draft, dataScope, propScope, queryScope);
     } catch {
       message.error(t('lowcode.dataInvalidLiteral'));
       return;
@@ -196,7 +202,19 @@ function PreviewScopeSection({
 
   return (
     <section className="preview-scope-section">
-      <div className="preview-scope-section-title">{title}</div>
+      <div className="preview-scope-section-title">
+        <span>{title}</span>
+        {onAdd ? (
+          <Button
+            type="text"
+            size="small"
+            className="preview-scope-section-add"
+            icon={<PlusOutlined />}
+            aria-label={addLabel}
+            onClick={onAdd}
+          />
+        ) : null}
+      </div>
       {rows.length === 0 ? (
         <div className="preview-scope-empty">{empty}</div>
       ) : (
@@ -398,8 +416,11 @@ type CanvasWorkspaceProps = {
   pageData: PageVariable[];
   testData?: PageTestData;
   previewDataEdits?: Readonly<Record<string, string>>;
-  commitPreviewTest: (section: 'props' | 'data', name: string, type: string, text: string) => boolean;
+  commitPreviewTest: (section: 'props' | 'data' | 'query', name: string, type: string, text: string) => boolean;
   componentMode?: boolean;
+  pageQuery: ComponentProp[];
+  addPageQuery: () => void;
+  commitPageQuery: (next: ComponentProp[], coalesceKey?: string) => void;
   componentProps: ComponentProp[];
   componentEmits: ComponentEmit[];
   commitComponentProps: (next: ComponentProp[], coalesceKey?: string) => void;
@@ -479,6 +500,9 @@ export function CanvasWorkspace({
   previewDataEdits,
   commitPreviewTest,
   componentMode,
+  pageQuery,
+  addPageQuery,
+  commitPageQuery,
   componentProps,
   componentEmits,
   commitComponentProps,
@@ -525,10 +549,17 @@ export function CanvasWorkspace({
   const selectedCanvasLabel = selectedWidget ? widgetCanvasLabel(selectedWidget, t) : null;
   const schemaProps = buildPropsRecord(componentProps);
   const previewPropScope = buildPropsRecord(applyTestValues(componentProps, testData?.props));
+  const previewQueryScope = buildPropsRecord(applyTestValues(pageQuery, testData?.query));
   const previewDataOverrides = previewDataEdits && Object.keys(previewDataEdits).length > 0
     ? { ...testData?.data, ...previewDataEdits }
     : testData?.data;
-  const previewDataScope = resolvePageData(pageData, previewDataOverrides, schemaProps, previewPropScope);
+  const previewDataScope = resolvePageData(
+    pageData,
+    previewDataOverrides,
+    schemaProps,
+    previewPropScope,
+    previewQueryScope,
+  );
   return (
     <Card
       size="small"
@@ -626,6 +657,7 @@ export function CanvasWorkspace({
                     empty={t('lowcode.propsEmpty')}
                     dataScope={previewDataScope}
                     propScope={previewPropScope}
+                    queryScope={previewQueryScope}
                     rows={componentProps.map((prop) => ({
                       name: prop.name,
                       type: prop.type,
@@ -635,12 +667,31 @@ export function CanvasWorkspace({
                     }))}
                     onCommit={(name, type, text) => commitPreviewTest('props', name, type, text)}
                   />
-                ) : null}
+                ) : (
+                  <PreviewScopeSection
+                    title={t('lowcode.propsTitle')}
+                    empty={t('lowcode.propsEmpty')}
+                    dataScope={previewDataScope}
+                    propScope={previewPropScope}
+                    queryScope={previewQueryScope}
+                    addLabel={t('lowcode.propsAdd')}
+                    onAdd={readOnly ? undefined : addPageQuery}
+                    rows={pageQuery.map((item) => ({
+                      name: item.name,
+                      type: item.type,
+                      typeLabel: t(`lowcode.propType.${item.type}`),
+                      value: previewQueryScope[item.name],
+                      display: formatActual(item.type, previewQueryScope[item.name]),
+                    }))}
+                    onCommit={(name, type, text) => commitPreviewTest('query', name, type, text)}
+                  />
+                )}
                 <PreviewScopeSection
                   title={t('lowcode.dataSection')}
                   empty={t('lowcode.dataEmpty')}
                   dataScope={previewDataScope}
                   propScope={previewPropScope}
+                  queryScope={previewQueryScope}
                   rows={pageData.map((variable) => ({
                     name: variable.name,
                     type: variable.type,
@@ -909,7 +960,7 @@ export function CanvasWorkspace({
           </div>
         </div>
         {centerTab === 'data' ? (
-          <div className={['page-data-stack', componentMode ? 'is-split' : ''].filter(Boolean).join(' ')}>
+          <div className="page-data-stack is-split">
             {componentMode ? (
               <ComponentPropsPanel
                 props={componentProps}
@@ -917,12 +968,21 @@ export function CanvasWorkspace({
                 onChange={commitComponentProps}
                 onEndCoalesce={endCoalesce}
               />
-            ) : null}
-            {componentMode ? <div className="page-section-split" /> : null}
+            ) : (
+              <ComponentPropsPanel
+                variant="query"
+                props={pageQuery}
+                disabled={readOnly}
+                onChange={commitPageQuery}
+                onEndCoalesce={endCoalesce}
+              />
+            )}
+            <div className="page-section-split" />
             <PageDataPanel
               variables={pageData}
               widgets={widgets}
               propNames={componentMode ? componentProps.map((item) => item.name) : []}
+              queryNames={componentMode ? [] : pageQuery.map((item) => item.name)}
               componentProps={componentMode ? componentProps : []}
               sectionTitle={componentMode ? t('lowcode.dataSection') : undefined}
               disabled={readOnly}

@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ProjectIconFileDto, ProjectIconGroupDto } from '@vanstack/shared';
 import { api } from '../apis/api';
+import { useProjectVersionId } from '../utils/projectVersion';
 import { resolveAssetUrl } from './AssetLibraryPanel';
 
 function formatSize(bytes: number) {
@@ -32,6 +33,7 @@ export function IconLibraryBrowser({
   onPick?: (url: string) => void;
 }) {
   const { t } = useTranslation();
+  const versionId = useProjectVersionId();
   const [groups, setGroups] = useState<ProjectIconGroupDto[]>([]);
   const [groupName, setGroupName] = useState<string | null>(null);
   const [files, setFiles] = useState<ProjectIconFileDto[]>([]);
@@ -48,7 +50,12 @@ export function IconLibraryBrowser({
   const loadGroups = useCallback(async () => {
     setLoadingGroups(true);
     try {
-      const next = await api.listIconGroups(projectId);
+      if (!versionId) {
+        setGroups([]);
+        setGroupName(null);
+        return;
+      }
+      const next = await api.listIconGroups(projectId, versionId);
       setGroups(next);
       setGroupName((prev) => next.find((item) => item.name === prev)?.name ?? next[0]?.name ?? null);
     } catch (error) {
@@ -56,7 +63,7 @@ export function IconLibraryBrowser({
     } finally {
       setLoadingGroups(false);
     }
-  }, [projectId, t]);
+  }, [projectId, t, versionId]);
 
   const loadFiles = useCallback(
     async (name: string | null) => {
@@ -66,7 +73,11 @@ export function IconLibraryBrowser({
       }
       setLoadingFiles(true);
       try {
-        const next = await api.listIconFiles(projectId, name);
+        if (!versionId) {
+          setFiles([]);
+          return;
+        }
+        const next = await api.listIconFiles(projectId, versionId, name);
         setFiles(next);
       } catch (error) {
         message.error(error instanceof Error ? error.message : t('lowcode.iconsLoadFailed'));
@@ -74,7 +85,7 @@ export function IconLibraryBrowser({
         setLoadingFiles(false);
       }
     },
-    [projectId, t],
+    [projectId, t, versionId],
   );
 
   useEffect(() => {
@@ -91,7 +102,10 @@ export function IconLibraryBrowser({
       return;
     }
     try {
-      const created = await api.createIconGroup(projectId, { name });
+      if (!versionId) {
+        return;
+      }
+      const created = await api.createIconGroup(projectId, versionId, { name });
       setNewGroup('');
       setCreating(false);
       await loadGroups();
@@ -110,7 +124,10 @@ export function IconLibraryBrowser({
       return;
     }
     try {
-      const renamed = await api.renameIconGroup(projectId, groupName, { name });
+      if (!versionId) {
+        return;
+      }
+      const renamed = await api.renameIconGroup(projectId, versionId, groupName, { name });
       setRenameOpen(false);
       await loadGroups();
       setGroupName(renamed.name);
@@ -124,7 +141,10 @@ export function IconLibraryBrowser({
       return;
     }
     try {
-      await api.deleteIconGroup(projectId, groupName);
+      if (!versionId) {
+        return;
+      }
+      await api.deleteIconGroup(projectId, versionId, groupName);
       await loadGroups();
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.iconsGroupFailed'));
@@ -156,7 +176,10 @@ export function IconLibraryBrowser({
     }
     setUploading(true);
     try {
-      const stored = await api.uploadIconFile(projectId, groupName, pendingFile, name);
+      if (!versionId) {
+        return;
+      }
+      const stored = await api.uploadIconFile(projectId, versionId, groupName, pendingFile, name);
       setPendingFile(null);
       setUploadName('');
       await loadFiles(groupName);
@@ -175,7 +198,10 @@ export function IconLibraryBrowser({
       return;
     }
     try {
-      await api.deleteIconFile(projectId, groupName, file.name);
+      if (!versionId) {
+        return;
+      }
+      await api.deleteIconFile(projectId, versionId, groupName, file.name);
       await loadFiles(groupName);
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.iconsDeleteFailed'));

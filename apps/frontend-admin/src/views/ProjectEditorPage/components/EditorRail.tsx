@@ -1,13 +1,13 @@
-import { AppstoreOutlined, CodeOutlined, FolderOpenOutlined, GlobalOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, CodeOutlined, DatabaseOutlined, FolderOpenOutlined, GlobalOutlined } from '@ant-design/icons';
 import { Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 /**
  * 最左侧竖条当前选中的库。
- * develop 显示页面列表和组件树；其余三项由 EditorLibraries 换成文案、素材或图标库。
+ * develop 显示页面列表和组件树；数据池、文案、素材、图标由 EditorLibraries 换掉画布。
  * 切换只改导航，不改页面草稿。
  */
-export type EditorNav = 'develop' | 'i18n' | 'assets' | 'icons';
+export type EditorNav = 'develop' | 'pool' | 'i18n' | 'assets' | 'icons';
 
 type EditorRailProps = {
   value: EditorNav;
@@ -17,7 +17,7 @@ type EditorRailProps = {
 export function EditorRail({ value, onChange }: EditorRailProps) {
   const { t } = useTranslation();
   return (
-    <nav className="editor-rail" aria-label={`${t('lowcode.i18nDevelop')} / ${t('lowcode.i18nLibrary')} / ${t('lowcode.assetLibrary')}`}>
+    <nav className="editor-rail" aria-label={`${t('lowcode.i18nDevelop')} / ${t('lowcode.dataPool')} / ${t('lowcode.i18nLibrary')} / ${t('lowcode.assetLibrary')}`}>
       <Tooltip title={t('lowcode.i18nDevelop')} placement="right">
         <button
           type="button"
@@ -25,6 +25,15 @@ export function EditorRail({ value, onChange }: EditorRailProps) {
           onClick={() => onChange('develop')}
         >
           <CodeOutlined />
+        </button>
+      </Tooltip>
+      <Tooltip title={t('lowcode.dataPool')} placement="right">
+        <button
+          type="button"
+          className={['editor-rail-btn', value === 'pool' ? 'is-active' : ''].filter(Boolean).join(' ')}
+          onClick={() => onChange('pool')}
+        >
+          <DatabaseOutlined />
         </button>
       </Tooltip>
       <Tooltip title={t('lowcode.i18nLibrary')} placement="right">

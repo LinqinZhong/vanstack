@@ -195,6 +195,8 @@ export interface RuntimeProjectDto {
   name: string;
   key: string;
   pages: RuntimePageDto[];
+  /** 图标路径 `分组.名称` 到文件地址。 */
+  icons?: Record<string, string>;
 }
 
 export interface ProjectAssetGroupDto {
@@ -253,4 +255,56 @@ export interface MethodCodeDto {
 
 export interface PutMethodCodeInput {
   code: string;
+}
+
+/** 工程文档上的命名空间指针。内容在 namespace.version。 */
+export interface ProjectNamespaceDto {
+  name: string;
+  versionId: string;
+}
+
+export interface NamespaceTypeFieldDto {
+  id: string;
+  name: string;
+  description: string;
+  /** string、number、boolean、object、array、icon、image，或同一命名空间里的类型名。 */
+  type: string;
+  children?: NamespaceTypeFieldDto[];
+}
+
+export interface NamespaceTypeDto {
+  id: string;
+  name: string;
+  description: string;
+  fields: NamespaceTypeFieldDto[];
+  /** `interface Name { ... }` */
+  source: string;
+}
+
+export interface NamespaceDataDto {
+  id: string;
+  type: string;
+  name: string;
+  description: string;
+  value: unknown;
+}
+
+export interface NamespaceDocumentDto {
+  name: string;
+  versionId: string;
+  types: NamespaceTypeDto[];
+  data: NamespaceDataDto[];
+}
+
+export interface CreateNamespaceInput {
+  name: string;
+}
+
+export interface RenameNamespaceInput {
+  name: string;
+}
+
+export interface PutNamespaceInput {
+  types: NamespaceTypeDto[];
+  data: NamespaceDataDto[];
 }

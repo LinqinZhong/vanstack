@@ -16,6 +16,7 @@ import {
   type SwiperStyle,
   type WidgetStyle,
 } from '@vanstack/xml';
+import { widgetInstanceKey } from './loop';
 import type { WidgetRenderContext } from './widget-render';
 import { chainEventProps } from './events';
 
@@ -345,7 +346,7 @@ export function SwiperView({
           createElement(
             'div',
             {
-              key: item.id,
+              key: widgetInstanceKey(item),
               className: 'lowcode-swiper-item',
               style: slotStyle,
             },
@@ -392,7 +393,7 @@ export function SwiperView({
           },
           items.map((item, dotIndex) =>
             createElement('span', {
-              key: item.id,
+              key: widgetInstanceKey(item),
               className: 'lowcode-swiper-dot',
               'data-active': dotIndex === index ? 'true' : 'false',
               style: {

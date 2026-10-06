@@ -8,6 +8,8 @@ import {
   type PageLangSnapshot,
   type PageXmlDocument,
 } from '@vanstack/xml';
+import { installPageIcons } from './icon';
+import { installPageI18n } from './i18n';
 import { LowcodePage, type PageViewing } from './page';
 
 const roots = new WeakMap<Element, Root>();
@@ -23,12 +25,14 @@ export type RenderPageXmlOptions = {
   viewingStates?: Array<{ ownerId: string; state: string | null }> | null;
   dynamicTextLabel?: string;
   onModelValue?: (name: string, value: string, done?: boolean) => void;
+  onQueryValue?: (name: string, value: unknown) => void;
   loadWidgetEvent?: (id: string) => Promise<string | null>;
   pageId?: string | null;
   query?: Record<string, unknown>;
   components?: Record<string, PageXmlDocument>;
   centerContent?: boolean;
   useComponentTestData?: boolean;
+  icons?: Readonly<Record<string, string>>;
 };
 
 function resolveRenderCatalog(catalog: RenderPageXmlOptions['catalog']): PageI18n | undefined {
@@ -67,6 +71,9 @@ export function renderPage(
 ): RenderPageXmlResult {
   const root = rootFor(container);
   const editing = Boolean(options?.editing);
+  const catalog = resolveRenderCatalog(options?.catalog);
+  installPageIcons(options?.icons);
+  installPageI18n(catalog, options?.locale);
 
   try {
     const tree = createElement(LowcodePage, {
@@ -74,16 +81,18 @@ export function renderPage(
       editing,
       tableLayout: Boolean(options?.tableLayout),
       locale: options?.locale,
-      catalog: resolveRenderCatalog(options?.catalog),
+      catalog,
       viewing: resolveViewing(options),
       dynamicTextLabel: options?.dynamicTextLabel,
       onModelValue: options?.onModelValue,
+      onQueryValue: options?.onQueryValue,
       loadWidgetEvent: options?.loadWidgetEvent,
       pageId: options?.pageId,
       query: options?.query,
       components: options?.components,
       centerContent: options?.centerContent,
       useComponentTestData: options?.useComponentTestData,
+      icons: options?.icons,
     });
     flushSync(() => {
       root.render(tree);
@@ -99,5 +108,7 @@ export function renderPage(
 }
 
 export { HOVER_STATE_NAME, mergeHoverViewing, widgetHasHoverState } from './hover';
+export { installPageIcons } from './icon';
+export { installPageI18n } from './i18n';
 export { installPageNavigation } from './navigate';
 

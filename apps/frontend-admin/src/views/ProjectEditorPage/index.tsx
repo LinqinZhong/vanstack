@@ -116,6 +116,8 @@ import {
   collectExpandableKeys,
   collectTreeStateIds,
   createWidget,
+  findOwningScroll,
+  findOwningSwiper,
   findParentWidget,
   findWidget,
   firstChildWidgetId,
@@ -164,6 +166,8 @@ import {
   widgetWithStateLayers,
   type ViewingByOwner,
 } from '../../utils/widgetStates';
+import { refreshIconCatalog, subscribeIconCatalog } from '../../utils/iconCatalog';
+import { publishEditorI18n } from '../../utils/i18nRuntime';
 import { CANVAS_RASTER_SCALE, canEditPositionInsets, clampScale, closeStyleToolbarPopups, computeFitView, dragLengthPx, edgeBoxLength, EDIT_OVERFLOW_X, EDIT_OVERFLOW_Y, ENTER_DOUBLE_MS, FOCUS_PADDING, HISTORY_LIMIT, iframePointToClient, isAutoLength, isBoxDragGroup, isSpacingNudgeGroup, LANGS_DEBOUNCE_MS, liveWidgetCss, mapIframePoint, MAX_SCALE, paintCanvasView, SCREEN_HEIGHT, SCREEN_WIDTH, SERVER_IDLE_MS, sizeLock, snapDevicePixel, spacingAllowsNegative, styleBoxQuad, styleFromBoxQuad, zoomViewAt, ZOOM_IDLE_MS, ZOOM_STEP, type CanvasMode, type CenterTab, type HistoryEntry, type SaveStatus, type ViewTransform } from './helpers';
 import {
   AddWidgetModal,
@@ -185,6 +189,13 @@ import {
   type PageFormValues,
   type VersionFormValues,
 } from './components';
+
+type LoadedTarget = {
+  kind: CatalogKind;
+  ownerId: string;
+  versionId: string;
+  projectVersionId: string | null;
+};
 
 function presentCanvasDocument(
   doc: PageXmlDocument,
@@ -257,11 +268,14 @@ export function ProjectEditorPage() {
   const [pageEvents, setPageEvents] = useState<WidgetEvents | undefined>(undefined);
   const [pageMethods, setPageMethods] = useState<PageMethod[]>([]);
   const [pageI18n, setPageI18n] = useState<PageI18n | undefined>(undefined);
+  const [iconCatalog, setIconCatalog] = useState<Record<string, string>>({});
   const [previewLocale, setPreviewLocale] = useState<string | null>(null);
   const [leftNav, setLeftNav] = useState<EditorNav>('develop');
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
   const [tableRange, setTableRange] = useState<TableRange | null>(null);
   const [tableEditId, setTableEditId] = useState<string | null>(null);
+  const [scrollEditId, setScrollEditId] = useState<string | null>(null);
+  const [swiperEditId, setSwiperEditId] = useState<string | null>(null);
   const [viewingOwnerId, setViewingOwnerId] = useState<string | null>(null);
   const [viewingState, setViewingState] = useState<string | null>(null);
   const [viewingByOwner, setViewingByOwner] = useState<ViewingByOwner>({});
@@ -362,9 +376,17 @@ export function ProjectEditorPage() {
   const tableRangeRef = useRef<TableRange | null>(null);
   const tableEditIdRef = useRef<string | null>(null);
   const tableEditViewRef = useRef<ViewTransform | null>(null);
+  const scrollEditIdRef = useRef<string | null>(null);
+  const scrollEditViewRef = useRef<ViewTransform | null>(null);
+  const swiperEditIdRef = useRef<string | null>(null);
+  const swiperEditViewRef = useRef<ViewTransform | null>(null);
   const tableContentPinRef = useRef({ x: 0, y: 0 });
   const enterTableEditRef = useRef<() => void>(() => undefined);
   const exitTableEditRef = useRef<() => boolean>(() => false);
+  const enterScrollEditRef = useRef<() => void>(() => undefined);
+  const exitScrollEditRef = useRef<() => boolean>(() => false);
+  const enterSwiperEditRef = useRef<() => void>(() => undefined);
+  const exitSwiperEditRef = useRef<() => boolean>(() => false);
   const selectTableRangeRef = useRef<(message: { tableId: string; target: 'column' | 'row' | 'header'; index?: number; rowId?: string }) => void>(() => undefined);
   const runTableCommandRef = useRef<(command: TableCommand) => void>(() => undefined);
   const freezeTableRef = useRef<(target: 'header' | 'footer') => void>(() => undefined);
@@ -436,6 +458,10 @@ export function ProjectEditorPage() {
   const [hydrateEpoch, setHydrateEpoch] = useState(0);
   const lastServerKeyRef = useRef('');
   const persistEnabledRef = useRef(false);
+  /** 当前画布已经按这个页面或组件加载完。保存只能写回这里，不能写到后来选中的另一个。 */
+  const loadedOwnerRef = useRef<LoadedTarget | null>(null);
+  /** 这次打开页面后，用户改过草稿。没改过时，不能用空画布覆盖已有控件。 */
+  const editedRef = useRef(false);
   const inspectorInvalidRef = useRef(false);
   const saveInFlightRef = useRef(false);
   const saveAgainRef = useRef(false);
@@ -552,6 +578,8 @@ export function ProjectEditorPage() {
   pageI18nRef.current = pageI18n;
   selectedWidgetIdRef.current = selectedWidgetId;
   tableEditIdRef.current = tableEditId;
+  scrollEditIdRef.current = scrollEditId;
+  swiperEditIdRef.current = swiperEditId;
   viewingOwnerIdRef.current = viewingOwnerId;
   viewingStateRef.current = viewingState;
   viewingByOwnerRef.current = viewingByOwner;
@@ -847,16 +875,30 @@ export function ProjectEditorPage() {
     [applyView, fitCanvas],
   );
 
+  useEffect(() => subscribeIconCatalog(setIconCatalog), []);
+
+  useLayoutEffect(() => {
+    publishEditorI18n(pageI18n, previewLocale);
+  }, [pageI18n, previewLocale]);
+
+  useEffect(() => {
+    if (!id || !projectVersionId) {
+      return;
+    }
+    void refreshIconCatalog(id, projectVersionId).catch(() => undefined);
+  }, [id, projectVersionId]);
+
   const sendPreview = useCallback(() => {
+    publishEditorI18n(pageI18n, previewLocale);
     iframeRef.current?.contentWindow?.postMessage(
       {
         source: LOWCODE_MESSAGE_SOURCE,
         type: 'preview',
         document: presentCanvasDocument(
           documentRef.current,
-          catalogKindRef.current === 'component' && mode === 'preview',
-          true,
-          previewDataEditsRef.current,
+          mode === 'preview' && catalogKindRef.current === 'component',
+          mode === 'preview',
+          mode === 'preview' ? previewDataEditsRef.current : undefined,
         ),
         components: (() => {
           const library = { ...componentDocsRef.current, ...liveComponentDocsRef.current };
@@ -879,11 +921,14 @@ export function ProjectEditorPage() {
         locale: previewLocale,
         catalog: pageI18n,
         projectId: project?.id ?? null,
+        icons: iconCatalog,
         pageId: selectedPageId,
-        query: {
-          ...buildPropsRecord(applyTestValues(documentRef.current.query, documentRef.current.testData?.query)),
-          ...(mode === 'preview' ? previewQuery : {}),
-        },
+        query: mode === 'preview'
+          ? {
+              ...buildPropsRecord(applyTestValues(documentRef.current.query, documentRef.current.testData?.query)),
+              ...previewQuery,
+            }
+          : {},
         viewingOwnerId: mode === 'edit' ? viewingOwnerId : null,
         viewingState: mode === 'edit' ? viewingState : null,
         viewingStates: mode === 'edit' ? viewingListFromMap(viewingByOwner) : null,
@@ -900,6 +945,14 @@ export function ProjectEditorPage() {
           mode !== 'preview' &&
           tableEditId != null &&
           findOwningTable(widgetsRef.current, selectedWidgetId)?.table.id === tableEditId,
+        scrollEditing:
+          mode !== 'preview' &&
+          scrollEditId != null &&
+          findOwningScroll(widgetsRef.current, selectedWidgetId)?.id === scrollEditId,
+        swiperEditing:
+          mode !== 'preview' &&
+          swiperEditId != null &&
+          findOwningSwiper(widgetsRef.current, selectedWidgetId)?.id === swiperEditId,
         tableChrome:
           mode !== 'preview' &&
           !readOnlyRef.current &&
@@ -912,7 +965,7 @@ export function ProjectEditorPage() {
       },
       window.location.origin,
     );
-  }, [mode, previewLocale, previewQuery, pageI18n, project?.id, selectedPageId, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, tableRange, tableEditId, componentDocsKey]);
+  }, [mode, previewLocale, previewQuery, pageI18n, project?.id, selectedPageId, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, tableRange, tableEditId, scrollEditId, swiperEditId, componentDocsKey, iconCatalog]);
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -930,6 +983,15 @@ export function ProjectEditorPage() {
         commitModelRef.current(event.data.name, event.data.value, event.data.done);
         return;
       }
+      if (event.data.type === 'query-value') {
+        if (modeRef.current !== 'preview' || !event.data.name) {
+          return;
+        }
+        const next = { ...previewQueryRef.current, [event.data.name]: event.data.value };
+        previewQueryRef.current = next;
+        setPreviewQuery(next);
+        return;
+      }
       if (event.data.type === 'navigate') {
         navigatePreviewRef.current(event.data);
         return;
@@ -942,7 +1004,7 @@ export function ProjectEditorPage() {
       }
       if (event.data.type === 'select') {
         if (event.data.widgetId == null) {
-          if (tableEditIdRef.current) {
+          if (tableEditIdRef.current || scrollEditIdRef.current || swiperEditIdRef.current) {
             return;
           }
           if (dismissStyleToolbarRef.current()) {
@@ -964,6 +1026,22 @@ export function ProjectEditorPage() {
         }
         return;
       }
+      if (event.data.type === 'scroll-mode') {
+        if (event.data.action === 'exit') {
+          exitScrollEditRef.current();
+        } else {
+          enterScrollEditRef.current();
+        }
+        return;
+      }
+      if (event.data.type === 'swiper-mode') {
+        if (event.data.action === 'exit') {
+          exitSwiperEditRef.current();
+        } else {
+          enterSwiperEditRef.current();
+        }
+        return;
+      }
       if (event.data.type === 'table-command') {
         runTableCommandRef.current(event.data.command);
         return;
@@ -977,7 +1055,7 @@ export function ProjectEditorPage() {
         return;
       }
       if (event.data.type === 'dismiss-toolbar') {
-        if (tableEditIdRef.current) {
+        if (tableEditIdRef.current || scrollEditIdRef.current || swiperEditIdRef.current) {
           return;
         }
         if (!dismissStyleToolbarRef.current()) {
@@ -1004,6 +1082,8 @@ export function ProjectEditorPage() {
       if (event.data.type === 'keydown' || event.data.type === 'keyup') {
         if (event.data.type === 'keydown' && event.data.key === 'Escape' && !event.data.ctrlKey && !event.data.metaKey) {
           exitTableEditRef.current();
+          exitScrollEditRef.current();
+          exitSwiperEditRef.current();
           commitSpacingEditRef.current('cancel');
           return;
         }
@@ -1137,8 +1217,16 @@ export function ProjectEditorPage() {
   }, [previewLangKeys.join('\0')]);
 
   useEffect(() => {
+    const loaded = loadedOwnerRef.current;
     const draftVersionId = catalogKind === 'component' ? selectedVersionId : pageSnapshotId;
-    if (!id || !activeOwnerId || !draftVersionId || !persistEnabledRef.current) {
+    if (
+      !id ||
+      !loaded ||
+      loaded.kind !== catalogKind ||
+      loaded.ownerId !== activeOwnerId ||
+      loaded.versionId !== draftVersionId ||
+      !persistEnabledRef.current
+    ) {
       if (idleTimerRef.current) {
         clearTimeout(idleTimerRef.current);
         idleTimerRef.current = null;
@@ -1156,8 +1244,8 @@ export function ProjectEditorPage() {
       return;
     }
     setSaveStatus('unsaved');
-    const draftId = catalogKind === 'component' ? `component:${activeOwnerId}` : activeOwnerId;
-    void putDraft(id, draftId, draftVersionId, documentKey);
+    const draftId = loaded.kind === 'component' ? `component:${loaded.ownerId}` : loaded.ownerId;
+    void putDraft(id, draftId, loaded.versionId, documentKey);
     if (inspectorInvalid) {
       if (idleTimerRef.current) {
         clearTimeout(idleTimerRef.current);
@@ -1182,21 +1270,19 @@ export function ProjectEditorPage() {
 
   useEffect(() => {
     function onPageHide() {
-      const ownerId = catalogKindRef.current === 'component' ? selectedComponentIdRef.current : selectedPageIdRef.current;
-      const versionId = catalogKindRef.current === 'component' ? selectedVersionIdRef.current : pageSnapshotIdRef.current;
-      const projectVersion = projectVersionIdRef.current;
-      if (!id || !ownerId || !versionId || !persistEnabledRef.current) {
+      const loaded = loadedOwnerRef.current;
+      if (!id || !loaded || !persistEnabledRef.current) {
         return;
       }
-      const draftId = catalogKindRef.current === 'component' ? `component:${ownerId}` : ownerId;
-      void putDraftNow(id, draftId, versionId, documentKeyRef.current);
-      if (inspectorInvalidRef.current || documentKeyRef.current === lastServerKeyRef.current) {
+      const draftId = loaded.kind === 'component' ? `component:${loaded.ownerId}` : loaded.ownerId;
+      void putDraftNow(id, draftId, loaded.versionId, documentKeyRef.current);
+      if (inspectorInvalidRef.current || documentKeyRef.current === lastServerKeyRef.current || emptyCanvasWouldErase()) {
         return;
       }
-      if (catalogKindRef.current === 'component') {
-        api.updateComponentVersionKeepalive(id, ownerId, versionId, { document: documentRef.current });
-      } else if (projectVersion) {
-        api.updatePageDocumentKeepalive(id, projectVersion, ownerId, { document: documentRef.current });
+      if (loaded.kind === 'component') {
+        api.updateComponentVersionKeepalive(id, loaded.ownerId, loaded.versionId, { document: documentRef.current });
+      } else if (loaded.projectVersionId) {
+        api.updatePageDocumentKeepalive(id, loaded.projectVersionId, loaded.ownerId, { document: documentRef.current });
       }
     }
     window.addEventListener('pagehide', onPageHide);
@@ -1309,7 +1395,7 @@ export function ProjectEditorPage() {
         event.key === 'Escape' &&
         !isEditableKeyboardTarget(event.target)
       ) {
-        if (exitTableEditRef.current()) {
+        if (exitTableEditRef.current() || exitScrollEditRef.current() || exitSwiperEditRef.current()) {
           event.preventDefault();
           event.stopPropagation();
           commitSpacingEditRef.current('cancel');
@@ -1749,6 +1835,10 @@ export function ProjectEditorPage() {
       previewQueryRef.current = {};
       setPreviewQuery({});
     }
+    if (Object.keys(previewDataEditsRef.current).length > 0) {
+      previewDataEditsRef.current = {};
+      setPreviewDataEdits({});
+    }
   }, [mode]);
 
   useEffect(() => {
@@ -1795,11 +1885,13 @@ export function ProjectEditorPage() {
       return;
     }
     const projectId = id;
-    const kind = catalogKindRef.current;
     const loadSeq = ++ownerLoadSeqRef.current;
     const ownerKey = `component:${ownerId}`;
-    const stillCurrent = () => ownerLoadSeqRef.current === loadSeq && catalogKindRef.current === kind;
-    persistEnabledRef.current = false;
+    const stillCurrent = () =>
+      ownerLoadSeqRef.current === loadSeq &&
+      catalogKindRef.current === 'component' &&
+      selectedComponentIdRef.current === ownerId;
+    detachLoadedDocument();
     let showedCache = false;
     let shownVersionId: string | null = null;
     try {
@@ -1816,7 +1908,7 @@ export function ProjectEditorPage() {
         if (cachedCurrent?.id) {
           rememberVersionId(projectId, ownerKey, cachedCurrent.id);
         }
-        await hydrateVersion(cachedCurrent, ownerKey);
+        await hydrateVersion(cachedCurrent, ownerKey, stillCurrent);
         showedCache = true;
       }
       const [entity, metas] = await Promise.all([
@@ -1843,7 +1935,7 @@ export function ProjectEditorPage() {
         if (current?.id) {
           rememberVersionId(projectId, ownerKey, current.id);
         }
-        await hydrateVersion(current, ownerKey);
+        await hydrateVersion(current, ownerKey, stillCurrent);
       }
     } catch (error) {
       if (!showedCache) {
@@ -1855,45 +1947,99 @@ export function ProjectEditorPage() {
     }
   }
 
-  async function hydrateVersion(version: ProjectPageVersionDto | null, pageId: string) {
+  function emptyCanvasWouldErase() {
+    if (editedRef.current || documentRef.current.widgets.length > 0) {
+      return false;
+    }
+    try {
+      const saved = JSON.parse(lastServerKeyRef.current) as { widgets?: unknown[] };
+      return Array.isArray(saved.widgets) && saved.widgets.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  function detachLoadedDocument() {
+    const loaded = loadedOwnerRef.current;
+    persistEnabledRef.current = false;
+    loadedOwnerRef.current = null;
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+    if (!id || !loaded) {
+      return;
+    }
+    if (readOnlyRef.current || inspectorInvalidRef.current) {
+      return;
+    }
+    if (documentKeyRef.current === lastServerKeyRef.current || emptyCanvasWouldErase()) {
+      return;
+    }
+    void saveLoadedDocument(
+      { silent: true },
+      { target: loaded, document: documentRef.current, key: documentKeyRef.current },
+    );
+  }
+
+  async function hydrateVersion(version: ProjectPageVersionDto | null, pageId: string, stillCurrent: () => boolean) {
+    if (!stillCurrent()) {
+      return;
+    }
     const seq = ++hydrateSeqRef.current;
     persistEnabledRef.current = false;
+    loadedOwnerRef.current = null;
+    editedRef.current = false;
     if (idleTimerRef.current) {
       clearTimeout(idleTimerRef.current);
       idleTimerRef.current = null;
     }
     const serverDocument = readPageDocument(version?.document);
     const serverKey = JSON.stringify(serverDocument);
-    lastServerKeyRef.current = serverKey;
+    const fresh = () => stillCurrent() && seq === hydrateSeqRef.current;
+    if (!fresh()) {
+      return;
+    }
     if (!id || !version) {
       applyDocument(serverDocument);
+      lastServerKeyRef.current = serverKey;
       setSaveStatus('saved');
       setHydrateEpoch((epoch) => epoch + 1);
-      if (seq === hydrateSeqRef.current) {
-        finishOwnerCanvas();
-      }
+      finishOwnerCanvas();
       return;
     }
     let nextDocument = serverDocument;
     const local = await getDraft(id, pageId, version.id);
-    if (seq !== hydrateSeqRef.current) {
+    if (!fresh()) {
       return;
     }
     if (local) {
       const localDocument = readDraftDocument(local);
       const localKey = localDocument ? JSON.stringify(localDocument) : local;
-      if (localDocument && localKey !== serverKey) {
+      const emptyDraftWouldErase = Boolean(localDocument && localDocument.widgets.length === 0 && serverDocument.widgets.length > 0);
+      if (localDocument && localKey !== serverKey && !emptyDraftWouldErase) {
         nextDocument = localDocument;
       } else {
         await deleteDraft(id, pageId, version.id);
       }
     }
-    if (seq !== hydrateSeqRef.current) {
+    if (!fresh()) {
       return;
     }
     applyDocument(nextDocument);
+    lastServerKeyRef.current = serverKey;
+    const kind = catalogKindRef.current;
+    const ownerId = kind === 'component' ? selectedComponentIdRef.current : selectedPageIdRef.current;
+    if (ownerId) {
+      loadedOwnerRef.current = {
+        kind,
+        ownerId,
+        versionId: version.id,
+        projectVersionId: projectVersionIdRef.current,
+      };
+      persistEnabledRef.current = true;
+    }
     setSaveStatus(JSON.stringify(nextDocument) === serverKey ? 'saved' : 'unsaved');
-    persistEnabledRef.current = true;
     setHydrateEpoch((epoch) => epoch + 1);
     finishOwnerCanvas();
   }
@@ -1909,8 +2055,17 @@ export function ProjectEditorPage() {
     if (!id) {
       return;
     }
+    const projectId = id;
+    const loadSeq = ++ownerLoadSeqRef.current;
+    const stillCurrent = () =>
+      ownerLoadSeqRef.current === loadSeq &&
+      catalogKindRef.current === 'page' &&
+      selectedPageIdRef.current === pageId;
     try {
-      const snapshot = await api.getPageDocument(id, versionId, pageId);
+      const snapshot = await api.getPageDocument(projectId, versionId, pageId);
+      if (!stillCurrent()) {
+        return;
+      }
       setPageSnapshotId(snapshot.id);
       await hydrateVersion(
         {
@@ -1924,8 +2079,12 @@ export function ProjectEditorPage() {
           lastModified: snapshot.lastModified,
         },
         pageId,
+        stillCurrent,
       );
     } catch (error) {
+      if (!stillCurrent()) {
+        return;
+      }
       message.error(error instanceof Error ? error.message : t('lowcode.loadFailed'));
       cancelOwnerCanvas();
     }
@@ -1935,7 +2094,7 @@ export function ProjectEditorPage() {
     if (catalogKind !== 'component') {
       return;
     }
-    persistEnabledRef.current = false;
+    detachLoadedDocument();
     clipboardRef.current = null;
     setClipboardTick((tick) => tick + 1);
     resetHistory();
@@ -1962,7 +2121,7 @@ export function ProjectEditorPage() {
     if (!id || !projectVersionId || pagesVersionRef.current !== projectVersionId) {
       return;
     }
-    persistEnabledRef.current = false;
+    detachLoadedDocument();
     clipboardRef.current = null;
     setClipboardTick((tick) => tick + 1);
     resetHistory();
@@ -2139,6 +2298,8 @@ export function ProjectEditorPage() {
       endCoalesce();
     }
     const owning = findOwningTable(widgetsRef.current, id);
+    const owningScroll = findOwningScroll(widgetsRef.current, id);
+    const owningSwiper = findOwningSwiper(widgetsRef.current, id);
     const selected = findWidget(widgetsRef.current, id);
     if (
       id &&
@@ -2149,15 +2310,53 @@ export function ProjectEditorPage() {
       exitTableEdit();
       return;
     }
+    if (
+      id &&
+      scrollEditIdRef.current &&
+      selected?.type === 'scroll' &&
+      selected.id === scrollEditIdRef.current
+    ) {
+      exitScrollEdit();
+      return;
+    }
+    if (
+      id &&
+      swiperEditIdRef.current &&
+      selected?.type === 'swiper' &&
+      selected.id === swiperEditIdRef.current
+    ) {
+      exitSwiperEdit();
+      return;
+    }
     if (tableEditIdRef.current && owning?.table.id !== tableEditIdRef.current) {
       restoreTableEditView();
       tableEditIdRef.current = null;
       setTableEditId(null);
     }
+    if (scrollEditIdRef.current && owningScroll?.id !== scrollEditIdRef.current) {
+      restoreScrollEditView();
+      scrollEditIdRef.current = null;
+      setScrollEditId(null);
+    }
+    if (swiperEditIdRef.current && owningSwiper?.id !== swiperEditIdRef.current) {
+      restoreSwiperEditView();
+      swiperEditIdRef.current = null;
+      setSwiperEditId(null);
+    }
     if (owning && selected && selected.id !== owning.table.id && tableEditIdRef.current !== owning.table.id) {
       rememberTableEditView();
       tableEditIdRef.current = owning.table.id;
       setTableEditId(owning.table.id);
+    }
+    if (owningScroll && selected && selected.id !== owningScroll.id && scrollEditIdRef.current !== owningScroll.id) {
+      rememberScrollEditView();
+      scrollEditIdRef.current = owningScroll.id;
+      setScrollEditId(owningScroll.id);
+    }
+    if (owningSwiper && selected && selected.id !== owningSwiper.id && swiperEditIdRef.current !== owningSwiper.id) {
+      rememberSwiperEditView();
+      swiperEditIdRef.current = owningSwiper.id;
+      setSwiperEditId(owningSwiper.id);
     }
     clearTableRange();
     selectedWidgetIdRef.current = id;
@@ -2416,6 +2615,96 @@ export function ProjectEditorPage() {
     return true;
   }
 
+  function rememberScrollEditView() {
+    if (scrollEditViewRef.current) {
+      return;
+    }
+    const current = viewRef.current;
+    scrollEditViewRef.current = { scale: current.scale, x: current.x, y: current.y };
+  }
+
+  function restoreScrollEditView() {
+    const previous = scrollEditViewRef.current;
+    scrollEditViewRef.current = null;
+    if (previous) {
+      applyView(previous);
+    }
+  }
+
+  function enterScrollEdit() {
+    const selected = findWidget(widgetsRef.current, selectedWidgetIdRef.current);
+    if (!selected || selected.type !== 'scroll' || modeRef.current !== 'edit' || readOnlyRef.current) {
+      return;
+    }
+    if (scrollEditIdRef.current === selected.id) {
+      return;
+    }
+    rememberScrollEditView();
+    scrollEditIdRef.current = selected.id;
+    setScrollEditId(selected.id);
+    const childId = selected.children[0]?.id;
+    if (childId) {
+      selectWidget(childId);
+    }
+  }
+
+  function rememberSwiperEditView() {
+    if (swiperEditViewRef.current) {
+      return;
+    }
+    const current = viewRef.current;
+    swiperEditViewRef.current = { scale: current.scale, x: current.x, y: current.y };
+  }
+
+  function restoreSwiperEditView() {
+    const previous = swiperEditViewRef.current;
+    swiperEditViewRef.current = null;
+    if (previous) {
+      applyView(previous);
+    }
+  }
+
+  function enterSwiperEdit() {
+    const selected = findWidget(widgetsRef.current, selectedWidgetIdRef.current);
+    if (!selected || selected.type !== 'swiper' || modeRef.current !== 'edit' || readOnlyRef.current) {
+      return;
+    }
+    if (swiperEditIdRef.current === selected.id) {
+      return;
+    }
+    rememberSwiperEditView();
+    swiperEditIdRef.current = selected.id;
+    setSwiperEditId(selected.id);
+    const childId = selected.children[0]?.id;
+    if (childId) {
+      selectWidget(childId);
+    }
+  }
+
+  function exitSwiperEdit() {
+    const editingId = swiperEditIdRef.current;
+    if (!editingId) {
+      return false;
+    }
+    swiperEditIdRef.current = null;
+    setSwiperEditId(null);
+    selectWidgetRef.current(editingId);
+    restoreSwiperEditView();
+    return true;
+  }
+
+  function exitScrollEdit() {
+    const editingId = scrollEditIdRef.current;
+    if (!editingId) {
+      return false;
+    }
+    scrollEditIdRef.current = null;
+    setScrollEditId(null);
+    selectWidgetRef.current(editingId);
+    restoreScrollEditView();
+    return true;
+  }
+
   function rememberTableEditView() {
     if (tableEditViewRef.current) {
       return;
@@ -2484,6 +2773,18 @@ export function ProjectEditorPage() {
       enterTableEdit();
       return true;
     }
+    if (selected?.type === 'scroll' && scrollEditIdRef.current !== selected.id) {
+      enterTapAtRef.current = 0;
+      clearEnterConfirmTimer();
+      enterScrollEdit();
+      return true;
+    }
+    if (selected?.type === 'swiper' && swiperEditIdRef.current !== selected.id) {
+      enterTapAtRef.current = 0;
+      clearEnterConfirmTimer();
+      enterSwiperEdit();
+      return true;
+    }
     const now = Date.now();
     if (enterTapAtRef.current && now - enterTapAtRef.current <= ENTER_DOUBLE_MS) {
       enterTapAtRef.current = 0;
@@ -2503,6 +2804,10 @@ export function ProjectEditorPage() {
   handleWidgetEnterRef.current = handleWidgetEnter;
   enterTableEditRef.current = enterTableEdit;
   exitTableEditRef.current = exitTableEdit;
+  enterScrollEditRef.current = enterScrollEdit;
+  exitScrollEditRef.current = exitScrollEdit;
+  enterSwiperEditRef.current = enterSwiperEdit;
+  exitSwiperEditRef.current = exitSwiperEdit;
 
   useEffect(() => {
     if (!selectedWidgetId) {
@@ -2583,6 +2888,7 @@ export function ProjectEditorPage() {
     nextTestData?: PageTestData | null,
     nextQuery?: ComponentProp[],
   ) {
+    editedRef.current = true;
     const events = nextPageEvents === undefined ? pageEventsRef.current : nextPageEvents ?? undefined;
     const methods = nextPageMethods === undefined ? pageMethodsRef.current : nextPageMethods;
     const props = nextProps === undefined ? componentPropsRef.current : nextProps;
@@ -2845,7 +3151,7 @@ export function ProjectEditorPage() {
       stored = text === '1' || text === 'true' ? '1' : '0';
     } else if (type === 'num') {
       stored = normalizeInputModelValue('number', text);
-    } else if (type === 'str' || type === 'widget') {
+    } else if (type === 'str' || type === 'icon' || type === 'image' || type === 'widget') {
       stored = text;
     } else if ((type === 'arr' || type === 'obj') && validateDataLiteral(text, type, data, props, queryScope)) {
       stored = text.trim();
@@ -2882,7 +3188,7 @@ export function ProjectEditorPage() {
             ? value === '1' || value === 'true'
               ? '1'
               : '0'
-            : current.type === 'str'
+            : current.type === 'str' || current.type === 'icon' || current.type === 'image'
               ? value
               : current.type === 'arr' && validateDataLiteral(value, 'arr')
                 ? value
@@ -2910,7 +3216,7 @@ export function ProjectEditorPage() {
     const stored =
       current.type === 'num'
         ? normalizeInputModelValue('number', value)
-        : current.type === 'str'
+        : current.type === 'str' || current.type === 'icon' || current.type === 'image'
           ? value
           : current.type === 'bool'
             ? value === '1' || value === 'true'
@@ -4314,67 +4620,107 @@ export function ProjectEditorPage() {
     }
   }
 
-  async function saveCurrentVersion(options?: { silent?: boolean }) {
-    const ownerId = catalogKindRef.current === 'component' ? selectedComponentIdRef.current : selectedPageIdRef.current;
-    const savingProjectVersion = projectVersionIdRef.current;
-    if (!id || !ownerId || (catalogKindRef.current === 'component' ? !selectedVersionIdRef.current : !savingProjectVersion)) {
+  function sameLoaded(target: LoadedTarget) {
+    const loaded = loadedOwnerRef.current;
+    return (
+      loaded != null &&
+      loaded.kind === target.kind &&
+      loaded.ownerId === target.ownerId &&
+      loaded.versionId === target.versionId
+    );
+  }
+
+  async function saveLoadedDocument(
+    options?: { silent?: boolean },
+    forced?: { target: LoadedTarget; document: PageXmlDocument; key: string },
+  ) {
+    const target = forced?.target ?? loadedOwnerRef.current;
+    const documentToSave = forced?.document ?? documentRef.current;
+    const keyToSave = forced?.key ?? documentKeyRef.current;
+    if (!id || !target) {
+      return;
+    }
+    if (!forced) {
+      const selectedId = target.kind === 'component' ? selectedComponentIdRef.current : selectedPageIdRef.current;
+      if (!persistEnabledRef.current || catalogKindRef.current !== target.kind || selectedId !== target.ownerId || !sameLoaded(target)) {
+        return;
+      }
+    }
+    if (target.kind === 'page' && !target.projectVersionId) {
       return;
     }
     if (readOnlyRef.current || inspectorInvalidRef.current) {
       return;
     }
-    if (documentKeyRef.current === lastServerKeyRef.current) {
+    if (keyToSave === lastServerKeyRef.current || emptyCanvasWouldErase()) {
       return;
     }
     if (saveInFlightRef.current) {
       saveAgainRef.current = true;
       return;
     }
-    const versionId = catalogKindRef.current === 'component' ? selectedVersionIdRef.current : pageSnapshotIdRef.current;
-    const draftId = catalogKindRef.current === 'component' ? `component:${ownerId}` : ownerId;
-    const documentToSave = documentRef.current;
-    const keyToSave = documentKeyRef.current;
-    if (!versionId) {
-      return;
-    }
+    const projectId = id;
+    const draftId = target.kind === 'component' ? `component:${target.ownerId}` : target.ownerId;
     saveInFlightRef.current = true;
-    setSaveStatus('saving');
+    if (!forced) {
+      setSaveStatus('saving');
+    }
     try {
-      if (catalogKindRef.current === 'component') {
-        const updated = await api.updateComponentVersion(id, ownerId, versionId, { document: documentToSave });
-        lastServerKeyRef.current = keyToSave;
-        await deleteDraft(id, draftId, versionId);
-        void putCachedVersion(id, draftId, { ...updated, document: documentToSave });
-        setVersions((current) =>
-          current.map((version) => (version.id === updated.id ? { ...updated, document: documentToSave } : version)),
-        );
-      } else if (savingProjectVersion) {
-        const updated = await api.updatePageDocument(id, savingProjectVersion, ownerId, { document: documentToSave });
-        lastServerKeyRef.current = keyToSave;
-        await deleteDraft(id, draftId, versionId);
-        if (updated.id !== versionId) {
-          setPageSnapshotId(updated.id);
-          setPages((current) =>
-            current.map((page) => (page.id === ownerId ? { ...page, currentVersionId: updated.id } : page)),
+      if (target.kind === 'component') {
+        const updated = await api.updateComponentVersion(projectId, target.ownerId, target.versionId, {
+          document: documentToSave,
+        });
+        await deleteDraft(projectId, draftId, target.versionId);
+        void putCachedVersion(projectId, draftId, { ...updated, document: documentToSave });
+        if (sameLoaded(target) && documentKeyRef.current === keyToSave) {
+          lastServerKeyRef.current = keyToSave;
+          setVersions((current) =>
+            current.map((version) => (version.id === updated.id ? { ...updated, document: documentToSave } : version)),
           );
         }
+      } else if (target.projectVersionId) {
+        const updated = await api.updatePageDocument(projectId, target.projectVersionId, target.ownerId, {
+          document: documentToSave,
+        });
+        await deleteDraft(projectId, draftId, target.versionId);
+        if (updated.id !== target.versionId) {
+          setPages((current) =>
+            current.map((page) => (page.id === target.ownerId ? { ...page, currentVersionId: updated.id } : page)),
+          );
+          if (sameLoaded(target)) {
+            loadedOwnerRef.current = { ...target, versionId: updated.id };
+            pageSnapshotIdRef.current = updated.id;
+            setPageSnapshotId(updated.id);
+          }
+        }
+        if (sameLoaded(target) && documentKeyRef.current === keyToSave) {
+          lastServerKeyRef.current = keyToSave;
+        }
       }
-      if (!options?.silent) {
-        message.success(t('lowcode.versionUpdated'));
+      if (sameLoaded(target)) {
+        if (!options?.silent) {
+          message.success(t('lowcode.versionUpdated'));
+        }
+        setSaveStatus(documentKeyRef.current === lastServerKeyRef.current ? 'saved' : 'unsaved');
       }
-      setSaveStatus(documentKeyRef.current === lastServerKeyRef.current ? 'saved' : 'unsaved');
     } catch (error) {
-      setSaveStatus('unsaved');
-      if (!options?.silent) {
-        message.error(error instanceof Error ? error.message : t('lowcode.saveFailed'));
+      if (sameLoaded(target)) {
+        setSaveStatus('unsaved');
+        if (!options?.silent) {
+          message.error(error instanceof Error ? error.message : t('lowcode.saveFailed'));
+        }
       }
     } finally {
       saveInFlightRef.current = false;
       if (saveAgainRef.current) {
         saveAgainRef.current = false;
-        void saveCurrentVersion(options);
+        void saveLoadedDocument(options);
       }
     }
+  }
+
+  function saveCurrentVersion(options?: { silent?: boolean }) {
+    return saveLoadedDocument(options);
   }
   saveCurrentVersionRef.current = saveCurrentVersion;
 
@@ -4614,6 +4960,8 @@ export function ProjectEditorPage() {
               previewing={previewing}
               canvasSettling={canvasSettling}
               tableEditId={tableEditId}
+              scrollEditId={scrollEditId}
+              swiperEditId={swiperEditId}
               sendPreview={sendPreview}
               showStyleChrome={showStyleChrome}
               selectedWidget={selectedWidget}

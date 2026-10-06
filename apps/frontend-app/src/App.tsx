@@ -196,10 +196,28 @@ export default function App() {
       locale: pickPageLocale(catalog, lang),
       catalog,
       query: { ...buildPropsRecord(pageDocument.query), ...shownQuery },
+      onQueryValue(name, value) {
+        setShownQuery((prev) => {
+          if (prev[name] === value) {
+            return prev;
+          }
+          const next = { ...prev, [name]: value };
+          const current = routeRef.current;
+          const url = pageUrl(
+            current.projectKey,
+            shownPageKey || current.pageKey,
+            { ...current.query, ...next },
+            window.location.search,
+          );
+          window.history.replaceState(window.history.state, '', url);
+          return next;
+        });
+      },
       pageId: shownPageKey ? `${shownPageKey}:${JSON.stringify(shownQuery)}` : null,
       loadWidgetEvent: projectKey ? (eventId) => loadRuntimeEvent(projectKey, eventId) : undefined,
+      icons: project?.icons,
     });
-  }, [catalog, lang, pageDocument, projectKey, shownPageKey, shownQuery]);
+  }, [catalog, lang, pageDocument, project, projectKey, shownPageKey, shownQuery]);
 
   return (
     <div className="h5-frame">

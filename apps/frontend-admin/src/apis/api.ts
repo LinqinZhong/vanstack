@@ -27,8 +27,13 @@ import type {
   UpdateProjectInput,
   UpdateProjectPageInput,
   UpdateProjectPageVersionInput,
+  CreateNamespaceInput,
   MethodCodeDto,
+  NamespaceDocumentDto,
+  ProjectNamespaceDto,
   PutMethodCodeInput,
+  PutNamespaceInput,
+  RenameNamespaceInput,
   PutWidgetEventInput,
   WidgetEventScriptDto,
 } from '@vanstack/shared';
@@ -266,6 +271,23 @@ export const api = {
     request<WidgetEventScriptDto>(`/projects/${projectId}/events/${eventId}`, json('PUT', body)),
   deleteWidgetEvent: (projectId: string, eventId: string) =>
     request<void>(`/projects/${projectId}/events/${eventId}`, { method: 'DELETE' }),
+  listNamespaces: (projectId: string) => request<ProjectNamespaceDto[]>(`/projects/${projectId}/namespaces`),
+  createNamespace: (projectId: string, body: CreateNamespaceInput) =>
+    request<ProjectNamespaceDto>(`/projects/${projectId}/namespaces`, json('POST', body)),
+  renameNamespace: (projectId: string, name: string, body: RenameNamespaceInput) =>
+    request<ProjectNamespaceDto>(
+      `/projects/${projectId}/namespaces/${encodeURIComponent(name)}`,
+      json('PATCH', body),
+    ),
+  deleteNamespace: (projectId: string, name: string) =>
+    request<void>(`/projects/${projectId}/namespaces/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  getNamespace: (projectId: string, name: string) =>
+    request<NamespaceDocumentDto>(`/projects/${projectId}/namespaces/${encodeURIComponent(name)}`),
+  putNamespace: (projectId: string, name: string, body: PutNamespaceInput) =>
+    request<NamespaceDocumentDto>(
+      `/projects/${projectId}/namespaces/${encodeURIComponent(name)}`,
+      json('PUT', body),
+    ),
 };
 
 export const localeLabel: Record<Locale, string> = {

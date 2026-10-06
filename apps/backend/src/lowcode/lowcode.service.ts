@@ -25,6 +25,11 @@ import type {
   MethodCodeDto,
   ProjectPageVersionDto,
   ProjectPageVersionMetaDto,
+  NamespaceDataDto,
+  NamespaceDocumentDto,
+  NamespaceTypeDto,
+  NamespaceTypeFieldDto,
+  ProjectNamespaceDto,
   ProjectVersionDto,
   WidgetEventScriptDto,
   RuntimeLangDto,
@@ -40,6 +45,7 @@ import {
   normalizePageDocument,
   parseEventSource,
   XmlParseError,
+  type PageWidget,
   type PageXmlDocument,
 } from '@vanstack/xml';
 import { OssService } from '../oss/oss.service';
@@ -51,6 +57,10 @@ import {
   type LibraryFileRecord,
   type LibraryGroupRecord,
   type LibraryVersionRecord,
+  type NamespaceDataRecord,
+  type NamespaceFieldRecord,
+  type NamespaceTypeRecord,
+  type NamespaceVersionRecord,
   type PageVersionRecord,
   type ProjectLangValueRecord,
   type ProjectPageRecord,
@@ -161,10 +171,18 @@ export class LowcodeService implements OnApplicationBootstrap {
         langs,
       });
     }
+    const iconLibrary = await this.mongo.getLibraryVersion('icon', version.iconVersionId);
+    const icons: Record<string, string> = {};
+    for (const group of iconLibrary?.groups ?? []) {
+      for (const file of group.files) {
+        icons[`${group.name}.${file.name.replace(/\.svg$/i, '')}`] = this.oss.getPublicUrl(file.key);
+      }
+    }
     return {
       name: project.name,
       key: project.key,
       pages: runtimePages,
+      icons,
     };
   }
 
@@ -211,6 +229,7 @@ export class LowcodeService implements OnApplicationBootstrap {
       key: input.key,
       description: input.description?.trim() ?? '',
       currentVersionId: null,
+      namespace: [],
       createdAt: now,
       updatedAt: now,
     };
@@ -525,7 +544,11 @@ export class LowcodeService implements OnApplicationBootstrap {
     const page = this.pageIn(version, pageId);
     const originalId = page.currentVersionId;
     const snapshot = await this.writablePage(version, page);
-    this.applyDocument(snapshot, this.normalizeDocument(input.document));
+    const next = this.normalizeDocument(input.document);
+    if (await this.keepStoredPage(projectId, snapshot.widgets, next.widgets)) {
+      return this.toSnapshotDto(snapshot, false);
+    }
+    this.applyDocument(snapshot, next);
     const saved = await this.mongo.putPage(this.versionBody(snapshot));
     await this.recountCodeUses(projectId);
     if (project.currentVersionId === version._id) {
@@ -971,6 +994,214 @@ export class LowcodeService implements OnApplicationBootstrap {
       return;
     }
     await this.mongo.deleteEvent(projectId, eventId);
+  }
+
+  async listNamespaces(projectId: string): Promise<ProjectNamespaceDto[]> {
+    const project = await this.requireProject(projectId);
+    return (project.namespace ?? []).map((item) => ({ name: item.name, versionId: item.versionId }));
+  }
+
+  async createNamespace(projectId: string, name: string): Promise<ProjectNamespaceDto> {
+    const project = await this.requireProject(projectId);
+    const trimmed = this.namespaceName(name);
+    const list = project.namespace ?? [];
+    if (list.some((item) => item.name === trimmed)) {
+      throw new ConflictException('namespace already exists');
+    }
+    const now = new Date();
+    const versionId = randomUUID();
+    await this.mongo.saveNamespaceVersion({
+      _id: versionId,
+      projectId: project._id,
+      projectKey: project.key,
+      uses: 1,
+      types: [],
+      data: [],
+      updatedAt: now,
+    });
+    project.namespace = [...list, { name: trimmed, versionId }];
+    project.updatedAt = now;
+    await this.mongo.saveProject(project);
+    return { name: trimmed, versionId };
+  }
+
+  async renameNamespace(projectId: string, name: string, nextName: string): Promise<ProjectNamespaceDto> {
+    const project = await this.requireProject(projectId);
+    const current = name;
+    const trimmed = this.namespaceName(nextName);
+    const list = project.namespace ?? [];
+    const index = list.findIndex((item) => item.name === current);
+    if (index < 0) {
+      throw new NotFoundException();
+    }
+    if (trimmed !== current && list.some((item) => item.name === trimmed)) {
+      throw new ConflictException('namespace already exists');
+    }
+    const next = list.map((item, itemIndex) => (itemIndex === index ? { ...item, name: trimmed } : item));
+    project.namespace = next;
+    project.updatedAt = new Date();
+    await this.mongo.saveProject(project);
+    return next[index];
+  }
+
+  async deleteNamespace(projectId: string, name: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    const current = name;
+    const list = project.namespace ?? [];
+    const found = list.find((item) => item.name === current);
+    if (!found) {
+      throw new NotFoundException();
+    }
+    project.namespace = list.filter((item) => item.name !== current);
+    project.updatedAt = new Date();
+    await this.mongo.saveProject(project);
+    await this.mongo.deleteNamespaceVersion(found.versionId);
+  }
+
+  async getNamespace(projectId: string, name: string): Promise<NamespaceDocumentDto> {
+    const project = await this.requireProject(projectId);
+    const found = (project.namespace ?? []).find((item) => item.name === name);
+    if (!found) {
+      throw new NotFoundException();
+    }
+    const version = await this.mongo.getNamespaceVersion(found.versionId);
+    if (!version || version.projectId !== project._id) {
+      throw new NotFoundException();
+    }
+    return this.toNamespaceDocument(found.name, version);
+  }
+
+  async putNamespace(
+    projectId: string,
+    name: string,
+    input: { types: unknown[]; data: unknown[] },
+  ): Promise<NamespaceDocumentDto> {
+    const project = await this.requireProject(projectId);
+    const found = (project.namespace ?? []).find((item) => item.name === name);
+    if (!found) {
+      throw new NotFoundException();
+    }
+    const version = await this.mongo.getNamespaceVersion(found.versionId);
+    if (!version || version.projectId !== project._id) {
+      throw new NotFoundException();
+    }
+    const types = input.types.map((item) => this.normalizeNamespaceType(item));
+    const names = new Set(types.map((item) => item.name));
+    if (names.size !== types.length) {
+      throw new BadRequestException('duplicate type name');
+    }
+    version.types = types;
+    version.data = input.data.map((item) => this.normalizeNamespaceData(item));
+    version.updatedAt = new Date();
+    await this.mongo.saveNamespaceVersion(version);
+    return this.toNamespaceDocument(found.name, version);
+  }
+
+  private namespaceName(name: string): string {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > 64 || /[\s/\\]/.test(trimmed)) {
+      throw new BadRequestException('invalid namespace name');
+    }
+    return trimmed;
+  }
+
+  private normalizeNamespaceType(value: unknown): NamespaceTypeRecord {
+    if (!value || typeof value !== 'object') {
+      throw new BadRequestException('invalid type');
+    }
+    const row = value as Record<string, unknown>;
+    const name = typeof row.name === 'string' ? row.name.trim() : '';
+    if (!/^[\p{L}_$][\p{L}\p{N}_$]*$/u.test(name) || name.length > 64) {
+      throw new BadRequestException('invalid type name');
+    }
+    const fields = Array.isArray(row.fields) ? row.fields.map((item) => this.normalizeNamespaceField(item, 0)) : [];
+    const source = typeof row.source === 'string' ? row.source.slice(0, 100_000) : '';
+    return {
+      id: typeof row.id === 'string' && row.id.trim() ? row.id.trim() : randomUUID(),
+      name,
+      description: typeof row.description === 'string' ? row.description.slice(0, 4000) : '',
+      fields,
+      source,
+    };
+  }
+
+  private normalizeNamespaceField(value: unknown, depth: number): NamespaceFieldRecord {
+    if (depth > 12 || !value || typeof value !== 'object') {
+      throw new BadRequestException('invalid type field');
+    }
+    const row = value as Record<string, unknown>;
+    const type = typeof row.type === 'string' ? row.type.trim() : '';
+    if (!type || type.length > 64) {
+      throw new BadRequestException('invalid field type');
+    }
+    const name = typeof row.name === 'string' ? row.name.trim().slice(0, 64) : '';
+    const children = Array.isArray(row.children)
+      ? row.children.map((item) => this.normalizeNamespaceField(item, depth + 1))
+      : undefined;
+    return {
+      id: typeof row.id === 'string' && row.id.trim() ? row.id.trim() : randomUUID(),
+      name,
+      description: typeof row.description === 'string' ? row.description.slice(0, 4000) : '',
+      type,
+      ...(children && children.length > 0 ? { children } : {}),
+    };
+  }
+
+  private normalizeNamespaceData(value: unknown): NamespaceDataRecord {
+    if (!value || typeof value !== 'object') {
+      throw new BadRequestException('invalid data');
+    }
+    const row = value as Record<string, unknown>;
+    const name = typeof row.name === 'string' ? row.name.trim() : '';
+    if (!name || name.length > 64) {
+      throw new BadRequestException('invalid data name');
+    }
+    return {
+      id: typeof row.id === 'string' && row.id.trim() ? row.id.trim() : randomUUID(),
+      type: typeof row.type === 'string' ? row.type.trim().slice(0, 64) : '',
+      name,
+      description: typeof row.description === 'string' ? row.description.slice(0, 4000) : '',
+      value: row.value === undefined ? null : row.value,
+    };
+  }
+
+  private toNamespaceDocument(name: string, version: NamespaceVersionRecord): NamespaceDocumentDto {
+    return {
+      name,
+      versionId: version._id,
+      types: version.types.map((item) => this.toNamespaceType(item)),
+      data: version.data.map((item) => this.toNamespaceData(item)),
+    };
+  }
+
+  private toNamespaceType(item: NamespaceTypeRecord): NamespaceTypeDto {
+    return {
+      id: item.id,
+      name: item.name,
+      description: item.description,
+      fields: item.fields.map((field) => this.toNamespaceField(field)),
+      source: item.source,
+    };
+  }
+
+  private toNamespaceField(field: NamespaceFieldRecord): NamespaceTypeFieldDto {
+    return {
+      id: field.id,
+      name: field.name,
+      description: field.description,
+      type: field.type,
+      ...(field.children ? { children: field.children.map((child) => this.toNamespaceField(child)) } : {}),
+    };
+  }
+
+  private toNamespaceData(item: NamespaceDataRecord): NamespaceDataDto {
+    return {
+      id: item.id,
+      type: item.type,
+      name: item.name,
+      description: item.description,
+      value: item.value,
+    };
   }
 
   private catalogOf(record: LangVersionRecord | null): ProjectLangCatalogDto {
@@ -1647,6 +1878,32 @@ export class LowcodeService implements OnApplicationBootstrap {
     };
   }
 
+  /**
+   * 空画布，或一份和组件文档控件 id 完全相同的树，不能覆盖已经有内容的页面。
+   * 组件树被原样写进页面时，id 和组件版本一致。
+   */
+  private async keepStoredPage(projectId: string, stored: PageWidget[], next: PageWidget[]): Promise<boolean> {
+    if (stored.length > 0 && next.length === 0) {
+      return true;
+    }
+    if (next.length === 0) {
+      return false;
+    }
+    const incoming = widgetIdKey(next);
+    const components = await this.mongo.listComponents(projectId);
+    for (const component of components) {
+      if (!component.currentVersionId) {
+        continue;
+      }
+      const version = await this.mongo.getComponentVersion(component.currentVersionId);
+      if (!version || version.widgets.length === 0 || widgetIdKey(version.widgets) !== incoming) {
+        continue;
+      }
+      return widgetIdKey(stored) !== incoming;
+    }
+    return false;
+  }
+
   private applyDocument(version: PageXmlDocument, next: PageXmlDocument) {
     version.widgets = next.widgets;
     if (next.style) {
@@ -1898,4 +2155,18 @@ export class LowcodeService implements OnApplicationBootstrap {
       lastModified: toIso(version.updatedAt),
     };
   }
+}
+
+function widgetIdKey(widgets: readonly PageWidget[]): string {
+  const ids: string[] = [];
+  const walk = (list: readonly PageWidget[]) => {
+    for (const widget of list) {
+      ids.push(widget.id);
+      if ('children' in widget && Array.isArray(widget.children)) {
+        walk(widget.children);
+      }
+    }
+  };
+  walk(widgets);
+  return ids.join('\n');
 }

@@ -12,6 +12,7 @@ import {
   HighlightOutlined,
   ItalicOutlined,
   PictureOutlined,
+  BoxPlotOutlined,
   RadiusSettingOutlined,
   RotateRightOutlined,
   ThunderboltOutlined,
@@ -19,10 +20,12 @@ import {
   StrikethroughOutlined,
   UnderlineOutlined,
 } from '@ant-design/icons';
-import { Button, ColorPicker, ConfigProvider, Input, InputNumber, Modal, Select, theme, Tooltip } from 'antd';
+import { Button, ColorPicker, ConfigProvider, Input, InputNumber, Modal, Select, Switch, theme, Tooltip } from 'antd';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  DEFAULT_SCROLL_HEIGHT,
+  DEFAULT_SCROLL_WIDTH,
   DEFAULT_SWIPER_HEIGHT,
   DEFAULT_SWIPER_WIDTH,
   DEFAULT_TABLE_HEADER_HEIGHT,
@@ -30,10 +33,14 @@ import {
   TABLE_LINE_STYLES,
   compactTableLine,
   compactTableLines,
+  FLEX_ALIGN_ITEMS,
+  FLEX_DIRECTIONS,
+  FLEX_JUSTIFY_CONTENTS,
   OVERFLOW_MODES,
   POSITION_MODES,
   TABLE_ALIGNS,
   TABLE_VALIGNS,
+  compactFlexContainer,
   isCopyBinding,
   hasWidgetEvents,
   isLoopConfigured,
@@ -41,6 +48,10 @@ import {
   widgetEventSpecs,
   sanitizeWidgetStyle,
   type ComponentProp,
+  type FlexAlignItems,
+  type FlexContainerStyle,
+  type FlexDirection,
+  type FlexJustifyContent,
   type OverflowMode,
   type PageI18n,
   type PageVariable,
@@ -74,7 +85,7 @@ type ShadowValue = {
 const DEFAULT_SHADOW: ShadowValue = { x: 0, y: 0, blur: 4, color: '' };
 const DEFAULT_BUTTON_BACKGROUND = '#ffffff';
 
-export type BoxGroup = 'content' | 'margin' | 'padding' | 'radius' | 'border' | 'size' | 'overflow' | 'position' | 'rotate' | 'loop' | 'events';
+export type BoxGroup = 'content' | 'margin' | 'padding' | 'radius' | 'border' | 'size' | 'overflow' | 'position' | 'rotate' | 'loop' | 'events' | 'flex';
 
 export type TableCommand =
   | 'add-column'
@@ -107,7 +118,7 @@ export function isBoxGroupAllowed(type: PageWidget['type'], group: BoxGroup) {
     return group === 'padding' || group === 'radius';
   }
   if (group === 'overflow') {
-    return type === 'text' || type === 'input' || type === 'flex' || type === 'table';
+    return type === 'table' || type === 'scroll';
   }
   if (
     type === 'swiper-item' &&
@@ -286,6 +297,123 @@ function ColorIconPicker({
   );
 }
 
+const FLEX_DIRECTION_LABEL: Record<FlexDirection, string> = {
+  row: 'flexDirRow',
+  'row-reverse': 'flexDirRowReverse',
+  column: 'flexDirColumn',
+  'column-reverse': 'flexDirColumnReverse',
+};
+
+const FLEX_JUSTIFY_LABEL: Record<FlexJustifyContent, string> = {
+  'flex-start': 'flexAlignStart',
+  'flex-end': 'flexAlignEnd',
+  center: 'flexAlignCenter',
+  'space-between': 'flexAlignBetween',
+  'space-around': 'flexAlignAround',
+  'space-evenly': 'flexAlignEvenly',
+};
+
+const FLEX_ALIGN_LABEL: Record<FlexAlignItems, string> = {
+  stretch: 'flexAlignStretch',
+  'flex-start': 'flexAlignStart',
+  'flex-end': 'flexAlignEnd',
+  center: 'flexAlignCenter',
+  baseline: 'flexAlignBaseline',
+};
+
+function listed<T extends string>(values: readonly T[], value: string | undefined, fallback: T): T {
+  return (values as readonly string[]).includes(value ?? '') ? (value as T) : fallback;
+}
+
+function gapAmount(value: number | string | undefined) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function FlexControlPanel({
+  flex,
+  disabled,
+  popupContainer,
+  onChange,
+}: {
+  flex?: FlexContainerStyle;
+  disabled?: boolean;
+  popupContainer: () => HTMLElement;
+  onChange: (next: Partial<FlexContainerStyle>) => void;
+}) {
+  const { t } = useTranslation();
+  const current = flex ?? {};
+
+  function enumRow<T extends string>(label: string, value: T, options: readonly T[], labels: Record<T, string>, write: (value: T) => void) {
+    return (
+      <div className="flex-control-row is-select">
+        <span className="style-box-row-label">{label}</span>
+        <Select
+          size="small"
+          disabled={disabled}
+          value={value}
+          popupMatchSelectWidth={false}
+          getPopupContainer={popupContainer}
+          onMouseDown={(event) => event.stopPropagation()}
+          onChange={write}
+          options={options.map((item) => ({ value: item, label: t(`lowcode.${labels[item]}`) }))}
+        />
+      </div>
+    );
+  }
+
+  function gapRow(label: string, value: number | string | undefined, write: (value: number | undefined) => void) {
+    return (
+      <div className="flex-control-row">
+        <span className="style-box-row-label">{label}</span>
+        <InputNumber
+          size="small"
+          min={0}
+          disabled={disabled}
+          value={gapAmount(value)}
+          onChange={(next) => write(next ?? undefined)}
+        />
+        <Select
+          size="small"
+          disabled={disabled}
+          value="px"
+          popupMatchSelectWidth={false}
+          getPopupContainer={popupContainer}
+          onMouseDown={(event) => event.stopPropagation()}
+          options={[{ value: 'px', label: 'px' }]}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-control-panel">
+      {enumRow(
+        t('lowcode.flexArrange'),
+        listed(FLEX_DIRECTIONS, current.flexDirection, 'row'),
+        FLEX_DIRECTIONS,
+        FLEX_DIRECTION_LABEL,
+        (flexDirection) => onChange({ flexDirection: flexDirection === 'row' ? undefined : flexDirection }),
+      )}
+      {enumRow(
+        t('lowcode.flexJustify'),
+        listed(FLEX_JUSTIFY_CONTENTS, current.justifyContent, 'flex-start'),
+        FLEX_JUSTIFY_CONTENTS,
+        FLEX_JUSTIFY_LABEL,
+        (justifyContent) => onChange({ justifyContent: justifyContent === 'flex-start' ? undefined : justifyContent }),
+      )}
+      {enumRow(
+        t('lowcode.flexAlignItems'),
+        listed(FLEX_ALIGN_ITEMS, current.alignItems, 'stretch'),
+        FLEX_ALIGN_ITEMS,
+        FLEX_ALIGN_LABEL,
+        (alignItems) => onChange({ alignItems: alignItems === 'stretch' ? undefined : alignItems }),
+      )}
+      {gapRow(t('lowcode.flexRowGapShort'), current.rowGap, (rowGap) => onChange({ rowGap }))}
+      {gapRow(t('lowcode.flexColumnGapShort'), current.columnGap, (columnGap) => onChange({ columnGap }))}
+    </div>
+  );
+}
+
 export function WidgetStyleBubble({
   widget,
   style,
@@ -298,6 +426,7 @@ export function WidgetStyleBubble({
   onEventsChange,
   onStateFnChange,
   onOpenInspector,
+  onScrollChange,
   i18nCatalog,
   projectId,
   variables,
@@ -308,6 +437,7 @@ export function WidgetStyleBubble({
   table,
   onTableLines,
   onStyleDelta,
+  onFlexChange,
 }: {
   widget: PageWidget;
   style?: WidgetStyle;
@@ -322,6 +452,7 @@ export function WidgetStyleBubble({
   onEventsChange?: (events: PageWidget['events']) => void;
   onStateFnChange?: (stateFn: string | undefined, hoverStateId?: string) => void;
   onOpenInspector: () => void;
+  onScrollChange?: (axis: 'scrollX' | 'scrollY', enabled: boolean) => void;
   i18nCatalog?: PageI18n;
   variables?: PageVariable[];
   componentProps?: ComponentProp[];
@@ -330,6 +461,7 @@ export function WidgetStyleBubble({
   ownKeys?: Set<string>;
   table?: TableBubbleModel;
   onTableLines?: (lines: TableLines | undefined) => void;
+  onFlexChange?: (flex: FlexContainerStyle | undefined) => void;
 }) {
   const { t, i18n } = useTranslation();
   const modifier = modifierShortcutLabel();
@@ -411,6 +543,13 @@ export function WidgetStyleBubble({
     onChange(sanitizeWidgetStyle(widget.type, merged));
   }
 
+  function patchFlex(next: Partial<FlexContainerStyle>) {
+    if (disabled || !onFlexChange || widget.type !== 'flex') {
+      return;
+    }
+    onFlexChange(compactFlexContainer({ ...(widget.flex ?? {}), ...next }));
+  }
+
   function patchTableLine(kind: keyof TableLines, partial: Partial<TableLine>) {
     if (disabled || widget.type !== 'table' || !onTableLines) {
       return;
@@ -485,18 +624,18 @@ export function WidgetStyleBubble({
                 onContinue={() => popupProps('font-family').onOpenChange(true)}
               >
                 <Select
-                size="small"
-                className={['widget-style-bubble-font', inheritedClass('fontFamily')].filter(Boolean).join(' ')}
-                allowClear
-                value={display.fontFamily}
-                placeholder={t('lowcode.styleFontDefault')}
-                popupMatchSelectWidth={false}
-                getPopupContainer={() => document.body}
-                onMouseDown={(event) => event.stopPropagation()}
-                {...popupProps('font-family')}
-                options={fontFamilyOptions(i18n.language)}
-                onChange={(fontFamily) => patch({ fontFamily: fontFamily || undefined })}
-              />
+                  size="small"
+                  className={['widget-style-bubble-font', inheritedClass('fontFamily')].filter(Boolean).join(' ')}
+                  allowClear
+                  value={display.fontFamily}
+                  placeholder={t('lowcode.styleFontDefault')}
+                  popupMatchSelectWidth={false}
+                  getPopupContainer={() => document.body}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  {...popupProps('font-family')}
+                  options={fontFamilyOptions(i18n.language)}
+                  onChange={(fontFamily) => patch({ fontFamily: fontFamily || undefined })}
+                />
               </BindingLock>
               <Tooltip title={`${t('lowcode.styleFontSize')} (${modifier}+. / ${modifier}+-)`}>
                 <InputNumber
@@ -638,22 +777,22 @@ export function WidgetStyleBubble({
             </>
           ) : null}
           {widget.type !== 'tr' ? (
-          <ColorIconPicker
-            title={t('lowcode.styleBackground')}
-            kind="fill"
-            allowClear={widget.type !== 'button'}
-            color={display.background || (widget.type === 'button' ? DEFAULT_BUTTON_BACKGROUND : undefined)}
-            bound={isInherited('background') ? undefined : current.background}
-            buttonClassName={inheritedClass('background')}
-            resetKey={widget.id}
-            getPopupContainer={popupContainer}
-            {...popupProps('background')}
-            onChange={(css, cleared) =>
-              patch({
-                background: cleared && widget.type === 'button' ? DEFAULT_BUTTON_BACKGROUND : css,
-              })
-            }
-          />
+            <ColorIconPicker
+              title={t('lowcode.styleBackground')}
+              kind="fill"
+              allowClear={widget.type !== 'button'}
+              color={display.background || (widget.type === 'button' ? DEFAULT_BUTTON_BACKGROUND : undefined)}
+              bound={isInherited('background') ? undefined : current.background}
+              buttonClassName={inheritedClass('background')}
+              resetKey={widget.id}
+              getPopupContainer={popupContainer}
+              {...popupProps('background')}
+              onChange={(css, cleared) =>
+                patch({
+                  background: cleared && widget.type === 'button' ? DEFAULT_BUTTON_BACKGROUND : css,
+                })
+              }
+            />
           ) : null}
           {isBoxGroupAllowed(widget.type, 'size') ? (
             <Tooltip title={`${t('lowcode.styleSize')} (${modifier}+T)`}>
@@ -761,6 +900,16 @@ export function WidgetStyleBubble({
               />
             </Tooltip>
           ) : null}
+          {
+            // 弹性盒控制
+            widget.type === 'flex' ? <Tooltip title={t('lowcode.iconsFlexControl')}>
+              <Button size="small"
+                type={openGroup === 'flex' ? 'primary' : 'text'}
+                icon={<BoxPlotOutlined />}
+                onClick={() => toggleGroup('flex')}
+              />
+            </Tooltip> : null
+          }
           <Tooltip title={t('lowcode.styleSettings')}>
             <Button
               size="small"
@@ -770,6 +919,7 @@ export function WidgetStyleBubble({
             />
           </Tooltip>
         </div>
+        {/* 属性详细设置面板 */}
         {openGroup ? (
           <div className="widget-style-bubble-panel">
             {openGroup === 'content' && onTextChange ? (
@@ -796,8 +946,14 @@ export function WidgetStyleBubble({
                   <SizeField
                     label={t('lowcode.styleWidth')}
                     size={display.width}
-                    allowFit={widget.type !== 'swiper'}
-                    fallback={widget.type === 'swiper' ? DEFAULT_SWIPER_WIDTH : undefined}
+                    allowFit={widget.type !== 'swiper' && widget.type !== 'scroll'}
+                    fallback={
+                      widget.type === 'swiper'
+                        ? DEFAULT_SWIPER_WIDTH
+                        : widget.type === 'scroll'
+                          ? DEFAULT_SCROLL_WIDTH
+                          : undefined
+                    }
                     onChange={(width) => patch({ width })}
                   />
                 </Inherited>
@@ -805,14 +961,42 @@ export function WidgetStyleBubble({
                   <SizeField
                     label={t('lowcode.styleHeight')}
                     size={display.height}
-                    allowFit={widget.type !== 'swiper'}
-                    fallback={widget.type === 'swiper' ? DEFAULT_SWIPER_HEIGHT : undefined}
+                    allowFit={widget.type !== 'swiper' && widget.type !== 'scroll'}
+                    fallback={
+                      widget.type === 'swiper'
+                        ? DEFAULT_SWIPER_HEIGHT
+                        : widget.type === 'scroll'
+                          ? DEFAULT_SCROLL_HEIGHT
+                          : undefined
+                    }
                     onChange={(height) => patch({ height })}
                   />
                 </Inherited>
               </div>
             ) : null}
-            {openGroup === 'overflow' && isBoxGroupAllowed(widget.type, 'overflow') ? (
+            {openGroup === 'overflow' && widget.type === 'scroll' ? (
+              <div className="style-size-panel">
+                <div className="scroll-axis-row">
+                  <span>{t('lowcode.scrollX')}</span>
+                  <Switch
+                    size="small"
+                    checked={widget.scrollX !== false}
+                    disabled={disabled}
+                    onChange={(enabled) => onScrollChange?.('scrollX', enabled)}
+                  />
+                </div>
+                <div className="scroll-axis-row">
+                  <span>{t('lowcode.scrollY')}</span>
+                  <Switch
+                    size="small"
+                    checked={widget.scrollY !== false}
+                    disabled={disabled}
+                    onChange={(enabled) => onScrollChange?.('scrollY', enabled)}
+                  />
+                </div>
+              </div>
+            ) : null}
+            {openGroup === 'overflow' && widget.type === 'table' ? (
               <div className="style-size-panel">
                 <Select
                   size="small"
@@ -820,21 +1004,12 @@ export function WidgetStyleBubble({
                   value={
                     (OVERFLOW_MODES as readonly string[]).includes(display.overflow ?? '')
                       ? (display.overflow as OverflowMode)
-                      : widget.type === 'table'
-                        ? 'auto'
-                        : 'visible'
+                      : 'auto'
                   }
                   getPopupContainer={popupContainer}
                   onChange={(overflow: OverflowMode) =>
                     patch({
-                      overflow:
-                        widget.type === 'table'
-                          ? overflow === 'auto'
-                            ? undefined
-                            : overflow
-                          : overflow === 'visible'
-                            ? undefined
-                            : overflow,
+                      overflow: overflow === 'auto' ? undefined : overflow,
                     })
                   }
                   options={OVERFLOW_MODES.map((value) => ({
@@ -842,7 +1017,7 @@ export function WidgetStyleBubble({
                     label: t(`lowcode.styleOverflow${value.charAt(0).toUpperCase()}${value.slice(1)}`),
                   }))}
                 />
-                {widget.type === 'table' && table?.onHeaderHeight ? (
+                {table?.onHeaderHeight ? (
                   <Tooltip title={t('lowcode.tableHeaderHeight')}>
                     <InputNumber
                       size="small"
@@ -1181,6 +1356,14 @@ export function WidgetStyleBubble({
                 disabled={disabled}
                 popupContainer={popupContainer}
                 onChange={onLoopChange}
+              />
+            ) : null}
+            {openGroup === 'flex' && widget.type === 'flex' ? (
+              <FlexControlPanel
+                flex={widget.flex}
+                disabled={disabled}
+                popupContainer={popupContainer}
+                onChange={patchFlex}
               />
             ) : null}
           </div>

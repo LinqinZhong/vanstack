@@ -128,6 +128,34 @@ export function findWidget(widgets: PageWidget[], id: string | null | undefined)
   return null;
 }
 
+export function findOwningSwiper(
+  widgets: PageWidget[],
+  id: string | null | undefined,
+): Extract<PageWidget, { type: 'swiper' }> | null {
+  let current = findWidget(widgets, id);
+  while (current) {
+    if (current.type === 'swiper') {
+      return current;
+    }
+    current = findParentWidget(widgets, current.id);
+  }
+  return null;
+}
+
+export function findOwningScroll(
+  widgets: PageWidget[],
+  id: string | null | undefined,
+): Extract<PageWidget, { type: 'scroll' }> | null {
+  let current = findWidget(widgets, id);
+  while (current) {
+    if (current.type === 'scroll') {
+      return current;
+    }
+    current = findParentWidget(widgets, current.id);
+  }
+  return null;
+}
+
 export function findParentWidget(widgets: PageWidget[], id: string | null | undefined): PageWidget | null {
   if (!id) {
     return null;

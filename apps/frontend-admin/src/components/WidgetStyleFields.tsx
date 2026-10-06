@@ -1,7 +1,7 @@
 import { ColorPicker, Form, InputNumber, Select, Switch } from 'antd';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { compactSize, convertAngle, compactAngle, DEFAULT_SWIPER_HEIGHT, DEFAULT_SWIPER_WIDTH, isCopyBinding, sanitizeWidgetStyle, ANGLE_UNITS, type AngleUnit, type AngleValue, type PageWidget, type SizeMode, type SizeValue, type WidgetStyle } from '@vanstack/xml';
+import { compactSize, convertAngle, compactAngle, DEFAULT_SCROLL_HEIGHT, DEFAULT_SCROLL_WIDTH, DEFAULT_SWIPER_HEIGHT, DEFAULT_SWIPER_WIDTH, isCopyBinding, sanitizeWidgetStyle, ANGLE_UNITS, type AngleUnit, type AngleValue, type PageWidget, type SizeMode, type SizeValue, type WidgetStyle } from '@vanstack/xml';
 import { StyleBoxEdges, pxFromLength } from './StyleBoxEdges';
 
 type ShadowValue = {
@@ -344,16 +344,24 @@ export function WidgetStyleFields({
             label={t('lowcode.styleWidth')}
             size={current.width}
             disabled={disabled}
-            allowFit={widgetType !== 'swiper'}
-            fallback={widgetType === 'swiper' ? DEFAULT_SWIPER_WIDTH : undefined}
+            allowFit={widgetType !== 'swiper' && widgetType !== 'scroll'}
+            fallback={
+              widgetType === 'swiper' ? DEFAULT_SWIPER_WIDTH : widgetType === 'scroll' ? DEFAULT_SCROLL_WIDTH : undefined
+            }
             onChange={(width) => patch({ width })}
           />
           <SizeField
             label={t('lowcode.styleHeight')}
             size={current.height}
             disabled={disabled}
-            allowFit={widgetType !== 'swiper'}
-            fallback={widgetType === 'swiper' ? DEFAULT_SWIPER_HEIGHT : undefined}
+            allowFit={widgetType !== 'swiper' && widgetType !== 'scroll'}
+            fallback={
+              widgetType === 'swiper'
+                ? DEFAULT_SWIPER_HEIGHT
+                : widgetType === 'scroll'
+                  ? DEFAULT_SCROLL_HEIGHT
+                  : undefined
+            }
             onChange={(height) => patch({ height })}
           />
         </>

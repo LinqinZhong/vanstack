@@ -1,12 +1,13 @@
 import { DeleteOutlined, EditOutlined, ExpandOutlined, GlobalOutlined, PlusOutlined, SettingOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons';
 import { Button, Card, ConfigProvider, Empty, Input, Modal, Segmented, Select, Spin, Switch, Tooltip, Typography, message, theme } from 'antd';
-import CodeMirror from '@uiw/react-codemirror';
+import { ScriptEditor } from '../../../components/ScriptEditor';
 import { javascript } from '@codemirror/lang-javascript';
 import { useEffect, useState, type Dispatch, type MouseEvent, type PointerEvent, type RefObject, type SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 import { applyTestValues, buildPropsRecord, evaluateDataExpression, resolvePageData, type ComponentEmit, type ComponentProp, type PageI18n, type PageMethod, type PageTestData, type PageVariable, type PageWidget, type WidgetEvents } from '@vanstack/xml';
 import { PAGE_EVENT_SPECS } from '@vanstack/xml';
 import { ComponentEmitsPanel, ComponentPropsPanel } from '../../../components/ComponentContractPanel';
+import { formatTypeLabel, useNamespaceCatalog } from '../../../components/TypeKindFields';
 import { PageDataPanel } from '../../../components/PageDataPanel';
 import { PageMethodPanel } from '../../../components/PageMethodPanel';
 import { WidgetEventPanel } from '../../../components/WidgetEventPanel';
@@ -27,7 +28,10 @@ import {
   type ViewingByOwner,
   type VisibleWidgetState,
 } from '../../../utils/widgetStates';
+import { formatDataLiteral, tryParseDataLiteral } from '../../../utils/dataLiteral';
 import { widgetCanvasLabel, ZOOM_STEP, type CanvasMode, type CenterTab, type ViewTransform } from '../helpers';
+
+const previewEditorExtensions = [javascript()];
 
 function formatActual(type: string, value: unknown) {
   if (type === 'bool') {
@@ -36,7 +40,7 @@ function formatActual(type: string, value: unknown) {
   if (type === 'num') {
     return typeof value === 'number' && Number.isFinite(value) ? String(value) : '0';
   }
-  if (type === 'str' || type === 'widget') {
+  if (type === 'str' || type === 'icon' || type === 'image' || type === 'widget') {
     return typeof value === 'string' ? value : '';
   }
   return compactJson(value);
@@ -44,7 +48,7 @@ function formatActual(type: string, value: unknown) {
 
 function compactJson(value: unknown) {
   try {
-    return JSON.stringify(value) ?? '';
+    return formatDataLiteral(value);
   } catch {
     return '';
   }
@@ -52,10 +56,32 @@ function compactJson(value: unknown) {
 
 function prettyJson(value: unknown) {
   try {
-    return JSON.stringify(value, null, 2) ?? '';
+    return formatDataLiteral(value, 2);
   } catch {
     return '';
   }
+}
+
+function literalValue(source: string | undefined): unknown | undefined {
+  if (!source) {
+    return undefined;
+  }
+  return tryParseDataLiteral(source);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function storedLiteral(draft: string, type: string): string | null {
+  const parsed = tryParseDataLiteral(draft);
+  if (type === 'arr' && Array.isArray(parsed)) {
+    return formatDataLiteral(parsed);
+  }
+  if (type === 'obj' && isPlainRecord(parsed)) {
+    return formatDataLiteral(parsed);
+  }
+  return draft.trim() ? draft : null;
 }
 
 function TestValueEditor({
@@ -122,6 +148,7 @@ type ScopeRow = {
   typeLabel: string;
   display: string;
   value: unknown;
+  source?: string;
   readOnly?: boolean;
 };
 
@@ -159,15 +186,28 @@ function PreviewScopeSection({
   const [editor, setEditor] = useState<ScopeEditor | null>(null);
   const [openArrays, setOpenArrays] = useState<Record<string, boolean>>({});
 
+  function rowItems(row: ScopeRow): unknown[] {
+    const parsed = literalValue(row.source);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+    return Array.isArray(row.value) ? row.value : [];
+  }
+
   function openValue(row: ScopeRow) {
-    const source = row.type === 'arr' || row.type === 'obj' ? prettyJson(row.value) : row.display;
+    const parsed = literalValue(row.source);
+    const fromSource =
+      (row.type === 'arr' && Array.isArray(parsed)) || (row.type === 'obj' && isPlainRecord(parsed));
+    const source = row.type === 'arr' || row.type === 'obj'
+      ? prettyJson(fromSource ? parsed : row.value)
+      : row.display;
     setEditor({ name: row.name, type: row.type, kind: 'value', draft: source, items: [] });
   }
 
   function commitItems(name: string, items: unknown[]) {
     let text = '';
     try {
-      text = JSON.stringify(items) ?? '';
+      text = formatDataLiteral(items);
     } catch {
       message.error(t('lowcode.dataInvalidLiteral'));
       return false;
@@ -180,15 +220,26 @@ function PreviewScopeSection({
       return;
     }
     if (editor.kind === 'value') {
-      if (onCommit(editor.name, editor.type, editor.draft)) {
+      const draft = editor.type === 'arr' || editor.type === 'obj' ? storedLiteral(editor.draft, editor.type) : editor.draft;
+      if (draft == null) {
+        message.error(t('lowcode.dataInvalidLiteral'));
+        return;
+      }
+      if (onCommit(editor.name, editor.type, draft)) {
         setEditor(null);
       }
       return;
     }
-    let value: unknown;
-    try {
-      value = evaluateDataExpression(editor.draft, dataScope, propScope, queryScope);
-    } catch {
+    let value = tryParseDataLiteral(editor.draft);
+    if (value === undefined && editor.draft.trim() !== '') {
+      try {
+        value = evaluateDataExpression(editor.draft, dataScope, propScope, queryScope);
+      } catch {
+        message.error(t('lowcode.dataInvalidLiteral'));
+        return;
+      }
+    }
+    if (value === undefined && editor.draft.trim() === '') {
       message.error(t('lowcode.dataInvalidLiteral'));
       return;
     }
@@ -220,7 +271,7 @@ function PreviewScopeSection({
       ) : (
         <ul className="preview-scope-list">
           {rows.map((row) => {
-            const items = row.type === 'arr' && Array.isArray(row.value) ? row.value : [];
+            const items = row.type === 'arr' ? rowItems(row) : [];
             const canFold = items.length > 5;
             const folded = canFold && !openArrays[row.name];
             const shown = folded ? items.slice(0, 3) : items;
@@ -360,11 +411,10 @@ function PreviewScopeSection({
         width={640}
       >
         {editor ? (
-          <CodeMirror
+          <ScriptEditor
             value={editor.draft}
             height="240px"
-            theme="light"
-            extensions={[javascript()]}
+            extensions={previewEditorExtensions}
             onChange={(draft) => setEditor((current) => (current ? { ...current, draft } : current))}
           />
         ) : null}
@@ -406,6 +456,8 @@ type CanvasWorkspaceProps = {
   previewing: boolean;
   canvasSettling: boolean;
   tableEditId: string | null;
+  scrollEditId: string | null;
+  swiperEditId: string | null;
   sendPreview: () => void;
   showStyleChrome: boolean;
   selectedWidget: PageWidget | null;
@@ -488,6 +540,8 @@ export function CanvasWorkspace({
   previewing,
   canvasSettling,
   tableEditId,
+  scrollEditId,
+  swiperEditId,
   sendPreview,
   showStyleChrome,
   selectedWidget,
@@ -546,6 +600,8 @@ export function CanvasWorkspace({
   endCoalesce,
 }: CanvasWorkspaceProps) {
   const { t } = useTranslation();
+  const namespaces = useNamespaceCatalog(projectId);
+  const typeLabel = (type: string, of?: string) => formatTypeLabel(type, of, (key) => t(`lowcode.propType.${key}`, { defaultValue: key }));
   const selectedCanvasLabel = selectedWidget ? widgetCanvasLabel(selectedWidget, t) : null;
   const schemaProps = buildPropsRecord(componentProps);
   const previewPropScope = buildPropsRecord(applyTestValues(componentProps, testData?.props));
@@ -661,8 +717,9 @@ export function CanvasWorkspace({
                     rows={componentProps.map((prop) => ({
                       name: prop.name,
                       type: prop.type,
-                      typeLabel: t(`lowcode.propType.${prop.type}`),
+                      typeLabel: typeLabel(prop.type, prop.of),
                       value: previewPropScope[prop.name],
+                      source: testData?.props?.[prop.name] ?? prop.value,
                       display: formatActual(prop.type, previewPropScope[prop.name]),
                     }))}
                     onCommit={(name, type, text) => commitPreviewTest('props', name, type, text)}
@@ -679,8 +736,9 @@ export function CanvasWorkspace({
                     rows={pageQuery.map((item) => ({
                       name: item.name,
                       type: item.type,
-                      typeLabel: t(`lowcode.propType.${item.type}`),
+                      typeLabel: typeLabel(item.type, item.of),
                       value: previewQueryScope[item.name],
+                      source: testData?.query?.[item.name] ?? item.value,
                       display: formatActual(item.type, previewQueryScope[item.name]),
                     }))}
                     onCommit={(name, type, text) => commitPreviewTest('query', name, type, text)}
@@ -695,11 +753,9 @@ export function CanvasWorkspace({
                   rows={pageData.map((variable) => ({
                     name: variable.name,
                     type: variable.type,
-                    typeLabel:
-                      variable.type === 'widget'
-                        ? t('lowcode.dataTypeWidget')
-                        : t(`lowcode.propType.${variable.type}`, { defaultValue: variable.type }),
+                    typeLabel: typeLabel(variable.type, variable.of),
                     value: previewDataScope[variable.name],
+                    source: previewDataEdits?.[variable.name] ?? testData?.data?.[variable.name] ?? variable.value,
                     display: formatActual(variable.type, previewDataScope[variable.name]),
                     readOnly: Boolean(variable.computed),
                   }))}
@@ -732,7 +788,7 @@ export function CanvasWorkspace({
             </div>
             <div
               ref={phoneFrameRef}
-              className={['phone-page-frame', !previewing && tableEditId ? 'is-table-editing' : '']
+              className={['phone-page-frame', !previewing && tableEditId ? 'is-table-editing' : '', !previewing && scrollEditId ? 'is-scroll-editing' : '', !previewing && swiperEditId ? 'is-swiper-editing' : '']
                 .filter(Boolean)
                 .join(' ')}
             />
@@ -813,6 +869,17 @@ export function CanvasWorkspace({
                     }
                     onStateFnChange={(stateFn, hoverStateId) =>
                       updateWidget(bubbleWidget.id, { stateFn, hoverStateId }, `stateFn:${bubbleWidget.id}`)
+                    }
+                    onFlexChange={
+                      bubbleWidget.type === 'flex'
+                        ? (flex) => updateWidget(bubbleWidget.id, { flex }, `edit:${bubbleWidget.id}:flex`)
+                        : undefined
+                    }
+                    onScrollChange={
+                      bubbleWidget.type === 'scroll'
+                        ? (axis, enabled) =>
+                            updateWidget(bubbleWidget.id, { [axis]: enabled }, `edit:${bubbleWidget.id}:${axis}`)
+                        : undefined
                     }
                     onOpenInspector={() => setInspectorOpen(true)}
                     onToolbarPopupChange={(open) => {
@@ -964,6 +1031,7 @@ export function CanvasWorkspace({
             {componentMode ? (
               <ComponentPropsPanel
                 props={componentProps}
+                namespaces={namespaces}
                 disabled={readOnly}
                 onChange={commitComponentProps}
                 onEndCoalesce={endCoalesce}
@@ -984,6 +1052,7 @@ export function CanvasWorkspace({
               propNames={componentMode ? componentProps.map((item) => item.name) : []}
               queryNames={componentMode ? [] : pageQuery.map((item) => item.name)}
               componentProps={componentMode ? componentProps : []}
+              namespaces={namespaces}
               sectionTitle={componentMode ? t('lowcode.dataSection') : undefined}
               disabled={readOnly}
               onChange={commitPageData}

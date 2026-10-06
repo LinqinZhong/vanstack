@@ -1,6 +1,6 @@
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
-import CodeMirror from '@uiw/react-codemirror';
 import { javascript } from '@codemirror/lang-javascript';
+import { ScriptEditor } from './ScriptEditor';
 import { Button, ConfigProvider, Form, Input, Modal, Popconfirm, Select, Switch, Table, message } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { useMemo, useState } from 'react';
@@ -290,7 +290,7 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
   return (
     <div className="page-methods-panel" onMouseDown={(event) => event.stopPropagation()}>
       <div className="page-data-toolbar">
-        <Button size="small" icon={<PlusOutlined />} disabled={disabled || !projectId} onClick={openCreate}>
+        <Button className="create-method-button" size="small" icon={<PlusOutlined />} disabled={disabled || !projectId} onClick={openCreate}>
           {t('lowcode.methodCreate')}
         </Button>
       </div>
@@ -381,16 +381,13 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
                 />
               </Form.Item>
               <Form.Item label={t('lowcode.methodCode')} required>
-                <div className="page-data-code">
-                  <CodeMirror
-                    value={draft.code}
-                    height="280px"
-                    theme="light"
-                    extensions={editorExtensions}
-                    editable={!disabled}
-                    onChange={(code) => setDraft((current) => (current ? { ...current, code } : current))}
-                  />
-                </div>
+                <ScriptEditor
+                  value={draft.code}
+                  height="280px"
+                  extensions={editorExtensions}
+                  editable={!disabled}
+                  onChange={(code) => setDraft((current) => (current ? { ...current, code } : current))}
+                />
               </Form.Item>
             </Form>
           ) : null}

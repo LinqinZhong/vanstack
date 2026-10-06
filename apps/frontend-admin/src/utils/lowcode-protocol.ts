@@ -25,6 +25,7 @@ export type LowcodePreviewMessage = {
   locale: string | null;
   catalog?: PageI18n;
   projectId?: string | null;
+  icons?: Record<string, string>;
   pageId?: string | null;
   query?: Record<string, unknown>;
   viewingOwnerId: string | null;
@@ -34,6 +35,8 @@ export type LowcodePreviewMessage = {
   tableLayout?: boolean;
   tableChrome?: TableChromeState | null;
   tableEditing?: boolean;
+  scrollEditing?: boolean;
+  swiperEditing?: boolean;
   settle?: number;
   /** 组件画布：内容在屏幕区域内居中，父页不再画屏幕框。 */
   centerContent?: boolean;
@@ -67,6 +70,18 @@ export type LowcodeTableSelectMessage = {
 export type LowcodeTableModeMessage = {
   source: typeof LOWCODE_MESSAGE_SOURCE;
   type: 'table-mode';
+  action: 'enter' | 'exit';
+};
+
+export type LowcodeScrollModeMessage = {
+  source: typeof LOWCODE_MESSAGE_SOURCE;
+  type: 'scroll-mode';
+  action: 'enter' | 'exit';
+};
+
+export type LowcodeSwiperModeMessage = {
+  source: typeof LOWCODE_MESSAGE_SOURCE;
+  type: 'swiper-mode';
   action: 'enter' | 'exit';
 };
 
@@ -228,6 +243,13 @@ export type LowcodeModelValueMessage = {
   done?: boolean;
 };
 
+export type LowcodeQueryValueMessage = {
+  source: typeof LOWCODE_MESSAGE_SOURCE;
+  type: 'query-value';
+  name: string;
+  value: unknown;
+};
+
 export type LowcodeNavigateMessage = {
   source: typeof LOWCODE_MESSAGE_SOURCE;
   type: 'navigate';
@@ -243,6 +265,8 @@ export type LowcodeMessage =
   | LowcodeSelectMessage
   | LowcodeTableSelectMessage
   | LowcodeTableModeMessage
+  | LowcodeScrollModeMessage
+  | LowcodeSwiperModeMessage
   | LowcodeTableCommandMessage
   | LowcodeTableFreezeMessage
   | LowcodeTableResizeMessage
@@ -261,6 +285,7 @@ export type LowcodeMessage =
   | LowcodeWidgetBoxMessage
   | LowcodeCanvasSettledMessage
   | LowcodeModelValueMessage
+  | LowcodeQueryValueMessage
   | LowcodeNavigateMessage;
 
 const MESSAGE_TYPES = new Set([
@@ -269,6 +294,8 @@ const MESSAGE_TYPES = new Set([
   'select',
   'table-select',
   'table-mode',
+  'scroll-mode',
+  'swiper-mode',
   'table-command',
   'table-freeze',
   'table-resize',
@@ -288,6 +315,7 @@ const MESSAGE_TYPES = new Set([
   'widget-box',
   'canvas-settled',
   'model-value',
+  'query-value',
   'navigate',
 ]);
 

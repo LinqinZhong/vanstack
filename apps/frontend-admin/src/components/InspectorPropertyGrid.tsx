@@ -25,6 +25,8 @@ import {
   parseBoxLength,
   parseAngle,
   boxLengthsEqual,
+  DEFAULT_SCROLL_HEIGHT,
+  DEFAULT_SCROLL_WIDTH,
   DEFAULT_SWIPER_HEIGHT,
   DEFAULT_SWIPER_WIDTH,
   isCopyBinding,
@@ -902,7 +904,7 @@ function acceptComponentArg(type: ComponentPropType, raw: string): string | null
   if (isCopyBinding(trimmed)) {
     return trimmed;
   }
-  if (type === 'str') {
+  if (type === 'str' || type === 'icon' || type === 'image') {
     return trimmed;
   }
   if (type === 'num') {
@@ -1121,6 +1123,7 @@ export function WidgetPropertyInspector({
       value: widget.src,
       picker: 'icon',
       category: 'basic',
+      placeholder: t('lowcode.iconPath'),
       onChange: (raw) => {
         onPatch({ src: raw }, `edit:${widget.id}:src`);
         return true;
@@ -1320,11 +1323,17 @@ export function WidgetPropertyInspector({
     if (widget.type !== 'icon') items.push(
       {
         key: 'width',
-        value: formatSize(style.width) || (widget.type === 'swiper' ? formatSize(DEFAULT_SWIPER_WIDTH) : ''),
+        value:
+          formatSize(style.width) ||
+          (widget.type === 'swiper'
+            ? formatSize(DEFAULT_SWIPER_WIDTH)
+            : widget.type === 'scroll'
+              ? formatSize(DEFAULT_SCROLL_WIDTH)
+              : ''),
         onChange: (raw) => {
-          if (widget.type === 'swiper') {
+          if (widget.type === 'swiper' || widget.type === 'scroll') {
             const parsed = parseSize(raw);
-            if (parsed === false || parsed == null) {
+            if (parsed === false || parsed == null || (widget.type === 'scroll' && typeof parsed === 'string')) {
               return false;
             }
             return accepted(parsed, (width) => patchStyle({ width }));
@@ -1334,11 +1343,17 @@ export function WidgetPropertyInspector({
       },
       {
         key: 'height',
-        value: formatSize(style.height) || (widget.type === 'swiper' ? formatSize(DEFAULT_SWIPER_HEIGHT) : ''),
+        value:
+          formatSize(style.height) ||
+          (widget.type === 'swiper'
+            ? formatSize(DEFAULT_SWIPER_HEIGHT)
+            : widget.type === 'scroll'
+              ? formatSize(DEFAULT_SCROLL_HEIGHT)
+              : ''),
         onChange: (raw) => {
-          if (widget.type === 'swiper') {
+          if (widget.type === 'swiper' || widget.type === 'scroll') {
             const parsed = parseSize(raw);
-            if (parsed === false || parsed == null) {
+            if (parsed === false || parsed == null || (widget.type === 'scroll' && typeof parsed === 'string')) {
               return false;
             }
             return accepted(parsed, (height) => patchStyle({ height }));
@@ -1363,7 +1378,7 @@ export function WidgetPropertyInspector({
         },
       },
     );
-    if (widget.type === 'text' || widget.type === 'input' || widget.type === 'flex') {
+    if (widget.type === 'table') {
       items.push({
         key: 'overflow',
         value: style.overflow ?? '',
@@ -1376,6 +1391,36 @@ export function WidgetPropertyInspector({
           return accepted(parseEnum(raw, OVERFLOW_MODES), (overflow) => patchStyle({ overflow }));
         },
       });
+    }
+    if (widget.type === 'scroll') {
+      items.push(
+        {
+          key: 'scrollX',
+          category: 'basic',
+          value: widget.scrollX === false ? 'false' : 'true',
+          onChange: (raw) => {
+            const token = raw.trim().toLowerCase();
+            if (token !== 'true' && token !== 'false' && token !== '1' && token !== '0') {
+              return false;
+            }
+            onPatch({ scrollX: token === 'true' || token === '1' }, `edit:${widget.id}:scrollX`);
+            return true;
+          },
+        },
+        {
+          key: 'scrollY',
+          category: 'basic',
+          value: widget.scrollY === false ? 'false' : 'true',
+          onChange: (raw) => {
+            const token = raw.trim().toLowerCase();
+            if (token !== 'true' && token !== 'false' && token !== '1' && token !== '0') {
+              return false;
+            }
+            onPatch({ scrollY: token === 'true' || token === '1' }, `edit:${widget.id}:scrollY`);
+            return true;
+          },
+        },
+      );
     }
     if (style.position) {
       items.push(

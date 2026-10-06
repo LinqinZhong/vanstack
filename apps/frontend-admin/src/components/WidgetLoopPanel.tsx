@@ -1,5 +1,5 @@
 import { Button, Input, Modal, Select, Typography, message } from 'antd';
-import CodeMirror from '@uiw/react-codemirror';
+import { ScriptEditor } from './ScriptEditor';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -243,22 +243,18 @@ export function WidgetLoopPanel({
         okButtonProps={{ disabled }}
         destroyOnHidden
       >
-        <div className="page-data-code">
-          <pre className="page-data-code-line">{'function loop(){'}</pre>
-          <CodeMirror
-            value={literalDraft}
-            height="180px"
-            theme="light"
-            extensions={editorExtensions}
-            editable={!disabled}
-            basicSetup={{ lineNumbers: false, foldGutter: false, autocompletion: false }}
-            onChange={setLiteralDraft}
-          />
-          <pre className="page-data-code-line">{'}'}</pre>
-          <Typography.Text type="secondary" className="page-data-hint">
-            {t('lowcode.dataScopeHint')}
-          </Typography.Text>
-        </div>
+        <ScriptEditor
+          value={literalDraft}
+          height="200px"
+          prefix="function loop(){"
+          suffix="}"
+          extensions={editorExtensions}
+          editable={!disabled}
+          onChange={setLiteralDraft}
+        />
+        <Typography.Text type="secondary" className="page-data-hint">
+          {t('lowcode.dataScopeHint')}
+        </Typography.Text>
       </Modal>
     </div>
   );

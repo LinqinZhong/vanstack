@@ -7,6 +7,7 @@ export const WIDGET_KINDS = [
   'checkbox',
   'switch',
   'flex',
+  'scroll',
   'swiper',
   'swiper-item',
   'table',

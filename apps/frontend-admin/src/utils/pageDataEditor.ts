@@ -1,4 +1,4 @@
-import { autocompletion, startCompletion, type CompletionContext } from '@codemirror/autocomplete';
+import { startCompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
 import { javascript } from '@codemirror/lang-javascript';
 import { linter, type Diagnostic } from '@codemirror/lint';
 import { EditorView } from '@codemirror/view';
@@ -11,16 +11,14 @@ export function createPageDataEditorExtensions(
   queryNames: string[] = [],
 ) {
   const known = new Set(names);
+  const language = javascript();
   return [
-    javascript(),
-    autocompletion({
-      activateOnTyping: true,
-      activateOnTypingDelay: 0,
-      override: [
-        createDataRefCompletions(names),
-        createScopeRefCompletions('$props', propNames),
-        createScopeRefCompletions('$query', queryNames),
-      ],
+    language,
+    language.language.data.of({
+      autocomplete: (context: CompletionContext) =>
+        completeDataRef(context, names) ??
+        completeScopeRef(context, '$props', propNames) ??
+        completeScopeRef(context, '$query', queryNames),
     }),
     triggerDataRefCompletion(),
     linter(createDataRefLinter(known, unknownMessage), { delay: 150 }),
@@ -40,44 +38,44 @@ function triggerDataRefCompletion() {
   });
 }
 
-function createDataRefCompletions(names: string[]) {
-  return (context: CompletionContext) => {
-    const match = context.matchBefore(/\$data\.[^\s,;:?)}\]]*/u);
-    if (!match) {
-      return null;
-    }
-    const prefix = '$data.';
-    if (match.text.length < prefix.length) {
-      return null;
-    }
-    return {
-      from: match.from + prefix.length,
-      options: names.map((name) => ({
-        label: name,
-        type: 'variable',
-        detail: '$data',
-      })),
-      validFor: /^[\p{ID_Continue}$]*$/u,
-    };
+function completeDataRef(context: CompletionContext, names: string[]): CompletionResult | null {
+  const match = context.matchBefore(/\$data\.[^\s,;:?)}\]]*/u);
+  if (!match) {
+    return null;
+  }
+  const prefix = '$data.';
+  if (match.text.length < prefix.length) {
+    return null;
+  }
+  return {
+    from: match.from + prefix.length,
+    options: names.map((name) => ({
+      label: name,
+      type: 'variable',
+      detail: '$data',
+    })),
+    validFor: /^[\p{ID_Continue}$]*$/u,
   };
 }
 
-function createScopeRefCompletions(scope: '$props' | '$query', names: string[]) {
+function completeScopeRef(
+  context: CompletionContext,
+  scope: '$props' | '$query',
+  names: string[],
+): CompletionResult | null {
   const prefix = `${scope}.`;
-  return (context: CompletionContext) => {
-    const match = context.matchBefore(scope === '$props' ? /\$props\.[^\s,;:?)}\]]*/u : /\$query\.[^\s,;:?)}\]]*/u);
-    if (!match || match.text.length < prefix.length) {
-      return null;
-    }
-    return {
-      from: match.from + prefix.length,
-      options: names.map((name) => ({
-        label: name,
-        type: 'variable',
-        detail: scope,
-      })),
-      validFor: /^[\p{ID_Continue}$]*$/u,
-    };
+  const match = context.matchBefore(scope === '$props' ? /\$props\.[^\s,;:?)}\]]*/u : /\$query\.[^\s,;:?)}\]]*/u);
+  if (!match || match.text.length < prefix.length) {
+    return null;
+  }
+  return {
+    from: match.from + prefix.length,
+    options: names.map((name) => ({
+      label: name,
+      type: 'variable',
+      detail: scope,
+    })),
+    validFor: /^[\p{ID_Continue}$]*$/u,
   };
 }
 

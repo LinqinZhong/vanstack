@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import type { ProjectIconFileDto, ProjectIconGroupDto } from '@vanstack/shared';
 import { api } from '../apis/api';
 import { useProjectVersionId } from '../utils/projectVersion';
+import { iconPath, refreshIconCatalog } from '../utils/iconCatalog';
 import { resolveAssetUrl } from './AssetLibraryPanel';
 
 function formatSize(bytes: number) {
@@ -30,7 +31,7 @@ export function IconLibraryBrowser({
   onPick,
 }: {
   projectId: string;
-  onPick?: (url: string) => void;
+  onPick?: (path: string) => void;
 }) {
   const { t } = useTranslation();
   const versionId = useProjectVersionId();
@@ -131,6 +132,7 @@ export function IconLibraryBrowser({
       setRenameOpen(false);
       await loadGroups();
       setGroupName(renamed.name);
+      void refreshIconCatalog(projectId, versionId);
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.iconsGroupFailed'));
     }
@@ -146,6 +148,7 @@ export function IconLibraryBrowser({
       }
       await api.deleteIconGroup(projectId, versionId, groupName);
       await loadGroups();
+      void refreshIconCatalog(projectId, versionId);
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.iconsGroupFailed'));
     }
@@ -184,8 +187,9 @@ export function IconLibraryBrowser({
       setUploadName('');
       await loadFiles(groupName);
       if (onPick) {
-        onPick(resolveAssetUrl(stored.url));
+        onPick(iconPath(groupName, stored.name));
       }
+      void refreshIconCatalog(projectId, versionId);
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.iconsUploadFailed'));
     } finally {
@@ -203,6 +207,7 @@ export function IconLibraryBrowser({
       }
       await api.deleteIconFile(projectId, versionId, groupName, file.name);
       await loadFiles(groupName);
+      void refreshIconCatalog(projectId, versionId);
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.iconsDeleteFailed'));
     }
@@ -314,7 +319,7 @@ export function IconLibraryBrowser({
               <article
                 key={file.key}
                 className={['asset-library-card-item', onPick ? 'is-pickable' : ''].filter(Boolean).join(' ')}
-                onClick={onPick ? () => onPick(resolveAssetUrl(file.url)) : undefined}
+                onClick={onPick && groupName ? () => onPick(iconPath(groupName, file.name)) : undefined}
               >
                 <div className="asset-library-thumb icon-library-thumb">
                   <img src={resolveAssetUrl(file.url)} alt={file.name} />
@@ -398,7 +403,7 @@ export function IconPicker({
 }: {
   projectId: string;
   disabled?: boolean;
-  onPick: (url: string) => void;
+  onPick: (path: string) => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);

@@ -77,15 +77,15 @@ body:has(.preview-host.is-editing) #root {
   box-sizing: border-box;
 }
 
-.preview-host.is-editing .lowcode-swiper,
-.preview-host.is-editing .lowcode-swiper-viewport,
-.preview-host.is-editing .lowcode-swiper-track,
-.preview-host.is-editing .lowcode-swiper-item,
-.preview-host.is-editing .lowcode-swiper-item-body {
-  overflow: visible;
+.preview-host.is-editing .lowcode-swiper.is-editing:not(.is-swiper-open),
+.preview-host.is-editing .lowcode-swiper.is-editing:not(.is-swiper-open) .lowcode-swiper-viewport,
+.preview-host.is-editing .lowcode-swiper.is-editing:not(.is-swiper-open) .lowcode-swiper-track,
+.preview-host.is-editing .lowcode-swiper.is-editing:not(.is-swiper-open) .lowcode-swiper-item,
+.preview-host.is-editing .lowcode-swiper.is-editing:not(.is-swiper-open) .lowcode-swiper-item-body {
+  overflow: hidden !important;
 }
 
-.preview-host.is-editing .lowcode-swiper-item {
+.preview-host.is-editing .lowcode-swiper.is-swiper-open .lowcode-swiper-item {
   outline: 1px solid #e11d2e;
   outline-offset: -1px;
 }
@@ -96,7 +96,7 @@ body:has(.preview-host.is-editing) #root {
   box-sizing: border-box;
 }
 
-.preview-mount :where(.lowcode-flex > .lowcode-text, .lowcode-flex > .lowcode-input, .lowcode-flex > .lowcode-checkbox, .lowcode-flex > .lowcode-switch, .lowcode-flex > .lowcode-button, .lowcode-flex > .lowcode-image, .lowcode-flex > .lowcode-flex, .lowcode-flex > .lowcode-swiper) {
+.preview-mount :where(.lowcode-flex > .lowcode-text, .lowcode-flex > .lowcode-input, .lowcode-flex > .lowcode-checkbox, .lowcode-flex > .lowcode-switch, .lowcode-flex > .lowcode-button, .lowcode-flex > .lowcode-image, .lowcode-flex > .lowcode-flex, .lowcode-flex > .lowcode-scroll, .lowcode-flex > .lowcode-swiper) {
   margin: 0;
 }
 
@@ -251,9 +251,13 @@ body:has(.preview-host.is-editing) #root {
   overflow: hidden;
 }
 
-.preview-host.is-editing [data-widget-type="swiper"],
-.preview-host.is-editing [data-widget-type="swiper-item"] {
-  overflow: visible;
+.preview-host.is-editing .lowcode-swiper.is-swiper-open,
+.preview-host.is-editing .lowcode-swiper.is-swiper-open .lowcode-swiper-viewport,
+.preview-host.is-editing .lowcode-swiper.is-swiper-open .lowcode-swiper-track,
+.preview-host.is-editing .lowcode-swiper.is-swiper-open .lowcode-swiper-item,
+.preview-host.is-editing .lowcode-swiper.is-swiper-open .lowcode-swiper-item-body,
+.preview-host.is-editing .lowcode-swiper.is-swiper-open [data-widget-type="swiper-item"] {
+  overflow: visible !important;
 }
 
 .preview-host.is-editing [data-widget-type="swiper-item"] {
@@ -912,8 +916,61 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
   overflow: hidden !important;
 }
 
-.preview-host.is-table-editing .widget-chrome-frame.is-hover {
+.preview-host.is-editing .lowcode-scroll.is-editing:not(.is-scroll-open) {
+  overflow: hidden !important;
+  scrollbar-width: none;
+}
+
+.preview-host.is-editing .lowcode-scroll.is-editing:not(.is-scroll-open)::-webkit-scrollbar {
+  width: 0;
+  height: 0;
   display: none;
+}
+
+.preview-host.is-table-editing .widget-chrome-frame.is-hover,
+.preview-host.is-scroll-editing .widget-chrome-frame.is-hover {
+  display: none;
+}
+
+.preview-host.is-scroll-editing [data-widget-id] {
+  visibility: hidden;
+}
+
+.preview-host.is-scroll-editing .lowcode-scroll.is-scroll-open,
+.preview-host.is-scroll-editing .lowcode-scroll.is-scroll-open [data-widget-id] {
+  visibility: visible;
+}
+
+.preview-host.is-editing .lowcode-page:has(.lowcode-scroll.is-scroll-open),
+.preview-host.is-editing .lowcode-flex:has(.lowcode-scroll.is-scroll-open),
+.preview-host.is-editing .lowcode-scroll:has(.lowcode-scroll.is-scroll-open),
+.preview-host.is-editing .lowcode-scroll.is-scroll-open,
+.preview-host.is-editing .lowcode-page:has(.lowcode-swiper.is-swiper-open),
+.preview-host.is-editing .lowcode-flex:has(.lowcode-swiper.is-swiper-open),
+.preview-host.is-editing .lowcode-scroll:has(.lowcode-swiper.is-swiper-open) {
+  overflow: visible !important;
+}
+
+.preview-host.is-swiper-editing .widget-chrome-frame.is-hover {
+  display: none;
+}
+
+.preview-host.is-swiper-editing [data-widget-id] {
+  visibility: hidden;
+}
+
+.preview-host.is-swiper-editing .lowcode-swiper.is-swiper-open,
+.preview-host.is-swiper-editing .lowcode-swiper.is-swiper-open [data-widget-id] {
+  visibility: visible;
+}
+
+.preview-host.is-swiper-editing.is-scroll-editing .lowcode-scroll.is-scroll-open [data-widget-id] {
+  visibility: hidden;
+}
+
+.preview-host.is-swiper-editing.is-scroll-editing .lowcode-scroll.is-scroll-open .lowcode-swiper.is-swiper-open,
+.preview-host.is-swiper-editing.is-scroll-editing .lowcode-scroll.is-scroll-open .lowcode-swiper.is-swiper-open [data-widget-id] {
+  visibility: visible;
 }
 
 .preview-host.is-table-editing [data-widget-id] {
@@ -925,8 +982,18 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
   visibility: visible;
 }
 
+.preview-host.is-table-editing.is-swiper-editing .lowcode-swiper.is-swiper-open [data-widget-id] {
+  visibility: hidden;
+}
+
+.preview-host.is-table-editing.is-swiper-editing .lowcode-table.is-table-open,
+.preview-host.is-table-editing.is-swiper-editing .lowcode-table.is-table-open [data-widget-id] {
+  visibility: visible;
+}
+
 .preview-host.is-editing .lowcode-page:has(.lowcode-table.is-table-open),
 .preview-host.is-editing .lowcode-flex:has(.lowcode-table.is-table-open),
+.preview-host.is-editing .lowcode-scroll:has(.lowcode-table.is-table-open),
 .preview-host.is-editing .lowcode-table.is-table-open {
   overflow: visible !important;
 }

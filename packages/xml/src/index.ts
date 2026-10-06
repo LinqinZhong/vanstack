@@ -47,6 +47,8 @@ export {
   compactTableLines,
   compactWidgetProps,
   compactWidgetStyle,
+  DEFAULT_SCROLL_HEIGHT,
+  DEFAULT_SCROLL_WIDTH,
   DEFAULT_SWIPER_HEIGHT,
   DEFAULT_SWIPER_WIDTH,
   DEFAULT_TABLE_COLUMN_WIDTH,
@@ -175,6 +177,7 @@ export {
   resolveStateFnId,
   type BindingScope,
 } from './binding';
+export { compileScopeSugar, scopeSetterName, type ScopeAssign, type ScopeAssignCall, type ScopeBucket } from './sugar';
 export {
   copyWidgetRuntimeMeta,
   getWidgetRuntimeMeta,

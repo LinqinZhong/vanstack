@@ -31,6 +31,14 @@ function emptyIconMark(): ReactElement {
   );
 }
 
+function iconAssetUrl(src: string, icons: Readonly<Record<string, string>> | undefined): string {
+  const trimmed = src.trim();
+  if (!trimmed || /^(https?:|data:|\/)/i.test(trimmed)) {
+    return trimmed;
+  }
+  return icons?.[trimmed] ?? trimmed;
+}
+
 function iconFaceStyle(src: string, color?: string): CSSProperties {
   if (src.trim()) {
     return {
@@ -63,7 +71,7 @@ export function renderIcon(
         : Number(widget.size)
       : widget.size;
   const size = resolvedSize != null && Number.isFinite(resolvedSize) && resolvedSize > 0 ? resolvedSize : 24;
-  const src = resolveWidgetCopy(widget.src, ctx);
+  const src = iconAssetUrl(resolveWidgetCopy(widget.src, ctx), ctx.icons);
   const blank = !src.trim();
   return createElement(
     'span',

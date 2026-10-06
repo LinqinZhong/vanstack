@@ -33,6 +33,8 @@ export type WidgetPatch = {
   flex?: FlexContainerStyle | undefined;
   swiper?: SwiperStyle | undefined;
   item?: FlexItemStyle | undefined;
+  scrollX?: boolean;
+  scrollY?: boolean;
   freezeHeader?: boolean;
   freezeFooter?: boolean;
   headerHeight?: number;

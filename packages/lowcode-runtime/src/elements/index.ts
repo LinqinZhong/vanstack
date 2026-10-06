@@ -6,6 +6,7 @@ import { renderComponent } from './component';
 import { renderCheckbox } from './checkbox';
 import { renderSwitch } from './switch';
 import { renderFlex } from './flex';
+import { renderScroll } from './scroll';
 import { renderIcon } from './icon';
 import { renderInput } from './input';
 import { renderImage } from './image';
@@ -20,7 +21,13 @@ export function widgetElement(widget: PageWidget, ctx: WidgetRenderContext): Rea
   if (ctx.editing) {
     return node;
   }
-  const bindings = widgetRuntimeBindings(widget, ctx.loadWidgetEvent);
+  const bindings = widgetRuntimeBindings(widget, ctx.loadWidgetEvent, {
+    data: ctx.bindingScope.data,
+    props: ctx.bindingScope.props,
+    query: ctx.bindingScope.query,
+    aliases: ctx.bindingScope.aliases,
+    assign: ctx.assignScope,
+  });
   if (!bindings) {
     return node;
   }
@@ -53,6 +60,8 @@ function renderWidget(widget: PageWidget, ctx: WidgetRenderContext): ReactElemen
       return renderButton(widget, ctx);
     case 'flex':
       return renderFlex(widget, ctx);
+    case 'scroll':
+      return renderScroll(widget, ctx);
     case 'swiper':
       return renderSwiper(widget, ctx);
     case 'swiper-item':

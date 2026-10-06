@@ -13,6 +13,7 @@ import { isBoxDragKind, isSpacingNudgeKey, isSpacingValueKey, SPACING_EDGES } fr
 import { pointerAngleDeg, type RotateAxis } from '../../utils/rotateDrag';
 import { applyEditorChromeScale, applyLiveWidgetCss, applyViewport, applyWidgetState, FOCUS_DBLCLICK_MS, focusModifier, paintPreviewCamera, paintWidgetChrome, parentWidgetId, postCanvasPointer, postToParent, postWidgetHover, setSelectFaded } from './helpers';
 import { applyLiveTableTrack, readTableTrackPair, syncTableChrome, syncTableReveal, type TableChromeLabels } from './tableChrome';
+import { paintScrollModeButton, paintSwiperModeButton, syncScrollReveal, syncSwiperReveal, type ScrollChromeLabels, type SwiperChromeLabels } from './scrollChrome';
 
 export function PreviewPage() {
   const { t } = useTranslation();
@@ -28,6 +29,7 @@ export function PreviewPage() {
   const viewingStateRef = useRef<string | null>(null);
   const viewingStatesRef = useRef('');
   const projectIdRef = useRef<string | null>(null);
+  const iconsKeyRef = useRef('{}');
   const pageIdRef = useRef<string | null>(null);
   const queryKeyRef = useRef('{}');
   const tableLayoutRef = useRef(false);
@@ -49,6 +51,8 @@ export function PreviewPage() {
   const tableChromeRef = useRef<TableChromeState | null>(null);
   const tableDragKeyRef = useRef<string | null>(null);
   const tableEditingRef = useRef(false);
+  const scrollEditingRef = useRef(false);
+  const swiperEditingRef = useRef(false);
   const centerContentRef = useRef(false);
   const useComponentTestDataRef = useRef(false);
   const chromeLabelsRef = useRef<TableChromeLabels>({
@@ -79,9 +83,21 @@ export function PreviewPage() {
     editTable: t('lowcode.tableEdit'),
     exitTable: t('lowcode.tableExitEdit'),
   };
+  const scrollLabelsRef = useRef<ScrollChromeLabels>({ editScroll: '', exitScroll: '' });
+  scrollLabelsRef.current = {
+    editScroll: t('lowcode.scrollEdit'),
+    exitScroll: t('lowcode.tableExitEdit'),
+  };
+  const swiperLabelsRef = useRef<SwiperChromeLabels>({ editSwiper: '', exitSwiper: '' });
+  swiperLabelsRef.current = {
+    editSwiper: t('lowcode.swiperEdit'),
+    exitSwiper: t('lowcode.tableExitEdit'),
+  };
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(true);
   const [hostTableEditing, setHostTableEditing] = useState(false);
+  const [hostScrollEditing, setHostScrollEditing] = useState(false);
+  const [hostSwiperEditing, setHostSwiperEditing] = useState(false);
 
   /** readSelectedLayoutSize：当前选中控件的布局宽高（布局坐标）。 */
   function readSelectedLayoutSize() {
@@ -122,6 +138,24 @@ export function PreviewPage() {
 
   function refreshTableChrome() {
     syncTableReveal(hostRef.current, mountRef.current, editingRef.current, tableEditingRef.current);
+    syncScrollReveal(hostRef.current, mountRef.current, editingRef.current, scrollEditingRef.current);
+    paintScrollModeButton(
+      hostRef.current,
+      mountRef.current,
+      viewScaleRef.current,
+      editingRef.current,
+      scrollEditingRef.current,
+      scrollLabelsRef.current,
+    );
+    syncSwiperReveal(hostRef.current, mountRef.current, editingRef.current, swiperEditingRef.current);
+    paintSwiperModeButton(
+      hostRef.current,
+      mountRef.current,
+      viewScaleRef.current,
+      editingRef.current,
+      swiperEditingRef.current,
+      swiperLabelsRef.current,
+    );
     syncTableChrome(
       hostRef.current,
       mountRef.current,
@@ -241,7 +275,7 @@ export function PreviewPage() {
             viewScaleRef.current,
             editingRef.current,
             spacingDragRef.current,
-            !tableEditingRef.current,
+            !tableEditingRef.current && !scrollEditingRef.current && !swiperEditingRef.current,
           );
           refreshTableChrome();
           postSelectedLayoutSize();
@@ -266,6 +300,7 @@ export function PreviewPage() {
         locale,
         catalog,
         projectId,
+        icons,
         pageId,
         query,
         viewingOwnerId,
@@ -275,6 +310,8 @@ export function PreviewPage() {
         tableLayout,
         tableChrome,
         tableEditing,
+        scrollEditing,
+        swiperEditing,
         settle,
         components,
         centerContent,
@@ -289,6 +326,8 @@ export function PreviewPage() {
       const nextViewingState = viewingState ?? null;
       const nextViewingStates = JSON.stringify(viewingStates ?? null);
       const nextProjectId = projectId || null;
+      const nextIcons = icons && typeof icons === 'object' ? icons : {};
+      const nextIconsKey = JSON.stringify(nextIcons);
       const nextPageId = pageId || null;
       const nextQuery =
         query && typeof query === 'object' && !Array.isArray(query) ? query : {};
@@ -311,12 +350,19 @@ export function PreviewPage() {
         nextViewingState !== viewingStateRef.current ||
         nextViewingStates !== viewingStatesRef.current ||
         nextProjectId !== projectIdRef.current ||
+        nextIconsKey !== iconsKeyRef.current ||
         nextPageId !== pageIdRef.current ||
         nextQueryKey !== queryKeyRef.current;
       editingRef.current = nextEditing;
       const nextTableEditing = nextEditing && Boolean(tableEditing);
       tableEditingRef.current = nextTableEditing;
       setHostTableEditing(nextTableEditing);
+      const nextScrollEditing = nextEditing && Boolean(scrollEditing);
+      scrollEditingRef.current = nextScrollEditing;
+      setHostScrollEditing(nextScrollEditing);
+      const nextSwiperEditing = nextEditing && Boolean(swiperEditing);
+      swiperEditingRef.current = nextSwiperEditing;
+      setHostSwiperEditing(nextSwiperEditing);
       tableChromeRef.current = nextEditing ? (tableChrome ?? null) : null;
       tableLayoutRef.current = nextTableLayout;
       localeRef.current = nextLocale;
@@ -325,6 +371,7 @@ export function PreviewPage() {
       viewingStateRef.current = nextViewingState;
       viewingStatesRef.current = nextViewingStates;
       projectIdRef.current = nextProjectId;
+      iconsKeyRef.current = nextIconsKey;
       pageIdRef.current = nextPageId;
       queryKeyRef.current = nextQueryKey;
       installPageNavigation(
@@ -388,6 +435,7 @@ export function PreviewPage() {
           viewingState: nextViewingState,
           viewingStates: viewingStates ?? null,
           onModelValue: (name, value, done) => postToParent({ type: 'model-value', name, value, done }),
+          onQueryValue: (name, value) => postToParent({ type: 'query-value', name, value }),
           loadWidgetEvent: nextProjectId
             ? async (id) => {
                 try {
@@ -403,6 +451,7 @@ export function PreviewPage() {
           components,
           centerContent: nextCenterContent,
           useComponentTestData: nextUseComponentTestData,
+          icons: nextIcons,
         });
         setError(result.ok ? null : result.error);
       }
@@ -418,7 +467,7 @@ export function PreviewPage() {
         viewScaleRef.current,
         nextEditing,
         spacingDragRef.current,
-        !nextTableEditing,
+        !nextTableEditing && !nextScrollEditing && !nextSwiperEditing,
       );
       refreshTableChrome();
       syncSpacingGuides(
@@ -590,7 +639,7 @@ export function PreviewPage() {
           viewScaleRef.current,
           editingRef.current,
           spacingDragRef.current,
-          !tableEditingRef.current,
+          !tableEditingRef.current && !scrollEditingRef.current && !swiperEditingRef.current,
         );
         refreshTableChrome();
       });
@@ -614,7 +663,7 @@ export function PreviewPage() {
         viewScaleRef.current,
         editingRef.current,
         spacingDragRef.current,
-        !tableEditingRef.current,
+        !tableEditingRef.current && !scrollEditingRef.current && !swiperEditingRef.current,
       );
       refreshTableChrome();
     }
@@ -633,7 +682,7 @@ export function PreviewPage() {
       if (!parentId) {
         return innermostId;
       }
-      if (!tableEditingRef.current) {
+      if (!tableEditingRef.current && !scrollEditingRef.current && !swiperEditingRef.current) {
         return parentId;
       }
       const from = mountRef.current?.querySelector<HTMLElement>(`[data-widget-id="${CSS.escape(fromId)}"]`);
@@ -642,6 +691,12 @@ export function PreviewPage() {
         (from?.dataset.widgetType === 'tr' || from?.dataset.widgetType === 'th') &&
         parent?.dataset.widgetType === 'table'
       ) {
+        return innermostId;
+      }
+      if (scrollEditingRef.current && parent?.dataset.widgetType === 'scroll') {
+        return innermostId;
+      }
+      if (swiperEditingRef.current && parent?.dataset.widgetType === 'swiper') {
         return innermostId;
       }
       return parentId;
@@ -661,6 +716,18 @@ export function PreviewPage() {
         const table = node.closest('.lowcode-table');
         if (table instanceof HTMLElement) {
           hit = table;
+        }
+      }
+      if (!swiperEditingRef.current) {
+        const swiper = hit.closest('.lowcode-swiper');
+        if (swiper instanceof HTMLElement) {
+          hit = swiper;
+        }
+      }
+      if (!scrollEditingRef.current) {
+        const scroll = hit.closest('.lowcode-scroll');
+        if (scroll instanceof HTMLElement) {
+          hit = scroll;
         }
       }
       let host: HTMLElement | null = null;
@@ -693,7 +760,7 @@ export function PreviewPage() {
             viewScaleRef.current,
             editingRef.current,
             spacingDragRef.current,
-            !tableEditingRef.current,
+            !tableEditingRef.current && !scrollEditingRef.current && !swiperEditingRef.current,
           );
           refreshTableChrome();
           return;
@@ -767,6 +834,22 @@ export function PreviewPage() {
         }
         return;
       }
+      const swiperModeNode = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-swiper-mode]') : null;
+      const swiperMode = swiperModeNode?.dataset.swiperMode;
+      if (swiperMode === 'enter' || swiperMode === 'exit') {
+        event.preventDefault();
+        event.stopPropagation();
+        postToParent({ type: 'swiper-mode', action: swiperMode });
+        return;
+      }
+      const scrollModeNode = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-scroll-mode]') : null;
+      const scrollMode = scrollModeNode?.dataset.scrollMode;
+      if (scrollMode === 'enter' || scrollMode === 'exit') {
+        event.preventDefault();
+        event.stopPropagation();
+        postToParent({ type: 'scroll-mode', action: scrollMode });
+        return;
+      }
       const modeNode = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-table-mode]') : null;
       const tableMode = modeNode?.dataset.tableMode;
       if (tableMode === 'enter' || tableMode === 'exit') {
@@ -833,12 +916,18 @@ export function PreviewPage() {
       if (!hitId) {
         clearClimbTimer();
         climbAnchorIdRef.current = null;
-        if (!tableEditingRef.current) {
+        if (!tableEditingRef.current && !scrollEditingRef.current && !swiperEditingRef.current) {
           postToParent({ type: 'dismiss-toolbar' });
         }
         return;
       }
       if (tableEditingRef.current && hit?.dataset.widgetType === 'table') {
+        return;
+      }
+      if (scrollEditingRef.current && hit?.dataset.widgetType === 'scroll') {
+        return;
+      }
+      if (swiperEditingRef.current && hit?.dataset.widgetType === 'swiper') {
         return;
       }
       if (hitId !== climbAnchorIdRef.current) {
@@ -1246,7 +1335,7 @@ export function PreviewPage() {
       }
       if (
         editingRef.current &&
-        tableEditingRef.current &&
+        (tableEditingRef.current || scrollEditingRef.current || swiperEditingRef.current) &&
         event.key === 'Escape' &&
         !event.ctrlKey &&
         !event.metaKey &&
@@ -1410,6 +1499,8 @@ export function PreviewPage() {
           'preview-host',
           editing ? 'is-editing' : '',
           hostTableEditing ? 'is-table-editing' : '',
+          hostScrollEditing ? 'is-scroll-editing' : '',
+          hostSwiperEditing ? 'is-swiper-editing' : '',
           hostRef.current?.classList.contains('is-select-faded') ? 'is-select-faded' : '',
         ]
           .filter(Boolean)

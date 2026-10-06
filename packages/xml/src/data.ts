@@ -4,7 +4,7 @@ export function defaultPageDataValue(type: PageDataType): string {
   if (type === 'num') {
     return '0';
   }
-  if (type === 'str' || type === 'widget') {
+  if (type === 'str' || type === 'widget' || type === 'icon' || type === 'image') {
     return '';
   }
   if (type === 'bool') {
@@ -62,7 +62,7 @@ export function readVariableValue(
     const parsed = Number(variable.value);
     return Number.isFinite(parsed) ? parsed : 0;
   }
-  if (variable.type === 'str' || variable.type === 'widget') {
+  if (variable.type === 'str' || variable.type === 'widget' || variable.type === 'icon' || variable.type === 'image') {
     return variable.value;
   }
   if (variable.type === 'bool') {

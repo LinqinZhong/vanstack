@@ -15,6 +15,7 @@ import {
   type TableValign,
 } from '@vanstack/xml';
 import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, sizeCss, widgetClassName } from '../css';
+import { widgetInstanceKey } from '../loop';
 import { displayWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
 type RowLayout = {
@@ -148,7 +149,7 @@ function renderCell(
         createElement(
           'div',
           {
-            key: child.id,
+            key: widgetInstanceKey(child),
             className: 'lowcode-table-slot',
             style: {
               display: 'flex',
@@ -307,6 +308,9 @@ export function renderTable(
     },
     { position: 'relative', boxSizing: 'border-box' },
   );
+  if (shell) {
+    delete shell.overflow;
+  }
   return createElement(
     'div',
     {

@@ -1,5 +1,5 @@
 import { Form, Modal, Select, Typography, message } from 'antd';
-import CodeMirror from '@uiw/react-codemirror';
+import { ScriptEditor } from './ScriptEditor';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { compactStateFn, type ComponentProp, type PageVariable, type PageWidget, type WidgetStateDelta } from '@vanstack/xml';
@@ -124,19 +124,15 @@ export function WidgetStateFnModal({
           />
         </Form.Item>
         <Form.Item label={t('lowcode.stateOtherTiming')} className="state-fn-code-item">
-          <div className="page-data-code">
-            <pre className="page-data-code-line">{'function state(): string{'}</pre>
-            <CodeMirror
-              value={draft}
-              height="160px"
-              theme="light"
-              extensions={editorExtensions}
-              editable={!disabled}
-              basicSetup={{ lineNumbers: false, foldGutter: false, autocompletion: false }}
-              onChange={setDraft}
-            />
-            <pre className="page-data-code-line">{'}'}</pre>
-          </div>
+          <ScriptEditor
+            value={draft}
+            height="200px"
+            prefix="function state(): string{"
+            suffix="}"
+            extensions={editorExtensions}
+            editable={!disabled}
+            onChange={setDraft}
+          />
         </Form.Item>
       </Form>
       {stateIds.length ? (

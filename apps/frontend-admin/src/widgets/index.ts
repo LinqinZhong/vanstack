@@ -4,6 +4,7 @@ import { componentHelper } from './component';
 import { checkboxHelper } from './checkbox';
 import { switchHelper } from './switch';
 import { flexHelper } from './flex';
+import { scrollHelper } from './scroll';
 import { iconHelper } from './icon';
 import { inputHelper } from './input';
 import { imageHelper } from './image';
@@ -28,6 +29,7 @@ export const widgetHelpers = {
   button: buttonHelper,
   component: componentHelper,
   flex: flexHelper,
+  scroll: scrollHelper,
   swiper: swiperHelper,
   'swiper-item': swiperItemHelper,
   table: tableHelper,
@@ -36,7 +38,7 @@ export const widgetHelpers = {
   td: tableCellHelper,
 } satisfies { [K in PageWidget['type']]: WidgetHelperInterface<Extract<PageWidget, { type: K }>> };
 
-export const ADDABLE_WIDGET_TYPES = ['text', 'input', 'checkbox', 'switch', 'button', 'flex', 'swiper', 'table', 'swiper-item', 'image', 'icon'] as const satisfies readonly PageWidget['type'][];
+export const ADDABLE_WIDGET_TYPES = ['text', 'input', 'checkbox', 'switch', 'button', 'flex', 'scroll', 'swiper', 'table', 'swiper-item', 'image', 'icon'] as const satisfies readonly PageWidget['type'][];
 
 export function acceptsChild(accepts: WidgetAccepts, childType: PageWidget['type']): boolean {
   if (accepts === 'none') {

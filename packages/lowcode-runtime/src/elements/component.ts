@@ -1,4 +1,4 @@
-import { createElement, useRef, type CSSProperties, type ReactElement } from 'react';
+import { createElement, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import {
   applyTestValues,
   buildPropsRecord,
@@ -12,10 +12,12 @@ import {
   type PageStyle,
   type PageWidget,
   type PageXmlDocument,
+  type ScopeAssign,
 } from '@vanstack/xml';
 import { cssMeasure, cssText, dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, pageCssText, widgetClassName, type WidgetCssOptions } from '../css';
 import { resolveRuntimeOwnState } from '../hover';
 import { expandLoopTree, widgetInstanceKey } from '../loop';
+import { formatStoredValue } from '../stored';
 import { widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
 function prefixTree(widgets: PageWidget[], prefix: string): PageWidget[] {
@@ -64,7 +66,7 @@ function storeResolvedProp(type: ComponentProp['type'], value: unknown): string 
   if (value == null) {
     return null;
   }
-  if (type === 'str') {
+  if (type === 'str' || type === 'icon' || type === 'image') {
     return typeof value === 'string' ? value : String(value);
   }
   if (type === 'num') {
@@ -94,7 +96,7 @@ function storeResolvedProp(type: ComponentProp['type'], value: unknown): string 
 }
 
 function literalPropValue(type: ComponentProp['type'], raw: string): string | null {
-  if (type === 'str') {
+  if (type === 'str' || type === 'icon' || type === 'image') {
     return raw;
   }
   if (type === 'bool') {
@@ -168,43 +170,72 @@ function ComponentView({
     ? applyTestValues(nested?.props, nested?.testData?.props)
     : nested?.props;
   const query = ctx.bindingScope.query;
-  const propsScope = buildPropsRecord(
-    propsWithArgs(definedProps, widget.args, ctx.bindingScope, ctx.evaluateBindings),
-    query,
-  );
   const dataKey = `${componentDataKey(nested?.data, definedProps, widget.args, ctx.evaluateBindings)}\0${ctx.useComponentTestData ? 1 : 0}`;
+  const [writesStamp, setWritesStamp] = useState(dataKey);
+  const [writes, setWrites] = useState<Record<string, string>>({});
+  if (writesStamp !== dataKey) {
+    setWritesStamp(dataKey);
+    setWrites({});
+  }
+  const activeWrites = writesStamp === dataKey ? writes : {};
+  const writtenProps = applyPropWrites(propsWithArgs(definedProps, widget.args, ctx.bindingScope, ctx.evaluateBindings), activeWrites);
+  const propsScope = buildPropsRecord(writtenProps, query);
   const createdRef = useRef<{ key: string; props: Record<string, unknown> } | null>(null);
   if (!createdRef.current || createdRef.current.key !== dataKey) {
     createdRef.current = { key: dataKey, props: propsScope };
   }
+  const dataWrites = dataWritesFrom(activeWrites);
+  const testData = ctx.useComponentTestData ? nested?.testData?.data : undefined;
+  const dataOverride = { ...testData, ...dataWrites };
   const dataScope = resolvePageData(
     nested?.data,
-    ctx.useComponentTestData ? nested?.testData?.data : undefined,
+    Object.keys(dataOverride).length > 0 ? dataOverride : undefined,
     createdRef.current.props,
     propsScope,
     query,
   );
-  const scope = { data: dataScope, props: propsScope, query };
+  const scope = { data: dataScope, props: propsScope, query, aliases: { ...ctx.bindingScope.aliases } };
   const options = widgetCssOptions(ctx);
   const prefix = `${widget.id}__`;
-  const expanded = nested
-    ? expandLoopTree(prefixTree(nested.widgets, prefix), scope, false, widgetInstanceKey(widget))
-    : [];
+  const template = nested ? prefixTree(nested.widgets, prefix) : [];
+  // 先展开循环，再按每一项求 state()。样式仍用模板，避免某一项的状态写进共用 class。
+  const expanded = nested ? expandLoopTree(template, scope, false, widgetInstanceKey(widget)) : [];
   const innerWidgets = nested
-    ? resolveWidgetTree(
-        expanded,
-        null,
-        ctx.editing
-          ? undefined
-          : {
-              appliedStateFor: (child) => resolveRuntimeOwnState(child, ctx.hoverInstanceKeys ?? []),
-              stateLayersSink: ctx.stateLayers,
-            },
-      )
+    ? resolveWidgetTree(expanded, null, {
+        appliedStateFor: (child) => resolveRuntimeOwnState(child, ctx.editing ? [] : (ctx.hoverInstanceKeys ?? [])),
+        stateLayersSink: ctx.stateLayers,
+      })
     : [];
 
   const nestedStack = [...stack, widget.componentId];
   const dataArg = /^\$data\.([\p{ID_Start}$_][\p{ID_Continue}$]*)$/u;
+  const assignScope: ScopeAssign = (bucket, name, value) => {
+    if (bucket === 'query') {
+      ctx.assignScope?.(bucket, name, value);
+      return;
+    }
+    const stored = formatStoredValue(value);
+    if (bucket === 'props') {
+      if (!definedProps?.some((prop) => prop.name === name)) {
+        return;
+      }
+      propsScope[name] = value;
+      setWrites((prev) => (prev[`$props.${name}`] === stored ? prev : { ...prev, [`$props.${name}`]: stored }));
+      const target = dataArg.exec(widget.args?.[name]?.trim() ?? '');
+      if (target) {
+        ctx.assignScope?.('data', target[1], value);
+      } else if (definedProps.some((prop) => prop.name === name && prop.bind)) {
+        ctx.assignScope?.('props', name, value);
+      }
+      return;
+    }
+    const variable = nested?.data?.find((item) => item.name === name);
+    if (!variable || (variable.computed && (variable.type === 'arr' || variable.type === 'obj'))) {
+      return;
+    }
+    dataScope[name] = value;
+    setWrites((prev) => (prev[name] === stored ? prev : { ...prev, [name]: stored }));
+  };
   function commitNestedModel(name: string, value: string, done?: boolean) {
     const propName = propModelName(name);
     if (!propName) {
@@ -237,17 +268,41 @@ function ComponentView({
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,
     },
-    nested ? createElement('style', { dangerouslySetInnerHTML: { __html: pageCssText(innerWidgets) } }) : null,
+    nested ? createElement('style', { dangerouslySetInnerHTML: { __html: pageCssText(template) } }) : null,
     innerWidgets.length > 0
       ? innerWidgets.map((child) =>
           ctx.render(child, {
             componentStack: nestedStack,
             commitModelValue: commitNestedModel,
+            assignScope,
             instantiate: true,
           }),
         )
       : widget.name || widget.componentKey,
   );
+}
+
+function applyPropWrites(
+  props: ReturnType<typeof propsWithArgs>,
+  writes: Record<string, string>,
+) {
+  if (!props) {
+    return props;
+  }
+  return props.map((prop) => {
+    const stored = writes[`$props.${prop.name}`];
+    return stored === undefined ? prop : { ...prop, value: stored };
+  });
+}
+
+function dataWritesFrom(writes: Record<string, string>): Record<string, string> {
+  const data: Record<string, string> = {};
+  for (const [key, value] of Object.entries(writes)) {
+    if (!key.startsWith('$props.')) {
+      data[key] = value;
+    }
+  }
+  return data;
 }
 
 export function renderComponent(

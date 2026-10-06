@@ -4,7 +4,6 @@ import type { TableColumnsType } from 'antd';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  COMPONENT_PROP_TYPES,
   METHOD_PARAM_TYPES,
   defaultPageDataValue,
   isJsIdentifier,
@@ -15,10 +14,12 @@ import {
   type MethodParamType,
   type PageMethodParam,
 } from '@vanstack/xml';
+import { PROP_TYPES, SCALAR_TYPES, TypeKindFields, type NamespaceCatalogEntry } from './TypeKindFields';
 
 type PropsPanelProps = {
   props: ComponentProp[];
   variant?: 'props' | 'query';
+  namespaces?: NamespaceCatalogEntry[];
   disabled?: boolean;
   onChange: (next: ComponentProp[], coalesceKey?: string) => void;
   onEndCoalesce: () => void;
@@ -41,16 +42,16 @@ function nextPropName(props: ComponentProp[], prefix: string) {
   return name;
 }
 
-export function ComponentPropsPanel({ props, variant = 'props', disabled, onChange, onEndCoalesce }: PropsPanelProps) {
+export function ComponentPropsPanel({
+  props,
+  variant = 'props',
+  namespaces = [],
+  disabled,
+  onChange,
+  onEndCoalesce,
+}: PropsPanelProps) {
   const { t } = useTranslation();
-  const typeOptions = useMemo(
-    () =>
-      COMPONENT_PROP_TYPES.map((type) => ({
-        value: type,
-        label: t(`lowcode.propType.${type}`),
-      })),
-    [t],
-  );
+  const typeAllow = variant === 'query' ? SCALAR_TYPES : PROP_TYPES;
 
   function rename(index: number, nextName: string) {
     const name = nextName.trim();
@@ -104,17 +105,26 @@ export function ComponentPropsPanel({ props, variant = 'props', disabled, onChan
     {
       title: t('lowcode.dataType'),
       dataIndex: 'type',
-      width: 110,
+      width: variant === 'query' ? 120 : 220,
       render: (type: ComponentPropType, record, index) => (
-        <Select
-          size="small"
-          value={type}
+        <TypeKindFields
+          type={type}
+          of={record.of}
+          allow={typeAllow}
+          namespaces={variant === 'query' ? [] : namespaces}
           disabled={disabled}
-          options={typeOptions}
-          style={{ width: '100%' }}
-          onChange={(value: ComponentPropType) =>
-            patch(index, { ...record, type: value, value: defaultPageDataValue(value) })
-          }
+          onChange={(next) => {
+            if (next.type === 'widget') {
+              return;
+            }
+            const { of: _of, ...rest } = record;
+            patch(index, {
+              ...rest,
+              type: next.type,
+              ...(next.of ? { of: next.of } : {}),
+              ...(next.reset ? { value: defaultPageDataValue(next.type) } : {}),
+            });
+          }}
         />
       ),
     },

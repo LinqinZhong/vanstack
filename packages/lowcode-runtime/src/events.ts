@@ -1,9 +1,13 @@
 import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode } from 'react';
 import {
+  compileScopeSugar,
   compactWidgetEvents,
+  isJsIdentifier,
   parseEventSource,
   widgetEventSpecs,
   type PageWidget,
+  type ScopeAssign,
+  type ScopeAssignCall,
   type WidgetEventPayload,
 } from '@vanstack/xml';
 
@@ -104,13 +108,23 @@ function currentPageQuery(): Record<string, unknown> {
   return query && typeof query === 'object' ? query : {};
 }
 
+export type ScriptScope = {
+  data?: Record<string, unknown>;
+  props?: Record<string, unknown>;
+  query?: Record<string, unknown>;
+  aliases?: Record<string, unknown>;
+  assign?: ScopeAssign;
+};
+
+const SCRIPT_RESERVED = new Set(['$data', '$props', '$query', '$item', '$index', 'data', 'props', 'query']);
+
 export async function runEventIds(
   load: WidgetEventLoader,
   ids: string[],
   args: unknown[],
-  query?: Record<string, unknown>,
+  scope?: ScriptScope,
 ) {
-  const pageQuery = query ?? currentPageQuery();
+  const pageQuery = scope?.query ?? currentPageQuery();
   for (const id of ids) {
     const source = await load(id);
     if (!source) {
@@ -120,10 +134,41 @@ export async function runEventIds(
     if (!parsed) {
       continue;
     }
-    const names = parsed.paramNames.includes('$query') ? parsed.paramNames : ['$query', ...parsed.paramNames];
-    const values = parsed.paramNames.includes('$query') ? args : [pageQuery, ...args];
+    const compiled = compileScopeSugar(parsed.body);
+    const names: string[] = [];
+    const values: unknown[] = [];
+    const used = new Set<string>();
+    const add = (name: string, value: unknown) => {
+      if (used.has(name) || !isJsIdentifier(name)) {
+        return;
+      }
+      used.add(name);
+      names.push(name);
+      values.push(value);
+    };
+    for (const [setter, targets] of setterTargets(compiled.calls)) {
+      add(setter, (value: unknown) => {
+        for (const target of targets) {
+          scope?.assign?.(target.bucket, target.name, value);
+        }
+      });
+    }
+    add('$data', scope?.data ?? {});
+    add('$props', scope?.props ?? {});
+    add('$query', pageQuery);
+    add('$item', aliasOf(scope?.aliases, '$item', 'item'));
+    add('$index', aliasOf(scope?.aliases, '$index', 'index'));
+    for (const [name, value] of Object.entries(scope?.aliases ?? {})) {
+      if (!SCRIPT_RESERVED.has(name)) {
+        add(name, value);
+      }
+    }
+    parsed.paramNames.forEach((name, index) => add(name, args[index]));
+    if (!used.has('$query')) {
+      add('$query', pageQuery);
+    }
     try {
-      const fn = new Function(...names, `"use strict";\n${parsed.body}`) as (...input: unknown[]) => unknown;
+      const fn = new Function(...names, `"use strict";\n${compiled.code}`) as (...input: unknown[]) => unknown;
       await fn(...values);
     } catch (error) {
       console.error(error);
@@ -131,9 +176,29 @@ export async function runEventIds(
   }
 }
 
+function setterTargets(calls: ScopeAssignCall[]): Map<string, ScopeAssignCall[]> {
+  const grouped = new Map<string, ScopeAssignCall[]>();
+  for (const call of calls) {
+    const list = grouped.get(call.setter) ?? [];
+    if (!list.some((item) => item.bucket === call.bucket && item.name === call.name)) {
+      list.push(call);
+    }
+    grouped.set(call.setter, list);
+  }
+  return grouped;
+}
+
+function aliasOf(aliases: Record<string, unknown> | undefined, dollarName: string, plainName: string): unknown {
+  if (aliases && Object.prototype.hasOwnProperty.call(aliases, dollarName)) {
+    return aliases[dollarName];
+  }
+  return aliases?.[plainName];
+}
+
 export function widgetRuntimeBindings(
   widget: PageWidget,
   load: WidgetEventLoader | undefined,
+  scope?: ScriptScope,
 ): WidgetRuntimeBindings | undefined {
   const events = compactWidgetEvents(widget.type, widget.events);
   if (!events || !load) {
@@ -150,7 +215,7 @@ export function widgetRuntimeBindings(
     }
     if (item.payload === 'index') {
       onIndexChange = (index, oldIndex) => {
-        void runEventIds(load, ids, [{ timestamp: Date.now(), value: index, oldValue: oldIndex }]);
+        void runEventIds(load, ids, [{ timestamp: Date.now(), value: index, oldValue: oldIndex }], scope);
       };
       continue;
     }
@@ -159,7 +224,7 @@ export function widgetRuntimeBindings(
       continue;
     }
     dom[item.handler] = (event: unknown) => {
-      void runEventIds(load, ids, [eventPayload(widget.id, item.payload, event)]);
+      void runEventIds(load, ids, [eventPayload(widget.id, item.payload, event)], scope);
     };
   }
 
@@ -177,7 +242,7 @@ export function widgetRuntimeBindings(
       clear();
       start = pointOf(event);
       timer = window.setTimeout(() => {
-        void runEventIds(load, ids, [{ timestamp: Date.now(), ...start }]);
+        void runEventIds(load, ids, [{ timestamp: Date.now(), ...start }], scope);
       }, LONG_PRESS_MS);
     };
     dom.onTouchMove = (event: unknown) => {

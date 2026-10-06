@@ -10,6 +10,7 @@ import {
   type PageVariable,
   type PageWidget,
   type PageXmlDocument,
+  type ScopeAssign,
   type WidgetStateLayer,
 } from '@vanstack/xml';
 import type { WidgetCssOptions } from './css';
@@ -36,6 +37,7 @@ export type WidgetRenderContext = {
       summarizeCopy?: boolean;
       componentStack?: string[];
       commitModelValue?: (name: string, value: string, done?: boolean) => void;
+      assignScope?: ScopeAssign;
       instantiate?: boolean;
     },
   ) => ReactElement;
@@ -45,11 +47,14 @@ export type WidgetRenderContext = {
   pageData?: PageVariable[];
   modelOverrides?: Readonly<Record<string, string>>;
   commitModelValue?: (name: string, value: string, done?: boolean) => void;
+  assignScope?: ScopeAssign;
   loadWidgetEvent?: (id: string) => Promise<string | null>;
   components?: Record<string, PageXmlDocument>;
   componentStack?: string[];
   /** 编辑其它组件时，内部实例使用组件自己的测试数据。 */
   useComponentTestData?: boolean;
+  /** 图标路径 `分组.名称` 到文件地址。 */
+  icons?: Readonly<Record<string, string>>;
 };
 
 export function readPropText(value: unknown): string {

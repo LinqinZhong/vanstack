@@ -195,7 +195,7 @@ export function pageScrollCss(style: PageStyle | undefined, editing = false, opt
 
 export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOptions): CSSProperties | undefined {
   if (!style) {
-    return { width: 'fit-content', height: 'fit-content' };
+    return { width: 'fit-content', height: 'fit-content', overflow: 'hidden' };
   }
 
   const css: CSSProperties = {};
@@ -334,10 +334,8 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
 
   css.width = sizeCss(style.width, options);
   css.height = sizeCss(style.height, options);
-  const overflow = cssText(style.overflow, options);
-  if (overflow) {
-    css.overflow = overflow as CSSProperties['overflow'];
-  }
+  // 控件溢出一律裁切。表格和滚动容器在自己的节点上用 overflow-x / overflow-y 盖过这一条。
+  css.overflow = 'hidden';
   const position = cssText(style.position, options);
   if (position) {
     css.position = position as CSSProperties['position'];

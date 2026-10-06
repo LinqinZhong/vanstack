@@ -28,6 +28,8 @@ import type {
   MethodCodeDto,
   ProjectPageVersionDto,
   ProjectPageVersionMetaDto,
+  NamespaceDocumentDto,
+  ProjectNamespaceDto,
   ProjectVersionDto,
   WidgetEventScriptDto,
 } from '@vanstack/shared';
@@ -35,6 +37,7 @@ import { RequirePermissions } from '../auth/decorators/require-permissions.decor
 import { CreateAssetGroupDto, UpdateAssetGroupDto, UploadAssetFileDto } from './dto/asset.dto';
 import { CreateIconGroupDto, UpdateIconGroupDto, UploadIconFileDto } from './dto/icon.dto';
 import { PutProjectLangsDto } from './dto/lang.dto';
+import { CreateNamespaceDto, PutNamespaceDto, RenameNamespaceDto } from './dto/namespace.dto';
 import { PutWidgetEventDto } from './dto/event.dto';
 import { PutMethodCodeDto } from './dto/method.dto';
 import { CreateProjectPageDto, UpdateProjectPageDto } from './dto/page.dto';
@@ -429,6 +432,48 @@ export class LowcodeController {
     @Param('name') name: string,
   ): Promise<void> {
     return this.lowcode.deleteIconFile(id, versionId, group, name);
+  }
+
+  @Get(':id/namespaces')
+  listNamespaces(@Param('id', ParseUUIDPipe) id: string): Promise<ProjectNamespaceDto[]> {
+    return this.lowcode.listNamespaces(id);
+  }
+
+  @Post(':id/namespaces')
+  createNamespace(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateNamespaceDto,
+  ): Promise<ProjectNamespaceDto> {
+    return this.lowcode.createNamespace(id, dto.name);
+  }
+
+  @Patch(':id/namespaces/:name')
+  renameNamespace(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('name') name: string,
+    @Body() dto: RenameNamespaceDto,
+  ): Promise<ProjectNamespaceDto> {
+    return this.lowcode.renameNamespace(id, name, dto.name);
+  }
+
+  @Delete(':id/namespaces/:name')
+  @HttpCode(204)
+  deleteNamespace(@Param('id', ParseUUIDPipe) id: string, @Param('name') name: string): Promise<void> {
+    return this.lowcode.deleteNamespace(id, name);
+  }
+
+  @Get(':id/namespaces/:name')
+  getNamespace(@Param('id', ParseUUIDPipe) id: string, @Param('name') name: string): Promise<NamespaceDocumentDto> {
+    return this.lowcode.getNamespace(id, name);
+  }
+
+  @Put(':id/namespaces/:name')
+  putNamespace(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('name') name: string,
+    @Body() dto: PutNamespaceDto,
+  ): Promise<NamespaceDocumentDto> {
+    return this.lowcode.putNamespace(id, name, dto);
   }
 
   @Get(':id/methods/:methodId')

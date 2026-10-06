@@ -105,8 +105,49 @@ function showHtml(html: string): void {
   void mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 }
 
+let showingError = false;
+
 function showError(message: string): void {
+  showingError = true;
   showHtml(errorPageHtml(message));
+}
+
+function watchDevWindow(win: BrowserWindow): void {
+  win.webContents.on('console-message', (details, level, message) => {
+    const text = message || (details as unknown as { message?: string }).message || '';
+    const namedLevel = (details as unknown as { level?: string }).level;
+    if (level >= 3 || namedLevel === 'error') {
+      console.error(`[renderer] ${text}`);
+    }
+  });
+  win.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+    if (!isMainFrame || code === -3) {
+      return;
+    }
+    console.error(`[renderer] failed to load ${url}: ${description} (${code})`);
+    showError(`无法打开管理后台 ${url}\n${description} (${code})`);
+  });
+  let retried = false;
+  win.webContents.on('did-finish-load', () => {
+    if (showingError || retried) {
+      return;
+    }
+    setTimeout(() => {
+      if (showingError || retried || win.isDestroyed()) {
+        return;
+      }
+      void win.webContents
+        .executeJavaScript('document.getElementById("root")?.childElementCount ?? 0')
+        .then((count: number) => {
+          if (count === 0 && !retried && !win.isDestroyed()) {
+            retried = true;
+            console.error('[renderer] blank page, reloading');
+            win.webContents.reload();
+          }
+        })
+        .catch(() => undefined);
+    }, 1500);
+  });
 }
 
 function isAddrInUse(error: unknown): boolean {
@@ -170,6 +211,7 @@ async function boot(): Promise<void> {
   attachNavigationGuards();
   mainWindow = createMainWindow();
   if (devMode) {
+    watchDevWindow(mainWindow);
     void mainWindow.loadURL(ADMIN_ORIGIN);
     return;
   }

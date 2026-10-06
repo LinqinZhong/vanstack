@@ -24,7 +24,7 @@ export type EventEditorCopy = {
 
 const FILE = '/event.ts';
 const SIGNATURE = '(text: string, duration?: 0 | 1): void';
-const RUNTIME_FUNCTIONS = new Set(['$toast', '$navigateTo', '$navigateBack']);
+const RUNTIME_FUNCTIONS = new Set(['$toast', '$navigateTo', '$navigateBack', '$icon']);
 
 const libLoaders = import.meta.glob(
   [
@@ -78,8 +78,8 @@ async function scriptCompletions(context: CompletionContext, copy: EventEditorCo
   const libs = await loadLibs();
   const languageService = ensureService(libs);
   const body = context.state.doc.toString();
-  const header = virtualHeader(copy.params);
-  const nextSource = `${header}${body}\n}\n`;
+  const header = virtualHeader();
+  const nextSource = `${header}${body}\n`;
   if (nextSource !== source) {
     source = nextSource;
     version += 1;
@@ -127,7 +127,7 @@ function completionOptions(
   const detailed = result.isMemberCompletion && result.entries.length <= 80;
   const options: Completion[] = [];
   for (const entry of result.entries) {
-    if (entry.name === 'handler' || entry.isPackageJsonImport || entry.isImportStatementCompletion) {
+    if (entry.name === 'handler' || entry.name === '$icon' || entry.isPackageJsonImport || entry.isImportStatementCompletion) {
       continue;
     }
     const spanStart = entry.replacementSpan ? entry.replacementSpan.start - headerLength : -1;
@@ -164,6 +164,9 @@ function pushDuration(options: Completion[], copy: EventEditorCopy) {
 }
 
 function completionApply(entry: ts.CompletionEntry, member: boolean): Completion['apply'] {
+  if (!member && entry.name === '$icon') {
+    return "$icon('";
+  }
   if (!member && RUNTIME_FUNCTIONS.has(entry.name)) {
     return `${entry.name}(`;
   }
@@ -263,17 +266,26 @@ function completionType(kind: string) {
   }
 }
 
-function virtualHeader(params: EventEditorParam[]) {
-  const args = params.map((param) => `${param.name}: ${param.type}`).join(', ');
+function virtualHeader() {
   return `${WIDGET_EVENT_DECLARATIONS}
 declare function $toast(text: string, duration?: 0 | 1): void
+/** 按「分组.名称」取图标文件地址。 */
+declare function $icon(path: string): string
 /** 返回上一层或多层。1 是上一页，更大的数字继续往前，停在本次打开时的首页。 */
 declare function $navigateBack(times?: number): void
 /** 打开指定页面，并带上查询参数。页面里用 $query.参数名 读取。 */
 declare function $navigateTo(pageKey: string, query?: Record<string, any>): void
-/** 当前页的查询参数。 */
+/** 页面变量。读取 $data.名称；写入 $data.名称(值)，编译为 React 时是 set名称(值)。 */
+declare const $data: Record<string, any>
+/** 组件入参。读取 $props.名称；写入 $props.名称(值)，编译为 React 时是 set名称(值)。 */
+declare const $props: Record<string, any>
+/** 查询参数。读取 $query.名称；写入 $query.名称(值)，编译为 React 时是 set名称(值)。 */
 declare const $query: Record<string, any>
-function handler(${args}) {\n`;
+/** 当前循环项。 */
+declare const $item: any
+/** 当前循环序号，从 0 开始。 */
+declare const $index: number
+`;
 }
 
 function loadLibs() {

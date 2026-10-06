@@ -64,12 +64,20 @@ export type ProjectLangValueRecord = {
   sortOrder: number;
 };
 
+/** 工程上的命名空间。versionId 指向 namespace.version。 */
+export type ProjectNamespaceRecord = {
+  name: string;
+  versionId: string;
+};
+
 export type ProjectRecord = {
   _id: string;
   name: string;
   key: string;
   description: string;
   currentVersionId: string | null;
+  /** 命名空间名称，以及各自指向的 namespace.version。 */
+  namespace?: ProjectNamespaceRecord[];
   createdAt: Date;
   updatedAt: Date;
 };
@@ -121,6 +129,41 @@ export type LibraryVersionRecord = {
   updatedAt: Date;
 };
 
+export type NamespaceFieldRecord = {
+  id: string;
+  name: string;
+  description: string;
+  type: string;
+  children?: NamespaceFieldRecord[];
+};
+
+export type NamespaceTypeRecord = {
+  id: string;
+  name: string;
+  description: string;
+  fields: NamespaceFieldRecord[];
+  source: string;
+};
+
+export type NamespaceDataRecord = {
+  id: string;
+  type: string;
+  name: string;
+  description: string;
+  value: unknown;
+};
+
+/** 一个命名空间的类型定义和数据。由工程文档的 namespace.versionId 指向。 */
+export type NamespaceVersionRecord = {
+  _id: string;
+  projectId: string;
+  projectKey: string;
+  uses: number;
+  types: NamespaceTypeRecord[];
+  data: NamespaceDataRecord[];
+  updatedAt: Date;
+};
+
 /** 迁移前嵌在工程上的语言库，读完就不再写入。 */
 export type LegacyLangRecord = {
   _id: string;
@@ -151,7 +194,7 @@ export type EventRecord = {
 
 /**
  * 低代码文档按业务集合存放：`project`、`project.version`、`page.version`、`component`、`component.version`、
- * `function`、`event`、`lang.version`、`asset.version`、`icon.version`。
+ * `function`、`event`、`lang.version`、`asset.version`、`icon.version`、`namespace.version`。
  */
 @Injectable()
 export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
@@ -168,6 +211,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
   private legacyLangs: Collection<LegacyLangRecord> | null = null;
   private assetVersions: Collection<LibraryVersionRecord> | null = null;
   private iconVersions: Collection<LibraryVersionRecord> | null = null;
+  private namespaceVersions: Collection<NamespaceVersionRecord> | null = null;
 
   constructor(config: ConfigService) {
     this.dbName = config.get<string>('MONGO_DB', 'vanstack');
@@ -189,6 +233,8 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     this.legacyLangs = db.collection<LegacyLangRecord>('lang');
     this.assetVersions = db.collection<LibraryVersionRecord>('asset.version');
     this.iconVersions = db.collection<LibraryVersionRecord>('icon.version');
+    this.namespaceVersions = db.collection<NamespaceVersionRecord>('namespace.version');
+    await this.namespaceVersions.createIndex({ projectId: 1 });
     await adoptBusinessId(this.projects, 'id');
     await adoptBusinessId(this.pageVersions, 'versionId');
     await adoptBusinessId(this.components, 'id');
@@ -455,6 +501,18 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     return this.addUses(this.libraryDocs(kind), id, delta);
   }
 
+  async getNamespaceVersion(id: string): Promise<NamespaceVersionRecord | null> {
+    return this.namespaceVersionDocs().findOne({ _id: id });
+  }
+
+  async saveNamespaceVersion(record: NamespaceVersionRecord): Promise<void> {
+    await this.namespaceVersionDocs().replaceOne({ _id: record._id }, record, { upsert: true });
+  }
+
+  async deleteNamespaceVersion(id: string): Promise<void> {
+    await this.namespaceVersionDocs().deleteOne({ _id: id });
+  }
+
   async countBlobKey(key: string): Promise<number> {
     const filter = { 'groups.files.key': key };
     const assets = await this.libraryDocs('asset').countDocuments(filter);
@@ -507,6 +565,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     await this.componentVersionDocs().deleteMany({ projectId });
     await this.functionDocs().deleteMany({ projectId });
     await this.eventDocs().deleteMany({ projectId });
+    await this.namespaceVersionDocs().deleteMany({ projectId });
   }
 
   async renameProjectKey(projectId: string, projectKey: string): Promise<void> {
@@ -520,6 +579,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     await this.componentVersionDocs().updateMany({ projectId }, set);
     await this.functionDocs().updateMany({ projectId }, set);
     await this.eventDocs().updateMany({ projectId }, set);
+    await this.namespaceVersionDocs().updateMany({ projectId }, set);
   }
 
   /** 迁走工程文档上残留的 pages 字段，并记下当前工程版本。 */
@@ -640,6 +700,13 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
       throw new Error('lang.version collection is not ready');
     }
     return this.langVersions;
+  }
+
+  private namespaceVersionDocs() {
+    if (!this.namespaceVersions) {
+      throw new Error('namespace.version collection is not ready');
+    }
+    return this.namespaceVersions;
   }
 
   private libraryDocs(kind: 'asset' | 'icon') {

@@ -13,6 +13,7 @@ import {
   type PageVariable,
   type PageWidget,
   type PageXmlDocument,
+  type ScopeAssign,
   type WidgetStateLayer,
 } from '@vanstack/xml';
 import { pageCss, pageCssText, pageScrollCss } from './css';
@@ -20,8 +21,11 @@ import { widgetElement } from './elements';
 import { HOVER_STATE_NAME, resolveRuntimeOwnState, widgetHasHoverState } from './hover';
 import { expandLoopTree, widgetInstanceKey, widgetInstanceMeta } from './loop';
 import { setPageQuery } from './navigate';
+import { installPageIcons } from './icon';
+import { installPageI18n } from './i18n';
 import { usePageToast } from './toast';
-import { pointEventPayload, runEventIds, timeEventPayload, type WidgetEventLoader } from './events';
+import { pointEventPayload, runEventIds, timeEventPayload, type ScriptScope, type WidgetEventLoader } from './events';
+import { formatStoredValue } from './stored';
 import type { WidgetHoverHandlers } from './widget-render';
 
 export type PageViewing =
@@ -38,12 +42,14 @@ export type LowcodePageProps = {
   viewing: PageViewing;
   dynamicTextLabel?: string;
   onModelValue?: (name: string, value: string, done?: boolean) => void;
+  onQueryValue?: (name: string, value: unknown) => void;
   loadWidgetEvent?: WidgetEventLoader;
   pageId?: string | null;
   query?: Record<string, unknown>;
   components?: Record<string, PageXmlDocument>;
   centerContent?: boolean;
   useComponentTestData?: boolean;
+  icons?: Readonly<Record<string, string>>;
 };
 
 const EMPTY_SCOPE: BindingScope = { data: Object.create(null) as Record<string, unknown> };
@@ -55,16 +61,26 @@ function pageDataKey(data: PageVariable[] | undefined) {
     .join('\n');
 }
 
-export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel, onModelValue, loadWidgetEvent, pageId, query, components, centerContent, useComponentTestData }: LowcodePageProps): ReactElement {
+export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel, onModelValue, onQueryValue, loadWidgetEvent, pageId, query, components, centerContent, useComponentTestData, icons }: LowcodePageProps): ReactElement {
+  installPageIcons(icons);
+  installPageI18n(catalog, locale || pickPageLocale(catalog));
   const pageQuery = query ?? EMPTY_QUERY;
   const loaderRef = useRef(loadWidgetEvent);
   loaderRef.current = loadWidgetEvent;
+  const scriptScopeRef = useRef<ScriptScope>({});
   const eventsRef = useRef(page.events);
   eventsRef.current = page.events;
   const [hoverInstanceKeys, setHoverInstanceKeys] = useState<string[]>([]);
   const dataKey = pageDataKey(page.data);
   const [appliedDataKey, setAppliedDataKey] = useState(dataKey);
   const [modelOverrides, setModelOverrides] = useState<Record<string, string>>({});
+  const incomingQueryStamp = JSON.stringify(pageQuery);
+  const [queryStamp, setQueryStamp] = useState(incomingQueryStamp);
+  const [queryOverrides, setQueryOverrides] = useState<Record<string, unknown>>({});
+  if (queryStamp !== incomingQueryStamp) {
+    setQueryStamp(incomingQueryStamp);
+    setQueryOverrides({});
+  }
   if (appliedDataKey !== dataKey) {
     setAppliedDataKey(dataKey);
     setModelOverrides((prev) => {
@@ -85,15 +101,27 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     setHoverInstanceKeys([]);
   }, [page, editing]);
 
+  useEffect(() => {
+    if (editing) {
+      setModelOverrides({});
+      setQueryOverrides({});
+    }
+  }, [editing]);
+
+  const liveQuery = useMemo(
+    () => (queryStamp === incomingQueryStamp ? { ...pageQuery, ...queryOverrides } : pageQuery),
+    [pageQuery, queryOverrides, queryStamp, incomingQueryStamp],
+  );
+
   useLayoutEffect(() => {
     if (editing) {
       return undefined;
     }
-    setPageQuery(pageQuery);
+    setPageQuery(liveQuery);
     return () => {
       setPageQuery(EMPTY_QUERY);
     };
-  }, [editing, pageQuery]);
+  }, [editing, liveQuery]);
 
   useEffect(() => {
     if (editing) {
@@ -110,7 +138,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       if (!ids?.length) {
         return;
       }
-      await runEventIds(loader, ids, [arg], pageQuery);
+      await runEventIds(loader, ids, [arg], scriptScopeRef.current);
     };
     void (async () => {
       await run('init', timeEventPayload());
@@ -129,14 +157,14 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       }
       void (async () => {
         if (before?.length) {
-          await runEventIds(loader, before, [leave], pageQuery);
+          await runEventIds(loader, before, [leave], scriptScopeRef.current);
         }
         if (left?.length) {
-          await runEventIds(loader, left, [leave], pageQuery);
+          await runEventIds(loader, left, [leave], scriptScopeRef.current);
         }
       })();
     };
-  }, [editing, pageId, pageQuery]);
+  }, [editing, pageId]);
 
   function runPageTouch(name: 'touchstart' | 'touchmove' | 'touchend', event: unknown) {
     if (editing) {
@@ -147,7 +175,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     if (!loader || !ids?.length) {
       return;
     }
-    void runEventIds(loader, ids, [pointEventPayload(event)]);
+    void runEventIds(loader, ids, [pointEventPayload(event)], scriptScopeRef.current);
   }
 
   const propsScope = useMemo(() => {
@@ -158,9 +186,9 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       }
       return { ...prop, value: modelOverrides[key] };
     });
-    return buildPropsRecord(live, pageQuery);
-  }, [page.props, modelOverrides, pageQuery]);
-  const dataProps = useMemo(() => buildPropsRecord(page.props, pageQuery), [page.props, pageQuery]);
+    return buildPropsRecord(live, liveQuery);
+  }, [page.props, modelOverrides, liveQuery]);
+  const dataProps = useMemo(() => buildPropsRecord(page.props, liveQuery), [page.props, liveQuery]);
   const dataOverrides = useMemo(() => {
     const overrides: Record<string, string> = Object.create(null);
     let any = false;
@@ -176,18 +204,47 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     return any ? overrides : undefined;
   }, [page.data, modelOverrides]);
   const dataScope = useMemo(
-    () => resolvePageData(page.data, dataOverrides, dataProps, propsScope, pageQuery),
-    [page.data, dataOverrides, dataProps, propsScope, pageQuery],
+    () => resolvePageData(page.data, dataOverrides, dataProps, propsScope, liveQuery),
+    [page.data, dataOverrides, dataProps, propsScope, liveQuery],
   );
+  const assignScope = (bucket: 'data' | 'props' | 'query', name: string, value: unknown) => {
+    if (bucket === 'query') {
+      liveQuery[name] = value;
+      setQueryOverrides((prev) => (prev[name] === value ? prev : { ...prev, [name]: value }));
+      onQueryValue?.(name, value);
+      return;
+    }
+    const stored = formatStoredValue(value);
+    if (bucket === 'props') {
+      const prop = page.props?.find((item) => item.name === name);
+      if (!prop) {
+        return;
+      }
+      propsScope[name] = value;
+      const key = `$props.${name}`;
+      setModelOverrides((prev) => (prev[key] === stored ? prev : { ...prev, [key]: stored }));
+      if (prop.bind) {
+        onModelValue?.(key, stored, true);
+      }
+      return;
+    }
+    const variable = page.data?.find((item) => item.name === name);
+    if (!variable || (variable.computed && (variable.type === 'arr' || variable.type === 'obj'))) {
+      return;
+    }
+    dataScope[name] = value;
+    commitModelValue(name, stored, true);
+  };
+  scriptScopeRef.current = { data: dataScope, props: propsScope, query: liveQuery, assign: assignScope };
   const { widgets, stateLayers } = useMemo(() => {
     const sink = new WeakMap<object, WidgetStateLayer[]>();
-    const expanded = expandLoopTree(page.widgets, { data: dataScope, props: propsScope, query: pageQuery, aliases: {} }, editing);
+    const expanded = expandLoopTree(page.widgets, { data: dataScope, props: propsScope, query: liveQuery, aliases: {} }, editing);
     const resolved = resolveWidgetTree(expanded, editing ? viewing : null, {
       appliedStateFor: editing ? undefined : (widget) => resolveRuntimeOwnState(widget, hoverInstanceKeys),
       stateLayersSink: sink,
     });
     return { widgets: resolved, stateLayers: sink };
-  }, [page.widgets, viewing, dataScope, propsScope, pageQuery, editing, hoverInstanceKeys]);
+  }, [page.widgets, viewing, dataScope, propsScope, liveQuery, editing, hoverInstanceKeys]);
   const toast = usePageToast();
   const currentLocale = locale || pickPageLocale(catalog);
   const dir = pageI18nDir(catalog, currentLocale);
@@ -222,7 +279,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
             ? value === '1' || value === 'true'
               ? '1'
               : '0'
-            : prop.type === 'str'
+            : prop.type === 'str' || prop.type === 'icon' || prop.type === 'image'
               ? value
               : prop.type === 'arr' && validateDataLiteral(value, 'arr')
                 ? value
@@ -253,7 +310,13 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       }
       return;
     }
-    if (variable.type !== 'str' && variable.type !== 'num' && variable.type !== 'bool') {
+    if (
+      variable.type !== 'str' &&
+      variable.type !== 'icon' &&
+      variable.type !== 'image' &&
+      variable.type !== 'num' &&
+      variable.type !== 'bool'
+    ) {
       return;
     }
     if (variable.type === 'bool') {
@@ -282,6 +345,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       summarizeCopy?: boolean;
       componentStack?: string[];
       commitModelValue?: (name: string, value: string, done?: boolean) => void;
+      assignScope?: ScopeAssign;
       /** 组件被放到别的页面上时，内部按入参求值并展开循环。 */
       instantiate?: boolean;
     },
@@ -290,6 +354,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     const summarizeCopy = Boolean(options?.summarizeCopy);
     const componentStack = options?.componentStack ?? [];
     const commit = options?.commitModelValue ?? commitModelValue;
+    const assign = options?.assignScope ?? assignScope;
     const instantiate = Boolean(options?.instantiate);
     return widgetElement(widget, {
       editing,
@@ -307,15 +372,18 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       pageData: page.data,
       modelOverrides,
       commitModelValue: commit,
+      assignScope: assign,
       loadWidgetEvent,
       components,
       componentStack,
       useComponentTestData: Boolean(useComponentTestData),
+      icons,
       render: (child, childOptions) =>
         render(child, {
           summarizeCopy: childOptions?.summarizeCopy ?? summarizeCopy,
           componentStack: childOptions?.componentStack ?? componentStack,
           commitModelValue: childOptions?.commitModelValue ?? commit,
+          assignScope: childOptions?.assignScope ?? assign,
           instantiate: childOptions?.instantiate ?? instantiate,
         }),
       stateLayers,
@@ -324,7 +392,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
 
   const bindingOptions = {
     evaluateBindings: !editing,
-    bindingScope: { data: dataScope, props: propsScope, query: pageQuery },
+    bindingScope: { data: dataScope, props: propsScope, query: liveQuery },
   };
   return createElement(
     'div',

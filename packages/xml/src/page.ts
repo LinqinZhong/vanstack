@@ -417,6 +417,16 @@ export type PageWidget =
       item?: FlexItemStyle;
     } & WidgetCommon)
   | ({
+      type: 'scroll';
+      id: string;
+      children: PageWidget[];
+      style?: WidgetStyle;
+      /** 缺省为开。关掉后这一轴裁切，不滚动。 */
+      scrollX?: boolean;
+      scrollY?: boolean;
+      item?: FlexItemStyle;
+    } & WidgetCommon)
+  | ({
       type: 'swiper';
       id: string;
       children: PageWidget[];
@@ -468,7 +478,7 @@ export type PageWidget =
       style?: WidgetStyle;
     } & WidgetCommon);
 
-type WidgetParent = 'page' | 'flex' | 'swiper' | 'swiper-item' | 'table' | 'tr' | 'th' | 'td';
+type WidgetParent = 'page' | 'flex' | 'scroll' | 'swiper' | 'swiper-item' | 'table' | 'tr' | 'th' | 'td';
 
 function hasFlexItem(
   widget: PageWidget,
@@ -486,7 +496,7 @@ export type PageStyle = {
   overflow?: OverflowMode | string;
 };
 
-export const PAGE_DATA_TYPES = ['num', 'str', 'bool', 'arr', 'obj', 'widget'] as const;
+export const PAGE_DATA_TYPES = ['num', 'str', 'bool', 'arr', 'obj', 'icon', 'image', 'widget'] as const;
 export type PageDataType = (typeof PAGE_DATA_TYPES)[number];
 
 export type PageVariable = {
@@ -495,11 +505,18 @@ export type PageVariable = {
   value: string;
   desc?: string;
   watch?: string;
-  /** 数组或对象打开后按表达式跟随 `$data` / `$props`，关闭后只在创建时求值一次。 */
+  /**
+   * 数组的元素类型，或对象引用的命名空间类型名。
+   * 内置元素类型是 num、str、bool、obj、icon、image、widget，其余是命名空间里的类型名。
+   */
+  of?: string;
+  /** 数组或对象用函数表达式生成值。缺省按静态字面量编辑。 */
+  dynamic?: boolean;
+  /** 动态值打开后按表达式跟随 `$data` / `$props`，关闭后只在创建时求值一次。 */
   computed?: boolean;
 };
 
-export const COMPONENT_PROP_TYPES = ['num', 'str', 'bool', 'arr', 'obj'] as const;
+export const COMPONENT_PROP_TYPES = ['num', 'str', 'bool', 'arr', 'obj', 'icon', 'image'] as const;
 export type ComponentPropType = (typeof COMPONENT_PROP_TYPES)[number];
 
 export type ComponentProp = {
@@ -510,6 +527,8 @@ export type ComponentProp = {
   required?: boolean;
   /** 双向绑定时，外部可以把这个入参写成可写绑定。脚本里用 `$props.参数名` 读取。 */
   bind?: boolean;
+  /** 数组的元素类型，或对象引用的命名空间类型名。 */
+  of?: string;
 };
 
 /** 调试样本。键是入参、页面 query 或变量名，值的写法和定义里的 value 相同。缺省时用定义值。 */
@@ -952,6 +971,7 @@ const WIDGET_TAGS = [
   'checkbox',
   'switch',
   'flex',
+  'scroll',
   'swiper',
   'swiper-item',
   'table',
@@ -1657,6 +1677,8 @@ export function compactWidgetStyle(style: WidgetStyle | undefined): WidgetStyle 
 
 export const DEFAULT_SWIPER_WIDTH: SizeValue = { mode: '%', value: 100 };
 export const DEFAULT_SWIPER_HEIGHT: SizeValue = { mode: 'px', value: 150 };
+export const DEFAULT_SCROLL_WIDTH: SizeValue = { mode: '%', value: 100 };
+export const DEFAULT_SCROLL_HEIGHT: SizeValue = { mode: 'px', value: 200 };
 
 export function sanitizeWidgetStyle(
   type: PageWidget['type'],
@@ -1700,12 +1722,15 @@ export function sanitizeWidgetStyle(
     delete next.paddingRight;
     delete next.paddingBottom;
     delete next.paddingLeft;
-    delete next.overflow;
     next.width = compactSize(next.width) ?? DEFAULT_SWIPER_WIDTH;
     next.height = compactSize(next.height) ?? DEFAULT_SWIPER_HEIGHT;
   }
-  if (type === 'image' || type === 'swiper-item' || type === 'th' || type === 'tr' || type === 'td') {
+  if (type !== 'table') {
     delete next.overflow;
+  }
+  if (type === 'scroll') {
+    next.width = fixedWidgetSize(next.width, DEFAULT_SCROLL_WIDTH);
+    next.height = fixedWidgetSize(next.height, DEFAULT_SCROLL_HEIGHT);
   }
   if (type === 'th' || type === 'tr' || type === 'td') {
     delete next.width;
@@ -1746,6 +1771,15 @@ export function sanitizeWidgetStyle(
     }
   }
   return compactWidgetStyle(next);
+}
+
+/** 滚动容器只要 px 或 %。绑定和自适应都落回默认尺寸。 */
+export function fixedWidgetSize(size: SizeValue | string | undefined, fallback: SizeValue): SizeValue {
+  const compact = compactSize(size);
+  if (compact && typeof compact !== 'string') {
+    return compact;
+  }
+  return fallback;
 }
 
 export function compactSize(size: SizeValue | string | undefined): SizeValue | string | undefined {
@@ -2549,12 +2583,16 @@ function parsePageData(nodes: OrderedNode[]): PageVariable[] | undefined {
       const desc = attr(child, 'desc').trim();
       const watch = type === 'bool' ? attr(child, 'watch') : '';
       const computed = (type === 'arr' || type === 'obj') && attr(child, 'computed') === '1';
+      const dynamic = (type === 'arr' || type === 'obj') && (attr(child, 'dynamic') === '1' || computed);
+      const of = type === 'arr' || type === 'obj' ? attr(child, 'of').trim() : '';
       const variable: PageVariable = {
         type,
         name,
         value,
         ...(desc ? { desc } : {}),
         ...(watch ? { watch } : {}),
+        ...(of ? { of } : {}),
+        ...(dynamic ? { dynamic: true } : {}),
         ...(computed ? { computed: true } : {}),
       };
       return [variable];
@@ -2644,6 +2682,7 @@ function parseContractProps(nodes: OrderedNode[], tag: 'props' | 'query'): Compo
     const desc = attr(child, 'desc').trim();
     const required = tag === 'props' && attr(child, 'required') === '1';
     const bind = tag === 'props' && attr(child, 'bind') === '1';
+    const of = tag === 'props' && (type === 'arr' || type === 'obj') ? attr(child, 'of').trim() : '';
     props.push({
       name,
       type,
@@ -2651,6 +2690,7 @@ function parseContractProps(nodes: OrderedNode[], tag: 'props' | 'query'): Compo
       ...(desc ? { desc } : {}),
       ...(required ? { required: true } : {}),
       ...(bind ? { bind: true } : {}),
+      ...(of ? { of } : {}),
     });
   }
   return props.length > 0 ? props : undefined;
@@ -2806,6 +2846,9 @@ function serializeContractProps(tag: 'props' | 'query', props: ComponentProp[]):
       if (tag === 'props' && prop.bind) {
         attrs['@_bind'] = '1';
       }
+      if (tag === 'props' && prop.of && (prop.type === 'arr' || prop.type === 'obj')) {
+        attrs['@_of'] = prop.of;
+      }
       return {
         [prop.type]: [{ '#text': prop.value }],
         ':@': attrs,
@@ -2917,8 +2960,14 @@ function serializePageData(variables: PageVariable[]): OrderedNode {
       if (variable.type === 'bool' && variable.watch) {
         attrs['@_watch'] = variable.watch;
       }
+      if ((variable.type === 'arr' || variable.type === 'obj') && variable.dynamic) {
+        attrs['@_dynamic'] = '1';
+      }
       if ((variable.type === 'arr' || variable.type === 'obj') && variable.computed) {
         attrs['@_computed'] = '1';
+      }
+      if ((variable.type === 'arr' || variable.type === 'obj') && variable.of) {
+        attrs['@_of'] = variable.of;
       }
       return {
         [variable.type]: [{ '#text': variable.value }],
@@ -3534,7 +3583,9 @@ function serializeStateChildren(widget: PageWidget, ids: { n: number }, parent: 
   const childParent: WidgetParent =
     widget.type === 'flex'
       ? 'flex'
-      : widget.type === 'swiper'
+      : widget.type === 'scroll'
+        ? 'scroll'
+        : widget.type === 'swiper'
         ? 'swiper'
         : widget.type === 'swiper-item'
           ? 'swiper-item'
@@ -3550,6 +3601,7 @@ function serializeStateChildren(widget: PageWidget, ids: { n: number }, parent: 
   const childSource = widget.type === 'table' ? orderTableChildren(widget.children) : undefined;
   const children =
     widget.type === 'flex' ||
+    widget.type === 'scroll' ||
     widget.type === 'swiper' ||
     widget.type === 'swiper-item' ||
     widget.type === 'table' ||
@@ -3866,6 +3918,34 @@ function parseWidgets(
       });
       continue;
     }
+    if (allowContent && Object.prototype.hasOwnProperty.call(child, 'scroll')) {
+      ids.n += 1;
+      const style = sanitizeWidgetStyle('scroll', parseStyle(child));
+      const item = asItem ? parseItem(child) : undefined;
+      const extra = widgetStateSpread(child, nodeList(child.scroll), ancestorIds);
+      const nextIds = [...ancestorIds, ...extraDeclaredIds(extra)];
+      const scrollX = attr(child, 'scroll-x') === 'false' ? false : undefined;
+      const scrollY = attr(child, 'scroll-y') === 'false' ? false : undefined;
+      widgets.push({
+        type: 'scroll',
+        id: attr(child, 'id') || `n${ids.n}`,
+        children: parseWidgets(extra.rest, ids, 'scroll', nextIds),
+        ...(style ? { style } : {}),
+        ...(scrollX === false ? { scrollX } : {}),
+        ...(scrollY === false ? { scrollY } : {}),
+        ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHidden(child),
+        ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
     if (allowContent && Object.prototype.hasOwnProperty.call(child, 'swiper')) {
       ids.n += 1;
       const style = sanitizeWidgetStyle('swiper', parseStyle(child));
@@ -4147,6 +4227,16 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
       return {
         flex: inner,
         ':@': widgetHostAttrs(widget, id, style, { ...flexAttrs(widget.flex), ...item }),
+      };
+    }
+    if (widget.type === 'scroll') {
+      return {
+        scroll: inner,
+        ':@': widgetHostAttrs(widget, id, style, {
+          ...(widget.scrollX === false ? { '@_scroll-x': 'false' } : {}),
+          ...(widget.scrollY === false ? { '@_scroll-y': 'false' } : {}),
+          ...item,
+        }),
       };
     }
     if (widget.type === 'swiper') {

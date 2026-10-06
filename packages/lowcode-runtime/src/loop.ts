@@ -70,7 +70,7 @@ function resolveLoopItems(loop: WidgetLoop, scope: BindingScope): unknown[] {
 
 function joinInstanceKey(prefix: string, widgetId: string, unique?: string): string {
   const base = prefix ? `${prefix}/${widgetId}` : widgetId;
-  return unique == null ? base : `${base}::${unique}`;
+  return unique == null ? base : `${base}-${unique}`;
 }
 
 function materialize(widget: PageWidget, scope: BindingScope, key: string, editing: boolean): PageWidget {
@@ -95,6 +95,7 @@ export function expandLoopTree(
       const items = resolveLoopItems(loop, scope);
       items.forEach((item, index) => {
         const unique = uniqueKeyOf(item, loop.key, index);
+        const token = unique === String(index) ? String(index) : `${unique}-${index}`;
         const nextScope: BindingScope = {
           data: scope.data,
           props: scope.props,
@@ -107,7 +108,7 @@ export function expandLoopTree(
             $index: index,
           },
         };
-        result.push(materialize(widget, nextScope, joinInstanceKey(keyPrefix, widget.id, `${unique}::${index}`), editing));
+        result.push(materialize(widget, nextScope, joinInstanceKey(keyPrefix, widget.id, token), editing));
       });
       continue;
     }

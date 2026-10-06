@@ -1,4 +1,4 @@
-import type { PageDataType, PageVariable } from '@vanstack/xml';
+import type { PageVariable } from '@vanstack/xml';
 import {
   buildPageDataScope,
   defaultPageDataValue,
@@ -18,15 +18,6 @@ export {
   readVariableValue,
   validateDataLiteral,
 };
-
-export const PAGE_DATA_TYPE_OPTIONS: Array<{ value: PageDataType; label: string }> = [
-  { value: 'num', label: 'Number' },
-  { value: 'str', label: 'String' },
-  { value: 'bool', label: 'Boolean' },
-  { value: 'arr', label: 'Array' },
-  { value: 'obj', label: 'Object' },
-  { value: 'widget', label: 'Widget' },
-];
 
 export const WIDGET_DATA_DRAG_TYPE = 'application/x-vanstack-widget-id';
 export const WIDGET_DATA_DRAG_PREFIX = 'vanstack-widget:';

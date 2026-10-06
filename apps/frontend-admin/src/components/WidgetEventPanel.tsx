@@ -1,5 +1,5 @@
 import { DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined } from '@ant-design/icons';
-import CodeMirror from '@uiw/react-codemirror';
+import { ScriptEditor } from './ScriptEditor';
 import { Button, ConfigProvider, Form, Input, Modal, Popconfirm, Select, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -332,19 +332,15 @@ export function WidgetEventPanel({
           </Form.Item>
         </Form>
         {editingSpec ? (
-          <div className="page-data-code widget-event-code">
-            <pre className="page-data-code-line">{eventFunctionHeader(editingSpec)}</pre>
-            <CodeMirror
-              value={body}
-              height="280px"
-              theme="light"
-              extensions={editorExtensions}
-              editable={!disabled}
-              basicSetup={{ lineNumbers: true, foldGutter: false }}
-              onChange={setBody}
-            />
-            <pre className="page-data-code-line">{'}'}</pre>
-          </div>
+          <ScriptEditor
+            value={body}
+            height="280px"
+            prefix={eventFunctionHeader(editingSpec)}
+            suffix="}"
+            extensions={editorExtensions}
+            editable={!disabled}
+            onChange={setBody}
+          />
         ) : null}
       </Modal>
       </ConfigProvider>

@@ -1030,7 +1030,7 @@ export function PreviewPage() {
       );
     }
 
-    /** onWheel：滚轮缩放，回传父页。编辑时表格不滚动；滚动容器仍可滚动。 */
+    /** onWheel：滚轮缩放，回传父页。编辑时表格不滚动；滚动容器仍可滚动。预览里页面自己滚，不改画布缩放。 */
     function onWheel(event: WheelEvent) {
       if (!editingRef.current || wheelTargetsScroll(event)) {
         return;

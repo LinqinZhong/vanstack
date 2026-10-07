@@ -981,7 +981,7 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
   min-height: var(--screen-height);
 }
 
-/* 表格 / 滚动 / 滑动器编辑时不走多窗口分屏，当前窗口不再裁切，其余窗口让开。 */
+/* 表格 / 滑动器编辑时收起其它窗口。滚动编辑只藏起来，窗口仍留在原来的槽位，避免画布跳动。 */
 .preview-host.is-editing:is(.is-scroll-editing, .is-table-editing, .is-swiper-editing) .lowcode-windows,
 .preview-host.is-editing:is(.is-scroll-editing, .is-table-editing, .is-swiper-editing) .lowcode-windows-track,
 .preview-host.is-editing:is(.is-scroll-editing, .is-table-editing, .is-swiper-editing) .lowcode-window {
@@ -993,11 +993,18 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
   visibility: hidden !important;
 }
 
-.preview-host.is-editing:is(.is-scroll-editing, .is-table-editing, .is-swiper-editing) .lowcode-windows-slot.is-offset:not(:has(.is-scroll-open, .is-table-open, .is-swiper-open)) {
+/* 滚动编辑只靠 visibility 藏窗口。display:none 会把多窗口槽拉出文档流，进出编辑时画布会抖。 */
+.preview-host.is-editing.is-scroll-editing .lowcode-window:not(:has(.is-scroll-open)),
+.preview-host.is-editing.is-scroll-editing .lowcode-windows-slot.is-offset:not(:has(.is-scroll-open)) {
+  visibility: hidden !important;
+  pointer-events: none;
+}
+
+.preview-host.is-editing:is(.is-table-editing, .is-swiper-editing) .lowcode-windows-slot.is-offset:not(:has(.is-table-open, .is-swiper-open)) {
   display: none;
 }
 
-.preview-host.is-editing:is(.is-scroll-editing, .is-table-editing, .is-swiper-editing) .lowcode-windows-slot.is-offset:has(.is-scroll-open, .is-table-open, .is-swiper-open) {
+.preview-host.is-editing:is(.is-table-editing, .is-swiper-editing) .lowcode-windows-slot.is-offset:has(.is-table-open, .is-swiper-open) {
   position: static;
   width: 100%;
   height: 100%;
@@ -1011,7 +1018,6 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
   height: 100%;
 }
 
-.preview-host.is-editing.is-scroll-editing .lowcode-window:not(:has(.is-scroll-open)),
 .preview-host.is-editing.is-table-editing .lowcode-window:not(:has(.is-table-open)),
 .preview-host.is-editing.is-swiper-editing .lowcode-window:not(:has(.is-swiper-open)) {
   display: none !important;

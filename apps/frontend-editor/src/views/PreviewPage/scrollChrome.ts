@@ -101,8 +101,11 @@ export function syncScrollReveal(
   editing: boolean,
   scrollEditing: boolean,
 ) {
-  const clearOpen = () => {
+  const clearOpen = (keep?: ReadonlySet<HTMLElement>) => {
     root?.querySelectorAll('.lowcode-scroll.is-scroll-open').forEach((node) => {
+      if (keep?.has(node as HTMLElement)) {
+        return;
+      }
       node.classList.remove('is-scroll-open');
     });
   };
@@ -111,21 +114,28 @@ export function syncScrollReveal(
     clearOpen();
     return;
   }
-  clearOpen();
+  const keep = new Set<HTMLElement>();
   const scroll = scrollEditing ? editingScroll(root) : null;
   if (scroll) {
-    host.classList.add('is-scroll-editing');
     openScroll(scroll);
-  } else {
-    host.classList.remove('is-scroll-editing');
+    keep.add(scroll);
   }
   const table = root.querySelector('.lowcode-table.is-table-open');
   let parent = table?.parentElement ?? null;
   while (parent) {
     if (parent.classList.contains('lowcode-scroll') && parent instanceof HTMLElement) {
       openScroll(parent);
+      keep.add(parent);
     }
     parent = parent.parentElement;
+  }
+  /* 先标好要留的滚动层，再切编辑态，避免窗口在 :not(:has(.is-scroll-open)) 下被整页收起。 */
+  if (scroll) {
+    clearOpen(keep);
+    host.classList.add('is-scroll-editing');
+  } else {
+    host.classList.remove('is-scroll-editing');
+    clearOpen(keep);
   }
 }
 

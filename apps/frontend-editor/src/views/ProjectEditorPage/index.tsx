@@ -306,7 +306,11 @@ export function ProjectEditorPage() {
   const readyRef = useRef(false);
   const [view, setView] = useState<ViewTransform>({ x: 0, y: 0, scale: 1 });
   const viewRef = useRef(view);
+  const editViewRef = useRef<ViewTransform>({ x: 0, y: 0, scale: 1 });
+  const previewViewRef = useRef<ViewTransform>({ x: 0, y: 0, scale: 1 });
   const userAdjustedRef = useRef(false);
+  const editUserAdjustedRef = useRef(false);
+  const previewUserAdjustedRef = useRef(false);
   const [panning, setPanning] = useState(false);
   const panningRef = useRef(false);
   const panRafRef = useRef(0);
@@ -645,6 +649,17 @@ export function ProjectEditorPage() {
       y: snapDevicePixel(next.y),
     };
     viewRef.current = snapped;
+    if (modeRef.current === 'preview') {
+      previewViewRef.current = snapped;
+      if (fromUser) {
+        previewUserAdjustedRef.current = true;
+      }
+    } else {
+      editViewRef.current = snapped;
+      if (fromUser) {
+        editUserAdjustedRef.current = true;
+      }
+    }
     paintCanvasView(iframeRef.current, phoneFrameRef.current, snapped, modeRef.current !== 'preview', tableContentPinRef.current);
     if (fromUser) {
       userAdjustedRef.current = true;
@@ -804,14 +819,41 @@ export function ProjectEditorPage() {
   }, []);
 
   useLayoutEffect(() => {
-    paintCanvasView(
-      iframeRef.current,
-      phoneFrameRef.current,
-      viewRef.current,
-      mode !== 'preview',
-      tableContentPinRef.current,
+    if (zoomRafRef.current) {
+      window.cancelAnimationFrame(zoomRafRef.current);
+      zoomRafRef.current = 0;
+    }
+    if (panRafRef.current) {
+      window.cancelAnimationFrame(panRafRef.current);
+      panRafRef.current = 0;
+    }
+    if (zoomIdleTimerRef.current) {
+      window.clearTimeout(zoomIdleTimerRef.current);
+      zoomIdleTimerRef.current = 0;
+    }
+    pendingZoomRef.current = null;
+    pendingPanRef.current = null;
+    zoomingRef.current = false;
+    panningRef.current = false;
+    dragRef.current = null;
+    setPanning(false);
+    stageRef.current?.classList.remove('is-zooming', 'is-panning');
+    const preview = mode === 'preview';
+    const adjusted = preview ? previewUserAdjustedRef.current : editUserAdjustedRef.current;
+    userAdjustedRef.current = adjusted;
+    const stage = stageRef.current;
+    if (!adjusted && stage && stage.clientWidth > 0 && stage.clientHeight > 0) {
+      applyView(canvasHomeView(stage), false);
+      return;
+    }
+    const stored = preview ? previewViewRef.current : editViewRef.current;
+    viewRef.current = stored;
+    setView((current) =>
+      current.x === stored.x && current.y === stored.y && current.scale === stored.scale ? current : stored,
     );
-  }, [mode]);
+    paintZoomLabel(stored.scale);
+    paintCanvasView(iframeRef.current, phoneFrameRef.current, stored, !preview, tableContentPinRef.current);
+  }, [mode, applyView, paintZoomLabel]);
 
   useLayoutEffect(() => {
     if (panningRef.current || zoomingRef.current) {
@@ -820,15 +862,54 @@ export function ProjectEditorPage() {
     paintCanvasView(iframeRef.current, phoneFrameRef.current, view, modeRef.current !== 'preview', tableContentPinRef.current);
   }, [view]);
 
+  /** 容器编辑中点还原时，用适配缩放，并把正在编辑的那一层放到画布中心。 */
+  function canvasHomeView(stage: HTMLElement): ViewTransform {
+    const fit = computeFitView(stage.clientWidth, stage.clientHeight, SCREEN_WIDTH);
+    const editingContainer =
+      modeRef.current !== 'preview' &&
+      Boolean(scrollEditIdRef.current || tableEditIdRef.current || swiperEditIdRef.current);
+    const doc = iframeRef.current?.contentDocument;
+    if (!editingContainer || !doc) {
+      return fit;
+    }
+    const nodes = [...doc.querySelectorAll<HTMLElement>('.is-scroll-open, .is-table-open, .is-swiper-open')];
+    const leaf = nodes.find((node) => !nodes.some((other) => other !== node && node.contains(other)));
+    if (!leaf) {
+      return fit;
+    }
+    const rect = leaf.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return fit;
+    }
+    const current = viewRef.current;
+    const stageRect = stage.getBoundingClientRect();
+    const topLeft = mapIframePoint(iframeRef.current, rect.left, rect.top);
+    const bottomRight = mapIframePoint(iframeRef.current, rect.left + rect.width, rect.top + rect.height);
+    const centerX = (topLeft.x + bottomRight.x) / 2 - stageRect.left;
+    const centerY = (topLeft.y + bottomRight.y) / 2 - stageRect.top;
+    const pageX = (centerX - current.x) / Math.max(current.scale, 0.01);
+    const pageY = (centerY - current.y) / Math.max(current.scale, 0.01);
+    return {
+      scale: fit.scale,
+      x: stage.clientWidth / 2 - pageX * fit.scale,
+      y: stage.clientHeight / 2 - pageY * fit.scale,
+    };
+  }
+
   const fitCanvas = useCallback(
     (fromUser = false) => {
       const stage = stageRef.current;
       if (!stage) {
         return;
       }
-      const next = computeFitView(stage.clientWidth, stage.clientHeight, SCREEN_WIDTH);
+      const next = canvasHomeView(stage);
       if (!fromUser) {
         userAdjustedRef.current = false;
+        if (modeRef.current === 'preview') {
+          previewUserAdjustedRef.current = false;
+        } else {
+          editUserAdjustedRef.current = false;
+        }
       }
       applyView(next, fromUser);
     },
@@ -1218,9 +1299,6 @@ export function ProjectEditorPage() {
         return;
       }
       if (event.data.type === 'canvas-wheel') {
-        if (modeRef.current !== 'edit') {
-          return;
-        }
         const stage = stageRef.current;
         if (!stage) {
           return;
@@ -1400,9 +1478,6 @@ export function ProjectEditorPage() {
         return;
       }
       event.preventDefault();
-      if (modeRef.current !== 'edit') {
-        return;
-      }
       scheduleZoom(event.clientX, event.clientY, event.deltaY > 0 ? 1 / ZOOM_STEP : ZOOM_STEP);
     }
     stage.addEventListener('wheel', onWheel, { passive: false });

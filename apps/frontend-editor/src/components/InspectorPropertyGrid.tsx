@@ -1680,7 +1680,7 @@ export function WidgetPropertyInspector({
       },
       {
         key: 'fontSize',
-        value: formatPx(style.fontSize),
+        value: formatPx(style.fontSize) || '14px',
         onChange: (raw) => accepted(parseFontSize(raw), (fontSize) => patchStyle({ fontSize })),
       },
     {

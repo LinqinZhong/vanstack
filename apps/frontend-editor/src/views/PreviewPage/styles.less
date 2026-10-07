@@ -32,6 +32,7 @@ body:has(.preview-host.is-editing) #root {
   box-sizing: border-box;
   width: 375px;
   height: 667px;
+  --screen-height: 667px;
   margin: 0;
   padding: 0;
   background: transparent;
@@ -953,13 +954,15 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
 .preview-host.is-editing .lowcode-windows-slot.is-offset {
   position: absolute;
   top: 0;
-  height: 100%;
+  height: auto;
+  min-height: var(--screen-height);
   box-sizing: border-box;
 }
 
 .preview-host.is-editing .lowcode-windows-slot.is-offset > .lowcode-window {
   width: 100%;
-  height: 100%;
+  height: auto;
+  min-height: var(--screen-height);
   box-sizing: border-box;
 }
 
@@ -967,6 +970,8 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
   outline: 1px solid #e11d2e;
   outline-offset: -1px;
   visibility: visible !important;
+  height: auto;
+  min-height: var(--screen-height);
 }
 
 /* 表格 / 滚动 / 滑动器编辑时不走多窗口分屏，当前窗口不再裁切，其余窗口让开。 */
@@ -978,6 +983,7 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
 
 .preview-host.is-editing:is(.is-scroll-editing, .is-table-editing, .is-swiper-editing) .lowcode-window {
   outline: none;
+  visibility: hidden !important;
 }
 
 .preview-host.is-editing:is(.is-scroll-editing, .is-table-editing, .is-swiper-editing) .lowcode-windows-slot.is-offset:not(:has(.is-scroll-open, .is-table-open, .is-swiper-open)) {
@@ -1030,16 +1036,23 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
 }
 
 .preview-host.is-table-editing .widget-chrome-frame.is-hover,
-.preview-host.is-scroll-editing .widget-chrome-frame.is-hover {
+.preview-host.is-scroll-editing .widget-chrome-frame.is-hover,
+.preview-host.is-swiper-editing .widget-chrome-frame.is-hover {
   display: none;
 }
 
-.preview-host.is-scroll-editing [data-widget-id] {
+/* 进入表格、滚动或滑动器编辑后，藏起页面壳和其它控件。嵌套时只留最里面那一层。 */
+.preview-host.is-editing:is(.is-scroll-editing, .is-table-editing, .is-swiper-editing) .lowcode-page,
+.preview-host.is-editing:is(.is-scroll-editing, .is-table-editing, .is-swiper-editing) [data-widget-id] {
   visibility: hidden;
 }
 
-.preview-host.is-scroll-editing .lowcode-scroll.is-scroll-open,
-.preview-host.is-scroll-editing .lowcode-scroll.is-scroll-open [data-widget-id] {
+.preview-host.is-scroll-editing .lowcode-scroll.is-scroll-open:not(:has(.is-scroll-open, .is-table-open, .is-swiper-open)),
+.preview-host.is-scroll-editing .lowcode-scroll.is-scroll-open:not(:has(.is-scroll-open, .is-table-open, .is-swiper-open)) [data-widget-id],
+.preview-host.is-table-editing .lowcode-table.is-table-open:not(:has(.is-scroll-open, .is-table-open, .is-swiper-open)),
+.preview-host.is-table-editing .lowcode-table.is-table-open:not(:has(.is-scroll-open, .is-table-open, .is-swiper-open)) [data-widget-id],
+.preview-host.is-swiper-editing .lowcode-swiper.is-swiper-open:not(:has(.is-scroll-open, .is-table-open, .is-swiper-open)),
+.preview-host.is-swiper-editing .lowcode-swiper.is-swiper-open:not(:has(.is-scroll-open, .is-table-open, .is-swiper-open)) [data-widget-id] {
   visibility: visible;
 }
 
@@ -1059,46 +1072,6 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
 .preview-host.is-editing .lowcode-component:has(.lowcode-swiper.is-swiper-open),
 .preview-host.is-editing .lowcode-table-cell:has(.lowcode-swiper.is-swiper-open) {
   overflow: visible !important;
-}
-
-.preview-host.is-swiper-editing .widget-chrome-frame.is-hover {
-  display: none;
-}
-
-.preview-host.is-swiper-editing [data-widget-id] {
-  visibility: hidden;
-}
-
-.preview-host.is-swiper-editing .lowcode-swiper.is-swiper-open,
-.preview-host.is-swiper-editing .lowcode-swiper.is-swiper-open [data-widget-id] {
-  visibility: visible;
-}
-
-.preview-host.is-swiper-editing.is-scroll-editing .lowcode-scroll.is-scroll-open [data-widget-id] {
-  visibility: hidden;
-}
-
-.preview-host.is-swiper-editing.is-scroll-editing .lowcode-scroll.is-scroll-open .lowcode-swiper.is-swiper-open,
-.preview-host.is-swiper-editing.is-scroll-editing .lowcode-scroll.is-scroll-open .lowcode-swiper.is-swiper-open [data-widget-id] {
-  visibility: visible;
-}
-
-.preview-host.is-table-editing [data-widget-id] {
-  visibility: hidden;
-}
-
-.preview-host.is-table-editing .lowcode-table.is-table-open,
-.preview-host.is-table-editing .lowcode-table.is-table-open [data-widget-id] {
-  visibility: visible;
-}
-
-.preview-host.is-table-editing.is-swiper-editing .lowcode-swiper.is-swiper-open [data-widget-id] {
-  visibility: hidden;
-}
-
-.preview-host.is-table-editing.is-swiper-editing .lowcode-table.is-table-open,
-.preview-host.is-table-editing.is-swiper-editing .lowcode-table.is-table-open [data-widget-id] {
-  visibility: visible;
 }
 
 .preview-host.is-editing .lowcode-page:has(.lowcode-table.is-table-open),

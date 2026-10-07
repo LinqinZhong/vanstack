@@ -135,6 +135,16 @@ export type LowcodeFocusWidgetMessage = {
   height: number;
 };
 
+export type LowcodeEditLeafMessage = {
+  source: typeof LOWCODE_MESSAGE_SOURCE;
+  type: 'edit-leaf';
+  widgetId: string | null;
+  left?: number;
+  top?: number;
+  width?: number;
+  height?: number;
+};
+
 export type LowcodeCanvasWheelMessage = {
   source: typeof LOWCODE_MESSAGE_SOURCE;
   type: 'canvas-wheel';
@@ -274,6 +284,7 @@ export type LowcodeMessage =
   | LowcodeTableResizeMessage
   | LowcodeDismissToolbarMessage
   | LowcodeFocusWidgetMessage
+  | LowcodeEditLeafMessage
   | LowcodeCanvasWheelMessage
   | LowcodeCanvasPointerMessage
   | LowcodeKeydownMessage
@@ -303,6 +314,7 @@ const MESSAGE_TYPES = new Set([
   'table-resize',
   'dismiss-toolbar',
   'focus-widget',
+  'edit-leaf',
   'canvas-wheel',
   'canvas-pointer',
   'keydown',

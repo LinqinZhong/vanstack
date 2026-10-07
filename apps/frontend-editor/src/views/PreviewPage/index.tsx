@@ -13,7 +13,7 @@ import { isBoxDragKind, isSpacingNudgeKey, isSpacingValueKey, SPACING_EDGES } fr
 import { pointerAngleDeg, type RotateAxis } from '../../utils/rotateDrag';
 import { applyEditorChromeScale, applyLiveWidgetCss, applyViewport, applyWidgetState, FOCUS_DBLCLICK_MS, focusModifier, paintPreviewCamera, paintWidgetChrome, parentWidgetId, postCanvasPointer, postToParent, postWidgetHover, setSelectFaded } from './helpers';
 import { applyLiveTableTrack, readTableTrackPair, syncTableChrome, syncTableReveal, type TableChromeLabels } from './tableChrome';
-import { paintScrollModeButton, paintSwiperModeButton, syncScrollReveal, syncSwiperReveal, type ScrollChromeLabels, type SwiperChromeLabels } from './scrollChrome';
+import { leafOpenEditor, paintScrollModeButton, paintSwiperModeButton, syncScrollReveal, syncSwiperReveal, type ScrollChromeLabels, type SwiperChromeLabels } from './scrollChrome';
 
 export function PreviewPage() {
   const { t } = useTranslation();
@@ -99,6 +99,7 @@ export function PreviewPage() {
   const [hostTableEditing, setHostTableEditing] = useState(false);
   const [hostScrollEditing, setHostScrollEditing] = useState(false);
   const [hostSwiperEditing, setHostSwiperEditing] = useState(false);
+  const editLeafIdRef = useRef<string | null | undefined>(undefined);
 
   /** readSelectedLayoutSize：当前选中控件的布局宽高（布局坐标）。 */
   function readSelectedLayoutSize() {
@@ -140,6 +141,7 @@ export function PreviewPage() {
   function refreshTableChrome() {
     syncTableReveal(hostRef.current, mountRef.current, editingRef.current, tableEditingRef.current);
     syncScrollReveal(hostRef.current, mountRef.current, editingRef.current, scrollEditingRef.current);
+    syncSwiperReveal(hostRef.current, mountRef.current, editingRef.current, swiperEditingRef.current);
     paintScrollModeButton(
       hostRef.current,
       mountRef.current,
@@ -148,7 +150,6 @@ export function PreviewPage() {
       scrollEditingRef.current,
       scrollLabelsRef.current,
     );
-    syncSwiperReveal(hostRef.current, mountRef.current, editingRef.current, swiperEditingRef.current);
     paintSwiperModeButton(
       hostRef.current,
       mountRef.current,
@@ -166,6 +167,31 @@ export function PreviewPage() {
       tableDragKeyRef.current,
       chromeLabelsRef.current,
     );
+    const leaf = editingRef.current ? leafOpenEditor(mountRef.current) : null;
+    const leafId = leaf?.dataset.widgetId ?? null;
+    if (!leaf || !leafId) {
+      if (editLeafIdRef.current !== null) {
+        editLeafIdRef.current = null;
+        postToParent({ type: 'edit-leaf', widgetId: null });
+      }
+      return;
+    }
+    const rect = leaf.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+    if (leafId === editLeafIdRef.current) {
+      return;
+    }
+    editLeafIdRef.current = leafId;
+    postToParent({
+      type: 'edit-leaf',
+      widgetId: leafId,
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
   }
 
   useEffect(() => {

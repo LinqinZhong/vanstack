@@ -9,6 +9,24 @@ export type ScrollChromeLabels = {
 type Box = { left: number; top: number; width: number; height: number };
 
 const MODE_ATTR = 'data-scroll-mode';
+const OPEN_EDITOR = '.is-scroll-open, .is-table-open, .is-swiper-open';
+
+/** 当前真正在编辑的那一层。外层为了不裁切内容也会带着 open，这里把它们排除。 */
+export function leafOpenEditor(root: HTMLElement | null): HTMLElement | null {
+  if (!root) {
+    return null;
+  }
+  const nodes = [...root.querySelectorAll<HTMLElement>(OPEN_EDITOR)];
+  const leaves = nodes.filter((node) => !nodes.some((other) => other !== node && node.contains(other)));
+  const selected = root.querySelector('.is-widget-selected');
+  if (selected instanceof HTMLElement) {
+    const hit = leaves.find((node) => node === selected || node.contains(selected));
+    if (hit) {
+      return hit;
+    }
+  }
+  return leaves[0] ?? null;
+}
 
 function hostBox(host: HTMLElement, node: HTMLElement, zoom: number): Box {
   const hostRect = host.getBoundingClientRect();
@@ -128,7 +146,7 @@ export function paintScrollModeButton(
   const selected = root.querySelector<HTMLElement>('.is-widget-selected');
   const open = scrollEditing ? editingScroll(root) : null;
   const scroll = open ?? (selected?.dataset.widgetType === 'scroll' ? selected : null);
-  if (!scroll) {
+  if (!scroll || (open && leafOpenEditor(root) !== scroll)) {
     remove();
     return;
   }
@@ -234,7 +252,7 @@ export function paintSwiperModeButton(
   const selected = root.querySelector<HTMLElement>('.is-widget-selected');
   const open = swiperEditing ? editingSwiper(root) : null;
   const swiper = open ?? (selected?.dataset.widgetType === 'swiper' ? selected : null);
-  if (!swiper) {
+  if (!swiper || (open && leafOpenEditor(root) !== swiper)) {
     remove();
     return;
   }

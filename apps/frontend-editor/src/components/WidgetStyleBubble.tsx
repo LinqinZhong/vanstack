@@ -682,11 +682,10 @@ export function WidgetStyleBubble({
                   min={1}
                   max={999}
                   controls
-                  value={display.fontSize}
-                  placeholder="px"
+                  value={typeof display.fontSize === 'number' ? display.fontSize : 14}
                   suffix="px"
                   onMouseDown={(event) => event.stopPropagation()}
-                  onChange={(fontSize) => patch({ fontSize: fontSize ?? undefined })}
+                  onChange={(fontSize) => patch({ fontSize: typeof fontSize === 'number' ? fontSize : undefined })}
                 />
               </Tooltip>
               <Tooltip title={t('lowcode.propEdit')}>

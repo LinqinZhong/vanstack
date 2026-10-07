@@ -1,5 +1,6 @@
 import { LOWCODE_MESSAGE_SOURCE, type TableChromeState } from '../../utils/lowcode-protocol';
 import { previewVisualScale } from '../../utils/spacingGuides';
+import { leafOpenEditor } from './scrollChrome';
 
 export type TableChromeLabels = {
   moveLeft: string;
@@ -341,7 +342,7 @@ function paintTableModeButton(
   const open = root.querySelector<HTMLElement>('.lowcode-table.is-table-open');
   const selected = root.querySelector<HTMLElement>('.is-widget-selected');
   const table = open ?? (selected?.dataset.widgetType === 'table' ? selected : null);
-  if (!table) {
+  if (!table || (open && leafOpenEditor(root) !== table)) {
     remove();
     return;
   }
@@ -388,6 +389,12 @@ export function syncTableChrome(
   draggingKey: string | null,
   labels: TableChromeLabels,
 ) {
+  const openTable = root?.querySelector<HTMLElement>('.lowcode-table.is-table-open');
+  if (openTable && leafOpenEditor(root) !== openTable) {
+    host?.querySelector(`[${MODE_ATTR}]`)?.remove();
+    host?.querySelector(`[${CHROME_ATTR}]`)?.remove();
+    return;
+  }
   paintTableModeButton(host, root, zoom, editing, labels);
   if (!host || !editing || !model) {
     host?.querySelector(`[${CHROME_ATTR}]`)?.remove();

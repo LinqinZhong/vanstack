@@ -385,11 +385,11 @@ export function ProjectEditorPage() {
   const selectWidgetRef = useRef<(id: string | null) => void>(() => undefined);
   const tableRangeRef = useRef<TableRange | null>(null);
   const tableEditIdRef = useRef<string | null>(null);
-  const tableEditViewRef = useRef<ViewTransform | null>(null);
   const scrollEditIdRef = useRef<string | null>(null);
-  const scrollEditViewRef = useRef<ViewTransform | null>(null);
   const swiperEditIdRef = useRef<string | null>(null);
-  const swiperEditViewRef = useRef<ViewTransform | null>(null);
+  const editOriginViewRef = useRef<ViewTransform | null>(null);
+  const centeredEditIdRef = useRef<string | null>(null);
+  const exitOneEditRef = useRef<() => boolean>(() => false);
   const tableContentPinRef = useRef({ x: 0, y: 0 });
   const enterTableEditRef = useRef<() => void>(() => undefined);
   const exitTableEditRef = useRef<() => boolean>(() => false);
@@ -901,6 +901,34 @@ export function ProjectEditorPage() {
     [applyView, fitCanvas],
   );
 
+  /** 进入表格 / 滚动 / 滑动器编辑时，保持当前缩放，把这一层挪到画布中心。 */
+  const centerWidgetInView = useCallback(
+    (box: { left: number; top: number; width: number; height: number }) => {
+      const stage = stageRef.current;
+      if (!stage || box.width <= 0 || box.height <= 0) {
+        return;
+      }
+      const current = viewRef.current;
+      const stageRect = stage.getBoundingClientRect();
+      const topLeft = mapIframePoint(iframeRef.current, box.left, box.top);
+      const bottomRight = mapIframePoint(
+        iframeRef.current,
+        box.left + box.width,
+        box.top + box.height,
+      );
+      const centerX = (topLeft.x + bottomRight.x) / 2 - stageRect.left;
+      const centerY = (topLeft.y + bottomRight.y) / 2 - stageRect.top;
+      const pageX = (centerX - current.x) / Math.max(current.scale, 0.01);
+      const pageY = (centerY - current.y) / Math.max(current.scale, 0.01);
+      applyView({
+        scale: current.scale,
+        x: stage.clientWidth / 2 - pageX * current.scale,
+        y: stage.clientHeight / 2 - pageY * current.scale,
+      });
+    },
+    [applyView],
+  );
+
   useEffect(() => subscribeIconCatalog(setIconCatalog), []);
 
   useLayoutEffect(() => {
@@ -916,6 +944,39 @@ export function ProjectEditorPage() {
 
   const sendPreview = useCallback(() => {
     publishEditorI18n(pageI18n, previewLocale);
+    const depthOf = (widgetId: string) => {
+      let depth = 0;
+      let current = findWidget(widgetsRef.current, widgetId);
+      while (current) {
+        depth += 1;
+        current = findParentWidget(widgetsRef.current, current.id);
+      }
+      return depth;
+    };
+    const editLayers: { kind: 'table' | 'scroll' | 'swiper'; depth: number }[] = [];
+    if (
+      mode !== 'preview' &&
+      tableEditId != null &&
+      findOwningTable(widgetsRef.current, selectedWidgetId)?.table.id === tableEditId
+    ) {
+      editLayers.push({ kind: 'table', depth: depthOf(tableEditId) });
+    }
+    if (
+      mode !== 'preview' &&
+      scrollEditId != null &&
+      findOwningScroll(widgetsRef.current, selectedWidgetId)?.id === scrollEditId
+    ) {
+      editLayers.push({ kind: 'scroll', depth: depthOf(scrollEditId) });
+    }
+    if (
+      mode !== 'preview' &&
+      swiperEditId != null &&
+      findOwningSwiper(widgetsRef.current, selectedWidgetId)?.id === swiperEditId
+    ) {
+      editLayers.push({ kind: 'swiper', depth: depthOf(swiperEditId) });
+    }
+    editLayers.sort((a, b) => b.depth - a.depth);
+    const editLeaf = editLayers[0]?.kind ?? null;
     iframeRef.current?.contentWindow?.postMessage(
       {
         source: LOWCODE_MESSAGE_SOURCE,
@@ -972,23 +1033,11 @@ export function ProjectEditorPage() {
               canEditPositionInsets(findViewed(selectedWidgetId)?.style))
             ? openBoxGroup
             : null,
-        tableEditing:
-          mode !== 'preview' &&
-          tableEditId != null &&
-          findOwningTable(widgetsRef.current, selectedWidgetId)?.table.id === tableEditId,
-        scrollEditing:
-          mode !== 'preview' &&
-          scrollEditId != null &&
-          findOwningScroll(widgetsRef.current, selectedWidgetId)?.id === scrollEditId,
-        swiperEditing:
-          mode !== 'preview' &&
-          swiperEditId != null &&
-          findOwningSwiper(widgetsRef.current, selectedWidgetId)?.id === swiperEditId,
+        tableEditing: editLeaf === 'table',
+        scrollEditing: editLeaf === 'scroll',
+        swiperEditing: editLeaf === 'swiper',
         tableChrome:
-          mode !== 'preview' &&
-          !readOnlyRef.current &&
-          tableEditId != null &&
-          findOwningTable(widgetsRef.current, selectedWidgetId)?.table.id === tableEditId
+          editLeaf === 'table' && !readOnlyRef.current
             ? tableChromeState(widgetsRef.current, selectedWidgetId, tableRangeRef.current)
             : null,
         ...(canvasSettlingRef.current ? { settle: settleGenRef.current } : {}),
@@ -1102,7 +1151,7 @@ export function ProjectEditorPage() {
         };
         return;
       }
-      if (event.data.type === 'focus-widget') {
+        if (event.data.type === 'focus-widget') {
         if (modeRef.current !== 'edit') {
           return;
         }
@@ -1110,11 +1159,39 @@ export function ProjectEditorPage() {
         focusWidgetInView(event.data, true);
         return;
       }
+      if (event.data.type === 'edit-leaf') {
+        const leafId = event.data.widgetId;
+        if (!leafId || event.data.left == null || event.data.top == null || event.data.width == null || event.data.height == null) {
+          centeredEditIdRef.current = null;
+          return;
+        }
+        if (leafId === centeredEditIdRef.current) {
+          return;
+        }
+        if (!tableEditIdRef.current && !scrollEditIdRef.current && !swiperEditIdRef.current) {
+          return;
+        }
+        if (event.data.width <= 0 || event.data.height <= 0) {
+          return;
+        }
+        if (!editOriginViewRef.current) {
+          const current = viewRef.current;
+          editOriginViewRef.current = { scale: current.scale, x: current.x, y: current.y };
+        }
+        centeredEditIdRef.current = leafId;
+        centerWidgetInView({
+          left: event.data.left,
+          top: event.data.top,
+          width: event.data.width,
+          height: event.data.height,
+        });
+        return;
+      }
       if (event.data.type === 'keydown' || event.data.type === 'keyup') {
         if (event.data.type === 'keydown' && event.data.key === 'Escape' && !event.data.ctrlKey && !event.data.metaKey) {
-          exitTableEditRef.current();
-          exitScrollEditRef.current();
-          exitSwiperEditRef.current();
+          if (exitOneEditRef.current()) {
+            return;
+          }
           commitSpacingEditRef.current('cancel');
           return;
         }
@@ -1165,7 +1242,7 @@ export function ProjectEditorPage() {
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [focusWidgetInView, scheduleZoom, sendPreview, enterTableEditRef, exitTableEditRef]);
+  }, [centerWidgetInView, focusWidgetInView, scheduleZoom, sendPreview, enterTableEditRef, exitTableEditRef]);
 
   useEffect(() => {
     sendPreview();
@@ -1386,7 +1463,7 @@ export function ProjectEditorPage() {
         event.key === 'Escape' &&
         !isEditableKeyboardTarget(event.target)
       ) {
-        if (exitTableEditRef.current() || exitScrollEditRef.current() || exitSwiperEditRef.current()) {
+        if (exitOneEditRef.current()) {
           event.preventDefault();
           event.stopPropagation();
           commitSpacingEditRef.current('cancel');
@@ -2276,32 +2353,26 @@ export function ProjectEditorPage() {
       return;
     }
     if (tableEditIdRef.current && owning?.table.id !== tableEditIdRef.current) {
-      restoreTableEditView();
       tableEditIdRef.current = null;
       setTableEditId(null);
     }
     if (scrollEditIdRef.current && owningScroll?.id !== scrollEditIdRef.current) {
-      restoreScrollEditView();
       scrollEditIdRef.current = null;
       setScrollEditId(null);
     }
     if (swiperEditIdRef.current && owningSwiper?.id !== swiperEditIdRef.current) {
-      restoreSwiperEditView();
       swiperEditIdRef.current = null;
       setSwiperEditId(null);
     }
     if (owning && selected && selected.id !== owning.table.id && tableEditIdRef.current !== owning.table.id) {
-      rememberTableEditView();
       tableEditIdRef.current = owning.table.id;
       setTableEditId(owning.table.id);
     }
     if (owningScroll && selected && selected.id !== owningScroll.id && scrollEditIdRef.current !== owningScroll.id) {
-      rememberScrollEditView();
       scrollEditIdRef.current = owningScroll.id;
       setScrollEditId(owningScroll.id);
     }
     if (owningSwiper && selected && selected.id !== owningSwiper.id && swiperEditIdRef.current !== owningSwiper.id) {
-      rememberSwiperEditView();
       swiperEditIdRef.current = owningSwiper.id;
       setSwiperEditId(owningSwiper.id);
     }
@@ -2309,6 +2380,7 @@ export function ProjectEditorPage() {
     selectedWidgetIdRef.current = id;
     setSelectedWidgetId(id);
     setExpandedKeys((prev) => nextExpandedKeys(prev, widgetsRef.current, widgetsRef.current, id));
+    syncEditOrigin();
   }
   selectWidgetRef.current = selectWidget;
 
@@ -2320,7 +2392,6 @@ export function ProjectEditorPage() {
     tableEditIdRef.current = null;
     setTableEditId(null);
     selectWidgetRef.current(editingId);
-    restoreTableEditView();
     return true;
   }
 
@@ -2562,20 +2633,23 @@ export function ProjectEditorPage() {
     return true;
   }
 
-  function rememberScrollEditView() {
-    if (scrollEditViewRef.current) {
+  function syncEditOrigin() {
+    const active = Boolean(tableEditIdRef.current || scrollEditIdRef.current || swiperEditIdRef.current);
+    if (active) {
+      if (!editOriginViewRef.current) {
+        const current = viewRef.current;
+        editOriginViewRef.current = { scale: current.scale, x: current.x, y: current.y };
+      }
       return;
     }
-    const current = viewRef.current;
-    scrollEditViewRef.current = { scale: current.scale, x: current.x, y: current.y };
-  }
-
-  function restoreScrollEditView() {
-    const previous = scrollEditViewRef.current;
-    scrollEditViewRef.current = null;
-    if (previous) {
-      applyView(previous);
+    const previous = editOriginViewRef.current;
+    if (!previous) {
+      return;
     }
+    editOriginViewRef.current = null;
+    centeredEditIdRef.current = null;
+    tableContentPinRef.current = { x: 0, y: 0 };
+    applyView(previous);
   }
 
   function enterScrollEdit() {
@@ -2586,28 +2660,13 @@ export function ProjectEditorPage() {
     if (scrollEditIdRef.current === selected.id) {
       return;
     }
-    rememberScrollEditView();
     scrollEditIdRef.current = selected.id;
     setScrollEditId(selected.id);
     const childId = selected.children[0]?.id;
     if (childId) {
       selectWidget(childId);
-    }
-  }
-
-  function rememberSwiperEditView() {
-    if (swiperEditViewRef.current) {
-      return;
-    }
-    const current = viewRef.current;
-    swiperEditViewRef.current = { scale: current.scale, x: current.x, y: current.y };
-  }
-
-  function restoreSwiperEditView() {
-    const previous = swiperEditViewRef.current;
-    swiperEditViewRef.current = null;
-    if (previous) {
-      applyView(previous);
+    } else {
+      syncEditOrigin();
     }
   }
 
@@ -2619,12 +2678,13 @@ export function ProjectEditorPage() {
     if (swiperEditIdRef.current === selected.id) {
       return;
     }
-    rememberSwiperEditView();
     swiperEditIdRef.current = selected.id;
     setSwiperEditId(selected.id);
     const childId = selected.children[0]?.id;
     if (childId) {
       selectWidget(childId);
+    } else {
+      syncEditOrigin();
     }
   }
 
@@ -2636,7 +2696,6 @@ export function ProjectEditorPage() {
     swiperEditIdRef.current = null;
     setSwiperEditId(null);
     selectWidgetRef.current(editingId);
-    restoreSwiperEditView();
     return true;
   }
 
@@ -2648,25 +2707,7 @@ export function ProjectEditorPage() {
     scrollEditIdRef.current = null;
     setScrollEditId(null);
     selectWidgetRef.current(editingId);
-    restoreScrollEditView();
     return true;
-  }
-
-  function rememberTableEditView() {
-    if (tableEditViewRef.current) {
-      return;
-    }
-    const current = viewRef.current;
-    tableEditViewRef.current = { scale: current.scale, x: current.x, y: current.y };
-  }
-
-  function restoreTableEditView() {
-    const previous = tableEditViewRef.current;
-    tableEditViewRef.current = null;
-    tableContentPinRef.current = { x: 0, y: 0 };
-    if (previous) {
-      applyView(previous);
-    }
   }
 
   function enterTableEdit() {
@@ -2677,13 +2718,39 @@ export function ProjectEditorPage() {
     if (tableEditIdRef.current === selected.id) {
       return;
     }
-    rememberTableEditView();
     tableEditIdRef.current = selected.id;
     setTableEditId(selected.id);
     const headerId = findOwningTable(widgetsRef.current, selected.id)?.headers[0]?.id;
     if (headerId) {
       selectWidget(headerId);
+    } else {
+      syncEditOrigin();
     }
+  }
+
+  function widgetDepth(id: string) {
+    let depth = 0;
+    let current = findWidget(widgetsRef.current, id);
+    while (current) {
+      depth += 1;
+      current = findParentWidget(widgetsRef.current, current.id);
+    }
+    return depth;
+  }
+
+  function exitOneEditLayer() {
+    const layers: { depth: number; exit: () => boolean }[] = [];
+    if (tableEditIdRef.current) {
+      layers.push({ depth: widgetDepth(tableEditIdRef.current), exit: () => exitTableEdit() });
+    }
+    if (scrollEditIdRef.current) {
+      layers.push({ depth: widgetDepth(scrollEditIdRef.current), exit: () => exitScrollEdit() });
+    }
+    if (swiperEditIdRef.current) {
+      layers.push({ depth: widgetDepth(swiperEditIdRef.current), exit: () => exitSwiperEdit() });
+    }
+    layers.sort((a, b) => b.depth - a.depth);
+    return layers[0]?.exit() ?? false;
   }
 
   function handleWidgetEnter(event: {
@@ -2755,6 +2822,7 @@ export function ProjectEditorPage() {
   exitScrollEditRef.current = exitScrollEdit;
   enterSwiperEditRef.current = enterSwiperEdit;
   exitSwiperEditRef.current = exitSwiperEdit;
+  exitOneEditRef.current = exitOneEditLayer;
 
   useEffect(() => {
     if (!selectedWidgetId) {
@@ -4505,7 +4573,7 @@ export function ProjectEditorPage() {
       }
       const style = widget.style;
       if (shortcut === 'fontSizeUp' || shortcut === 'fontSizeDown') {
-        const from = typeof style?.fontSize === 'number' && style.fontSize > 0 ? style.fontSize : (measuredFontSize(widget.id) ?? 16);
+        const from = typeof style?.fontSize === 'number' && style.fontSize > 0 ? style.fontSize : (measuredFontSize(widget.id) ?? 14);
         const nextSize = Math.min(999, Math.max(1, from + (shortcut === 'fontSizeUp' ? 1 : -1)));
         if (nextSize === style?.fontSize) {
           return;

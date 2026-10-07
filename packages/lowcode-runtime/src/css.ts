@@ -571,11 +571,14 @@ function escapeStateId(id: string): string {
   return id.replace(/["\\]/g, '\\$&');
 }
 
-function styleRuleText(style: WidgetStyle | undefined, includeDefaults: boolean): string | undefined {
-  if (!style && !includeDefaults) {
+function styleRuleText(style: WidgetStyle | undefined, includeDefaults: boolean, defaultFontSize = false): string | undefined {
+  if (!style && !includeDefaults && !defaultFontSize) {
     return undefined;
   }
   const css = widgetCss(style, { animate: false, evaluateBindings: false }) ?? {};
+  if (defaultFontSize && css.fontSize == null) {
+    css.fontSize = '14px';
+  }
   if (!includeDefaults) {
     if (style?.width == null) {
       delete css.width;
@@ -710,11 +713,20 @@ function fixedBottomClearance(widget: PageWidget): string | undefined {
   return value.mode === '%' ? `${value.value}%` : `${value.value}px`;
 }
 
+function usesDefaultFont(widget: PageWidget): boolean {
+  return widget.type === 'text' || widget.type === 'button' || widget.type === 'input' || widget.type === 'checkbox' || widget.type === 'th' || widget.type === 'td';
+}
+
+function hasExplicitFontSize(style: WidgetStyle | undefined): boolean {
+  const value = style?.fontSize;
+  return (typeof value === 'number' && Number.isFinite(value)) || (typeof value === 'string' && value.trim().length > 0);
+}
+
 export function pageCssText(widgets: PageWidget[]): string {
   const blocks: string[] = [];
 
-  function push(selector: string, style: WidgetStyle | undefined, includeDefaults: boolean) {
-    const body = styleRuleText(style, includeDefaults);
+  function push(selector: string, style: WidgetStyle | undefined, includeDefaults: boolean, defaultFontSize = false) {
+    const body = styleRuleText(style, includeDefaults, defaultFontSize);
     if (body) {
       blocks.push(`${selector} { ${body}; }`);
     }
@@ -735,7 +747,12 @@ export function pageCssText(widgets: PageWidget[]): string {
         }
       }
       const stretchTrack = widget.type === 'th' || widget.type === 'tr' || widget.type === 'td';
-      push(`.${cls}`, iconLayoutStyle(widget), !stretchTrack);
+      push(
+        `.${cls}`,
+        iconLayoutStyle(widget),
+        !stretchTrack,
+        usesDefaultFont(widget) && !hasExplicitFontSize(widget.style),
+      );
       if (widget.type === 'flex' && columnShouldHugContent(widget)) {
         blocks.push(`.lowcode-flex.${cls} { width: min-content; }`);
       }

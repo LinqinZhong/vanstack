@@ -248,9 +248,9 @@ export function WidgetStyleFields({
           max={999}
           controls
           disabled={disabled}
-          value={current.fontSize}
+          value={typeof current.fontSize === 'number' ? current.fontSize : 14}
           suffix="px"
-          onChange={(fontSize) => patch({ fontSize: fontSize ?? undefined })}
+          onChange={(fontSize) => patch({ fontSize: typeof fontSize === 'number' ? fontSize : undefined })}
         />
       </Form.Item>
       <Form.Item label={t('lowcode.styleColor')}>

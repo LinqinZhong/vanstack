@@ -82,6 +82,18 @@ function materialize(widget: PageWidget, scope: BindingScope, key: string, editi
   return next;
 }
 
+/** 编辑态默认只留一份模板。勾了「编辑时显示入参」的组件要按循环展开，入参里的 `$item` 才能求值。 */
+function loopForRender(widget: PageWidget, editing: boolean): WidgetLoop | undefined {
+  const loop = compactLoop(widget.loop);
+  if (!loop || !isLoopConfigured(loop)) {
+    return undefined;
+  }
+  if (!editing || (widget.type === 'component' && widget.editProps)) {
+    return loop;
+  }
+  return undefined;
+}
+
 export function expandLoopTree(
   widgets: PageWidget[],
   scope: BindingScope,
@@ -90,9 +102,13 @@ export function expandLoopTree(
 ): PageWidget[] {
   const result: PageWidget[] = [];
   for (const widget of widgets) {
-    const loop = !editing ? compactLoop(widget.loop) : undefined;
-    if (loop && isLoopConfigured(loop)) {
+    const loop = loopForRender(widget, editing);
+    if (loop) {
       const items = resolveLoopItems(loop, scope);
+      if (items.length === 0 && editing) {
+        result.push(materialize(widget, scope, joinInstanceKey(keyPrefix, widget.id), editing));
+        continue;
+      }
       items.forEach((item, index) => {
         const unique = uniqueKeyOf(item, loop.key, index);
         const token = unique === String(index) ? String(index) : `${unique}-${index}`;

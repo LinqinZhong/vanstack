@@ -2019,9 +2019,6 @@ export function ProjectEditorPage() {
     if (!id || !loaded) {
       return;
     }
-    if (readOnlyRef.current) {
-      return;
-    }
     if (documentKeyRef.current === lastServerKeyRef.current || emptyCanvasWouldErase()) {
       return;
     }
@@ -2987,7 +2984,7 @@ export function ProjectEditorPage() {
     } catch {
       return;
     }
-    if (!persistEnabledRef.current || readOnlyRef.current) {
+    if (!persistEnabledRef.current) {
       return;
     }
     void saveCurrentVersionRef.current({ silent: true });
@@ -3255,7 +3252,15 @@ export function ProjectEditorPage() {
       return true;
     }
     if (section === 'props') {
-      rememberPreviewProp(name, stored);
+      commitTestField('props', name, stored, `test:props:${name}`);
+      endCoalesce();
+      if (Object.prototype.hasOwnProperty.call(previewPropEditsRef.current, name)) {
+        const next = { ...previewPropEditsRef.current };
+        delete next[name];
+        previewPropEditsRef.current = next;
+        setPreviewPropEdits(next);
+      }
+      sendPreview();
       return true;
     }
     rememberPreviewQuery(name, stored);
@@ -4748,9 +4753,7 @@ export function ProjectEditorPage() {
     if (target.kind === 'page' && !target.projectVersionId) {
       return;
     }
-    if (readOnlyRef.current) {
-      return;
-    }
+    // 预览态仍要落盘：组件入参测试样本在预览里编辑，并写入 testData。
     if (keyToSave === lastServerKeyRef.current || emptyCanvasWouldErase()) {
       return;
     }

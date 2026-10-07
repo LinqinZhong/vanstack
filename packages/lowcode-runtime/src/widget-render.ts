@@ -39,6 +39,7 @@ export type WidgetRenderContext = {
       commitModelValue?: (name: string, value: string, done?: boolean) => void;
       assignScope?: ScopeAssign;
       instantiate?: boolean;
+      emit?: (name: string, ...args: unknown[]) => void;
     },
   ) => ReactElement | null;
   summarizeCopy?: boolean;
@@ -48,6 +49,8 @@ export type WidgetRenderContext = {
   modelOverrides?: Readonly<Record<string, string>>;
   commitModelValue?: (name: string, value: string, done?: boolean) => void;
   assignScope?: ScopeAssign;
+  /** 当前组件实例向外触发自定义事件。页面根上没有。 */
+  emit?: (name: string, ...args: unknown[]) => void;
   loadWidgetEvent?: (id: string) => Promise<string | null>;
   components?: Record<string, PageXmlDocument>;
   componentStack?: string[];

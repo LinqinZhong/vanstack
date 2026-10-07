@@ -1073,6 +1073,24 @@ function parseWidgetEvents(node: OrderedNode): { events?: WidgetEvents } {
       raw[item.name] = ids;
     }
   }
+  if (type === 'component') {
+    for (const [key, value] of Object.entries(node[':@'] ?? {})) {
+      if (!key.startsWith('@_@')) {
+        continue;
+      }
+      const name = key.slice(3);
+      if (!name || name === 'event-order' || raw[name] || !isJsIdentifier(name)) {
+        continue;
+      }
+      const ids = String(value ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean);
+      if (ids.length > 0) {
+        raw[name] = ids;
+      }
+    }
+  }
   const order = attr(node, '@event-order')
     .split(',')
     .map((id) => id.trim())

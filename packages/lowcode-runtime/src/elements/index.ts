@@ -35,6 +35,7 @@ export function widgetElement(widget: PageWidget, ctx: WidgetRenderContext): Rea
     query: ctx.bindingScope.query,
     aliases: ctx.bindingScope.aliases,
     assign: ctx.assignScope,
+    emit: ctx.emit,
   });
   if (!bindings) {
     return node;

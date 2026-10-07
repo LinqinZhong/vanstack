@@ -22,7 +22,7 @@ import {
   UnderlineOutlined,
 } from '@ant-design/icons';
 import { Button, ColorPicker, ConfigProvider, Input, InputNumber, Modal, Select, Switch, theme, Tooltip } from 'antd';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   DEFAULT_DRAWER_PLACE,
@@ -44,6 +44,7 @@ import {
   TABLE_ALIGNS,
   TABLE_VALIGNS,
   compactFlexContainer,
+  componentEmitSpecs,
   isCopyBinding,
   hasWidgetEvents,
   isLoopConfigured,
@@ -51,6 +52,7 @@ import {
   isStateFnConfigured,
   widgetEventSpecs,
   sanitizeWidgetStyle,
+  type ComponentEmit,
   type ComponentProp,
   type DrawerPlace,
   type FlexAlignItems,
@@ -460,6 +462,8 @@ export function WidgetStyleBubble({
   projectId,
   variables,
   componentProps,
+  scriptEmits,
+  listenEmits,
   disabled,
   onToolbarPopupChange,
   ownKeys,
@@ -487,6 +491,10 @@ export function WidgetStyleBubble({
   i18nCatalog?: PageI18n;
   variables?: PageVariable[];
   componentProps?: ComponentProp[];
+  /** 当前正在编辑的组件的自定义事件，供脚本里的 `$emit` 补全。 */
+  scriptEmits?: ComponentEmit[];
+  /** 选中的组件实例对外声明的自定义事件，可以在这里绑定处理函数。 */
+  listenEmits?: ComponentEmit[];
   disabled?: boolean;
   onToolbarPopupChange?: (open: boolean) => void;
   ownKeys?: Set<string>;
@@ -495,6 +503,14 @@ export function WidgetStyleBubble({
   onFlexChange?: (flex: FlexContainerStyle | undefined) => void;
 }) {
   const { t, i18n } = useTranslation();
+  const eventSpecs = useMemo(() => {
+    const base = widgetEventSpecs(widget.type);
+    if (widget.type !== 'component' || !listenEmits?.length) {
+      return base;
+    }
+    const taken = new Set(base.map((item) => item.name));
+    return [...componentEmitSpecs(listenEmits).filter((item) => !taken.has(item.name)), ...base];
+  }, [widget.type, listenEmits]);
   const modifier = modifierShortcutLabel();
   const rootRef = useRef<HTMLDivElement>(null);
   const current = style ?? {};
@@ -1440,10 +1456,11 @@ export function WidgetStyleBubble({
             ) : null}
             {openGroup === 'events' && onEventsChange ? (
               <WidgetEventPanel
-                specs={widgetEventSpecs(widget.type)}
+                specs={eventSpecs}
                 events={widget.events}
                 scopeKey={widget.id}
                 projectId={projectId}
+                emits={scriptEmits}
                 disabled={disabled}
                 onChange={onEventsChange}
               />

@@ -311,6 +311,7 @@
     "eventSaveFailed": "Could not save the event",
     "eventLoadFailed": "Could not load the event",
     "toastInfo": "Show a toast. The first argument is text. The second is 0 for a short duration, or 1 for a long duration.",
+    "emitInfo": "Emit a custom event of this component. The first argument is the event name. Later arguments match that event's parameters.",
     "toastShort": "Short",
     "toastLong": "Long",
     "eventClick": "Click",

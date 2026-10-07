@@ -27,7 +27,7 @@ export type WidgetEventParam = {
   type: string;
 };
 
-export type WidgetEventPayload = 'point' | 'value' | 'index' | 'compose' | 'time';
+export type WidgetEventPayload = 'point' | 'value' | 'index' | 'compose' | 'time' | 'emit';
 
 export type WidgetEventSpec = {
   /** XML 属性名。`click` 写成 `@click`，对应函数 `onClick`。 */
@@ -35,7 +35,69 @@ export type WidgetEventSpec = {
   handler: string;
   payload: WidgetEventPayload;
   params: WidgetEventParam[];
+  /** 事件列表里显示的名字。缺省时用内置文案。 */
+  label?: string;
 };
+
+export type EmitLike = {
+  name: string;
+  desc?: string;
+  params: { name: string; type: string }[];
+};
+
+const EMIT_NAME = /^[\p{ID_Start}$_][\p{ID_Continue}$]*$/u;
+
+export function scriptParamType(type: string): string {
+  switch (type) {
+    case 'string':
+    case 'number':
+    case 'boolean':
+    case 'any':
+      return type;
+    case 'array':
+      return 'any[]';
+    case 'object':
+      return 'Record<string, any>';
+    default:
+      return 'any';
+  }
+}
+
+function emitHandlerName(name: string): string {
+  if (/^on[A-Z]/u.test(name)) {
+    return name;
+  }
+  return `on${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
+}
+
+/** 组件自定义事件，作为组件实例上可绑定的事件。 */
+export function componentEmitSpecs(emits: readonly EmitLike[]): WidgetEventSpec[] {
+  const specs: WidgetEventSpec[] = [];
+  const seen = new Set<string>();
+  for (const emit of emits) {
+    const name = emit.name.trim();
+    if (!EMIT_NAME.test(name) || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    const params = emit.params.flatMap((param) => {
+      const paramName = param.name.trim();
+      if (!EMIT_NAME.test(paramName)) {
+        return [];
+      }
+      return [{ name: paramName, type: scriptParamType(param.type) }];
+    });
+    const desc = emit.desc?.trim();
+    specs.push({
+      name,
+      handler: emitHandlerName(name),
+      payload: 'emit',
+      params,
+      label: desc ? `${name} · ${desc}` : name,
+    });
+  }
+  return specs;
+}
 
 /** 事件脚本里的形参类型。运行时传入同名字段的普通对象，而不是浏览器事件。 */
 export const WIDGET_EVENT_DECLARATIONS = `interface PointEvent {
@@ -140,6 +202,8 @@ function payloadTypeName(payload: WidgetEventPayload): string {
       return 'ComposeEvent';
     case 'time':
       return 'TimeEvent';
+    case 'emit':
+      return 'any';
   }
 }
 
@@ -169,7 +233,11 @@ export function isWidgetEventId(value: string): boolean {
   return EVENT_ID.test(value);
 }
 
-export function compactEvents(specs: WidgetEventSpec[], events: WidgetEvents | undefined): WidgetEvents | undefined {
+export function compactEvents(
+  specs: WidgetEventSpec[],
+  events: WidgetEvents | undefined,
+  extra?: (name: string) => boolean,
+): WidgetEvents | undefined {
   if (!events) {
     return undefined;
   }
@@ -177,7 +245,7 @@ export function compactEvents(specs: WidgetEventSpec[], events: WidgetEvents | u
   const next: WidgetEvents = {};
   const known = new Set<string>();
   for (const [name, ids] of Object.entries(events)) {
-    if (name === 'order' || !allowed.has(name) || !ids) {
+    if (name === 'order' || !ids || (!allowed.has(name) && !extra?.(name))) {
       continue;
     }
     const clean: string[] = [];
@@ -201,7 +269,10 @@ export function compactEvents(specs: WidgetEventSpec[], events: WidgetEvents | u
 }
 
 export function compactWidgetEvents(type: WidgetKind, events: WidgetEvents | undefined): WidgetEvents | undefined {
-  return compactEvents(widgetEventSpecs(type), events);
+  if (type !== 'component') {
+    return compactEvents(widgetEventSpecs(type), events);
+  }
+  return compactEvents(widgetEventSpecs(type), events, (name) => EMIT_NAME.test(name));
 }
 
 export function compactPageEvents(events: WidgetEvents | undefined): WidgetEvents | undefined {

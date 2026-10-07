@@ -478,6 +478,7 @@ type CanvasWorkspaceProps = {
   commitPageQuery: (next: ComponentProp[], coalesceKey?: string) => void;
   componentProps: ComponentProp[];
   componentEmits: ComponentEmit[];
+  componentEmitsById: Record<string, ComponentEmit[]>;
   commitComponentProps: (next: ComponentProp[], coalesceKey?: string) => void;
   commitComponentEmits: (next: ComponentEmit[]) => void;
   pageEvents: WidgetEvents | undefined;
@@ -564,6 +565,7 @@ export function CanvasWorkspace({
   commitPageQuery,
   componentProps,
   componentEmits,
+  componentEmitsById,
   commitComponentProps,
   commitComponentEmits,
   pageEvents,
@@ -830,6 +832,10 @@ export function CanvasWorkspace({
                     projectId={projectId}
                     variables={pageData}
                     componentProps={componentMode ? componentProps : []}
+                    scriptEmits={componentMode ? componentEmits : undefined}
+                    listenEmits={
+                      bubbleWidget.type === 'component' ? componentEmitsById[bubbleWidget.componentId] : undefined
+                    }
                     disabled={readOnly}
                     openGroup={openBoxGroup}
                     onOpenGroupChange={handleOpenBoxGroupChange}
@@ -1107,6 +1113,7 @@ export function CanvasWorkspace({
               scopeKey={pageScopeId}
               projectId={projectId}
               sectionTitle={componentMode ? t('lowcode.pageEventsTitle') : undefined}
+              emits={componentMode ? componentEmits : undefined}
               disabled={readOnly}
               onChange={commitPageEvents}
             />

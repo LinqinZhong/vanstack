@@ -311,6 +311,7 @@
     "eventSaveFailed": "保存事件失败",
     "eventLoadFailed": "加载事件失败",
     "toastInfo": "显示轻提示。第一个参数是文本，第二个参数 0 是短时长，1 是长时长。",
+    "emitInfo": "触发当前组件的自定义事件。第一个参数是事件名，后面的参数对应该事件的形参。",
     "toastShort": "短时长",
     "toastLong": "长时长",
     "eventClick": "点击",

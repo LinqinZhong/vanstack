@@ -17,6 +17,7 @@ import {
   type WidgetEventSpec,
   type WidgetEvents,
 } from '@vanstack/xml';
+import type { EventEmitOption } from '../utils/eventEditor';
 import { api } from '../apis/api';
 import { createEventEditorExtensions } from '../utils/eventEditor';
 import { inspectorTheme } from './inspectorTheme';
@@ -27,6 +28,7 @@ export function WidgetEventPanel({
   scopeKey,
   projectId,
   sectionTitle,
+  emits,
   disabled,
   onChange,
 }: {
@@ -35,6 +37,7 @@ export function WidgetEventPanel({
   scopeKey: string;
   projectId?: string;
   sectionTitle?: string;
+  emits?: EventEmitOption[];
   disabled?: boolean;
   onChange: (events: WidgetEvents | undefined) => void;
 }) {
@@ -53,13 +56,17 @@ export function WidgetEventPanel({
   const [overId, setOverId] = useState<string | null>(null);
   const editorExtensions = useMemo(
     () =>
-      createEventEditorExtensions({
-        info: t('lowcode.toastInfo'),
-        short: t('lowcode.toastShort'),
-        long: t('lowcode.toastLong'),
-        params: editingName ? (specs.find((item) => item.name === editingName)?.params ?? []) : [],
-      }),
-    [t, editingName, specs],
+      createEventEditorExtensions(
+        {
+          info: t('lowcode.toastInfo'),
+          emitInfo: t('lowcode.emitInfo'),
+          short: t('lowcode.toastShort'),
+          long: t('lowcode.toastLong'),
+          params: editingName ? (specs.find((item) => item.name === editingName)?.params ?? []) : [],
+        },
+        emits ?? [],
+      ),
+    [t, editingName, specs, emits],
   );
 
   const rowKey = rows.map((row) => `${row.name}:${row.id}`).join(',');
@@ -243,7 +250,7 @@ export function WidgetEventPanel({
             <HolderOutlined />
           </span>
           <div className="widget-event-card-copy">
-            <div className="widget-event-name">{t(eventLabelKey(row.name))}</div>
+            <div className="widget-event-name">{eventTitle(specs, row.name, t)}</div>
             <div className="widget-event-desc" title={descriptions[row.id] || undefined}>
               {descriptions[row.id] || t('lowcode.eventNoDesc')}
             </div>
@@ -290,7 +297,7 @@ export function WidgetEventPanel({
           <Form.Item label={t('lowcode.eventField')} required>
             <Select
               value={eventName}
-              options={specs.map((item) => ({ value: item.name, label: t(eventLabelKey(item.name)) }))}
+              options={specs.map((item) => ({ value: item.name, label: item.label ?? t(eventLabelKey(item.name)) }))}
               onChange={setEventName}
             />
           </Form.Item>
@@ -318,7 +325,7 @@ export function WidgetEventPanel({
             <Select
               value={editingName ?? undefined}
               disabled={disabled}
-              options={specs.map((item) => ({ value: item.name, label: t(eventLabelKey(item.name)) }))}
+              options={specs.map((item) => ({ value: item.name, label: item.label ?? t(eventLabelKey(item.name)) }))}
               onChange={setEditingName}
             />
           </Form.Item>
@@ -346,4 +353,8 @@ export function WidgetEventPanel({
       </ConfigProvider>
     </div>
   );
+}
+
+function eventTitle(specs: WidgetEventSpec[], name: string, t: (key: string) => string) {
+  return specs.find((item) => item.name === name)?.label ?? t(eventLabelKey(name));
 }

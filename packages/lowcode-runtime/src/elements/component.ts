@@ -18,6 +18,7 @@ import { cssMeasure, cssText, dynamicStyleCss, flexItemCss, hiddenCss, mergeCss,
 import { resolveRuntimeOwnState } from '../hover';
 import { expandLoopTree, widgetInstanceKey } from '../loop';
 import { formatStoredValue } from '../stored';
+import { runEventIds } from '../events';
 import { widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
 function prefixTree(widgets: PageWidget[], prefix: string): PageWidget[] {
@@ -238,6 +239,23 @@ function ComponentView({
     dataScope[name] = value;
     setWrites((prev) => (prev[name] === stored ? prev : { ...prev, [name]: stored }));
   };
+  const emitEvent = (name: string, ...args: unknown[]) => {
+    if (!nested?.emits?.some((item) => item.name === name)) {
+      return;
+    }
+    const ids = widget.events?.[name];
+    if (!ids?.length || !ctx.loadWidgetEvent) {
+      return;
+    }
+    void runEventIds(ctx.loadWidgetEvent, ids, args, {
+      data: ctx.bindingScope.data,
+      props: ctx.bindingScope.props,
+      query: ctx.bindingScope.query,
+      aliases: ctx.bindingScope.aliases,
+      assign: ctx.assignScope,
+      emit: ctx.emit,
+    });
+  };
   function commitNestedModel(name: string, value: string, done?: boolean) {
     const propName = propModelName(name);
     if (!propName) {
@@ -279,6 +297,7 @@ function ComponentView({
             commitModelValue: commitNestedModel,
             assignScope,
             instantiate: true,
+            emit: emitEvent,
           }),
         )
       : widget.name || widget.componentKey,

@@ -114,9 +114,11 @@ export type ScriptScope = {
   query?: Record<string, unknown>;
   aliases?: Record<string, unknown>;
   assign?: ScopeAssign;
+  /** 触发外层组件实例上的自定义事件。 */
+  emit?: (name: string, ...args: unknown[]) => void;
 };
 
-const SCRIPT_RESERVED = new Set(['$data', '$props', '$query', '$item', '$index', 'data', 'props', 'query']);
+const SCRIPT_RESERVED = new Set(['$data', '$props', '$query', '$item', '$index', '$emit', 'data', 'props', 'query']);
 
 export async function runEventIds(
   load: WidgetEventLoader,
@@ -158,6 +160,12 @@ export async function runEventIds(
     add('$query', pageQuery);
     add('$item', aliasOf(scope?.aliases, '$item', 'item'));
     add('$index', aliasOf(scope?.aliases, '$index', 'index'));
+    add('$emit', (name: unknown, ...args: unknown[]) => {
+      if (typeof name !== 'string') {
+        return;
+      }
+      scope?.emit?.(name, ...args);
+    });
     for (const [name, value] of Object.entries(scope?.aliases ?? {})) {
       if (!SCRIPT_RESERVED.has(name)) {
         add(name, value);
@@ -211,6 +219,9 @@ export function widgetRuntimeBindings(
   for (const item of widgetEventSpecs(widget.type)) {
     const ids = events[item.name];
     if (!ids?.length) {
+      continue;
+    }
+    if (item.payload === 'emit') {
       continue;
     }
     if (item.payload === 'index') {

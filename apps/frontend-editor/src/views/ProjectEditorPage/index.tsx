@@ -599,6 +599,12 @@ export function ProjectEditorPage() {
     liveComponentDocsRef.current[selectedComponentId] = pageDocument;
   }
   componentEmitsRef.current = componentEmits;
+  const componentEmitsById: Record<string, ComponentEmit[]> = {};
+  for (const [id, doc] of Object.entries({ ...componentDocsRef.current, ...liveComponentDocsRef.current })) {
+    if (doc.emits?.length) {
+      componentEmitsById[id] = doc.emits;
+    }
+  }
   selectedVersionIdRef.current = selectedVersionId;
   projectVersionIdRef.current = projectVersionId;
   pageSnapshotIdRef.current = pageSnapshotId;
@@ -5153,6 +5159,7 @@ export function ProjectEditorPage() {
               commitPageQuery={commitPageQuery}
               componentProps={componentProps}
               componentEmits={componentEmits}
+              componentEmitsById={componentEmitsById}
               commitComponentProps={commitComponentProps}
               commitComponentEmits={commitComponentEmits}
               pageEvents={pageEvents}

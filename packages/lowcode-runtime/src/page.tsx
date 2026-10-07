@@ -373,6 +373,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       assignScope?: ScopeAssign;
       /** 组件被放到别的页面上时，内部按入参求值并展开循环。 */
       instantiate?: boolean;
+      emit?: (name: string, ...args: unknown[]) => void;
     },
   ): ReactElement | null {
     const meta = widgetInstanceMeta(widget);
@@ -398,6 +399,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       modelOverrides,
       commitModelValue: commit,
       assignScope: assign,
+      emit: options?.emit,
       loadWidgetEvent,
       components,
       componentStack,
@@ -414,6 +416,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
           commitModelValue: childOptions?.commitModelValue ?? commit,
           assignScope: childOptions?.assignScope ?? assign,
           instantiate: childOptions?.instantiate ?? instantiate,
+          emit: childOptions?.emit ?? options?.emit,
         }),
       stateLayers,
     });

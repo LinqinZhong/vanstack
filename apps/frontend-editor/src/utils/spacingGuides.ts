@@ -68,6 +68,18 @@ export function previewScreenElement(root: ParentNode | null) {
   return mount instanceof HTMLElement ? mount : null;
 }
 
+/** 分屏里旁边的窗口自己是 fixed 包含块；没这层时仍用 375 屏幕。 */
+export function fixedPositionContainer(widget: HTMLElement, root: ParentNode | null): HTMLElement | null {
+  const slot = widget.closest('.lowcode-windows-slot.is-offset');
+  if (slot instanceof HTMLElement) {
+    const transform = widget.ownerDocument.defaultView?.getComputedStyle(slot).transform ?? 'none';
+    if (transform !== 'none') {
+      return slot;
+    }
+  }
+  return previewScreenElement(root);
+}
+
 /** previewVisualScale：host zoom × 相机 scale，得到布局↔屏幕换算比例。 */
 export function previewVisualScale(host: HTMLElement, fallback = 1) {
   const view = host.ownerDocument.defaultView;
@@ -367,7 +379,7 @@ function positionContainingBox(host: HTMLElement, widget: HTMLElement, zoom: num
   const view = host.ownerDocument.defaultView;
   const position = view?.getComputedStyle(widget).position ?? '';
   if (position === 'fixed') {
-    const screen = previewScreenElement(host);
+    const screen = fixedPositionContainer(widget, host);
     if (screen) {
       return layoutBox(host, screen, zoom);
     }

@@ -778,6 +778,9 @@ export function pageCssText(widgets: PageWidget[]): string {
   blocks.unshift('.lowcode-drawer-panel { box-sizing: border-box; background: #fff; }');
   blocks.push(
     '.lowcode-page-scroll > [data-widget-id] { flex: 0 0 auto; max-width: none; }',
+    '.lowcode-windows { align-self: stretch; width: 100%; height: 100%; box-sizing: border-box; }',
+    '.lowcode-windows-track { width: 100%; height: 100%; box-sizing: border-box; }',
+    '.lowcode-window { width: 100%; height: 100%; box-sizing: border-box; }',
     '.lowcode-drawer-board > [data-widget-id] { flex: 0 0 auto; max-width: none; }',
     '.lowcode-page-scroll { scrollbar-width: none; -ms-overflow-style: none; }',
     '.lowcode-page-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }',

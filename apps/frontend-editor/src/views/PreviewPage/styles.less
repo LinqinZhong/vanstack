@@ -949,20 +949,26 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
 .preview-host.is-editing .lowcode-windows,
 .preview-host.is-editing .lowcode-windows-track {
   overflow: visible !important;
+  /* 窗口必须有确定高度，子级 height:100% 才能按窗口算，而不是被内容缩回去。 */
+  width: 100%;
+  height: var(--screen-height);
 }
 
 .preview-host.is-editing .lowcode-windows-slot.is-offset {
   position: absolute;
   top: 0;
-  height: auto;
+  height: 100%;
   min-height: var(--screen-height);
   box-sizing: border-box;
+  /* 这扇窗口在 375 屏幕外面。fixed 仍相对页面壳，顶栏和侧栏会画到左侧屏幕上。
+     transform 让偏移槽自己成为 fixed 的包含块。 */
+  transform: translateZ(0);
 }
 
 .preview-host.is-editing .lowcode-windows-slot.is-offset > .lowcode-window {
   width: 100%;
-  height: auto;
-  min-height: var(--screen-height);
+  height: 100%;
+  min-height: 100%;
   box-sizing: border-box;
 }
 
@@ -970,7 +976,8 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
   outline: 1px solid #e11d2e;
   outline-offset: -1px;
   visibility: visible !important;
-  height: auto;
+  width: 100%;
+  height: 100%;
   min-height: var(--screen-height);
 }
 
@@ -992,14 +999,16 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
 
 .preview-host.is-editing:is(.is-scroll-editing, .is-table-editing, .is-swiper-editing) .lowcode-windows-slot.is-offset:has(.is-scroll-open, .is-table-open, .is-swiper-open) {
   position: static;
-  width: auto !important;
-  height: auto;
+  width: 100%;
+  height: 100%;
   left: auto !important;
+  /* 槽已经回到屏幕原点，fixed 重新相对页面壳，避免再套一层包含块。 */
+  transform: none;
 }
 
 .preview-host.is-editing:is(.is-scroll-editing, .is-table-editing, .is-swiper-editing) .lowcode-windows-slot.is-offset > .lowcode-window {
-  width: auto;
-  height: auto;
+  width: 100%;
+  height: 100%;
 }
 
 .preview-host.is-editing.is-scroll-editing .lowcode-window:not(:has(.is-scroll-open)),
@@ -1018,15 +1027,16 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
 
 .preview-host.is-editing .lowcode-scroll.is-scroll-open > .lowcode-scroll-port {
   position: static;
-  width: auto;
-  height: auto;
+  width: 100%;
+  height: 100%;
   overflow: visible;
 }
 
+/* 编辑时仍保持滚动容器的确定尺寸，子级 100% 才能撑满，而不是缩成内容。 */
 .preview-host.is-editing .lowcode-scroll.is-scroll-open > .lowcode-scroll-port > .lowcode-scroll-view {
   overflow: visible !important;
-  width: auto !important;
-  height: auto !important;
+  width: 100% !important;
+  height: 100% !important;
   min-width: 100%;
   min-height: 100%;
 }

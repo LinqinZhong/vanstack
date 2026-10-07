@@ -101,7 +101,7 @@ import {
   type RotateAxis,
   type RotateTriple,
 } from '../../utils/rotateDrag';
-import { previewScreenElement, previewVisualScale, setSpacingDragCursor } from '../../utils/spacingGuides';
+import { fixedPositionContainer, previewVisualScale, setSpacingDragCursor } from '../../utils/spacingGuides';
 import type { BoxQuad } from '../../components/StyleBoxEdges';
 import {
   isBoxGroupShortcut,
@@ -3454,7 +3454,7 @@ export function ProjectEditorPage() {
     const rect = node.getBoundingClientRect();
     let container: { top: number; right: number; bottom: number; left: number };
     if (position === 'fixed') {
-      const screen = previewScreenElement(doc);
+      const screen = fixedPositionContainer(node, doc);
       if (screen) {
         const screenRect = screen.getBoundingClientRect();
         container = {

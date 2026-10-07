@@ -14,7 +14,7 @@ import {
   type PageXmlDocument,
   type ScopeAssign,
 } from '@vanstack/xml';
-import { cssMeasure, cssText, dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, pageCssText, presenceCss, widgetClassName, type WidgetCssOptions } from '../css';
+import { cssMeasure, cssText, dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, pageCssText, presenceCss, widgetClassName, widgetPaintKey, type WidgetCssOptions } from '../css';
 import { resolveRuntimeOwnState } from '../hover';
 import { expandLoopTree, widgetInstanceKey } from '../loop';
 import { formatStoredValue } from '../stored';
@@ -184,6 +184,7 @@ function ComponentView({
   const writtenProps = applyPropWrites(propsWithArgs(definedProps, widget.args, ctx.bindingScope, evaluateArgs), activeWrites);
   const propsScope = buildPropsRecord(writtenProps, query);
   const createdRef = useRef<{ key: string; props: Record<string, unknown> } | null>(null);
+  const childCache = useRef<{ key: string; nodes: Array<ReactElement | null> } | null>(null);
   if (!createdRef.current || createdRef.current.key !== dataKey) {
     createdRef.current = { key: dataKey, props: propsScope };
   }
@@ -201,15 +202,7 @@ function ComponentView({
   const options = widgetCssOptions(ctx);
   const prefix = `${widget.id}__`;
   const template = nested ? prefixTree(nested.widgets, prefix) : [];
-  // 先展开循环，再按每一项求 state()。样式仍用模板，避免某一项的状态写进共用 class。
-  const expanded = nested ? expandLoopTree(template, scope, false, widgetInstanceKey(widget)) : [];
-  const innerWidgets = nested
-    ? resolveWidgetTree(expanded, null, {
-        appliedStateFor: (child) => resolveRuntimeOwnState(child, ctx.editing ? [] : (ctx.hoverInstanceKeys ?? [])),
-        stateLayersSink: ctx.stateLayers,
-      })
-    : [];
-
+  const nestedStyle = template.length > 0 ? pageCssText(template) : '';
   const nestedStack = [...stack, widget.componentId];
   const dataArg = /^\$data\.([\p{ID_Start}$_][\p{ID_Continue}$]*)$/u;
   const assignScope: ScopeAssign = (bucket, name, value) => {
@@ -268,6 +261,38 @@ function ComponentView({
     }
   }
 
+  const childKey = [
+    widgetPaintKey(template),
+    dataKey,
+    writesStamp,
+    ctx.editing ? '1' : '0',
+    (ctx.hoverInstanceKeys ?? []).join(','),
+    ctx.locale ?? '',
+  ].join('\0');
+  if (!childCache.current || childCache.current.key !== childKey) {
+    // 先展开循环，再按每一项求 state()。样式仍用模板，避免某一项的状态写进共用 class。
+    const expanded = nested ? expandLoopTree(template, scope, false, widgetInstanceKey(widget)) : [];
+    const innerWidgets = nested
+      ? resolveWidgetTree(expanded, null, {
+          appliedStateFor: (child) => resolveRuntimeOwnState(child, ctx.editing ? [] : (ctx.hoverInstanceKeys ?? [])),
+          stateLayersSink: ctx.stateLayers,
+        })
+      : [];
+    childCache.current = {
+      key: childKey,
+      nodes: innerWidgets.map((child) =>
+        ctx.render(child, {
+          componentStack: nestedStack,
+          commitModelValue: commitNestedModel,
+          assignScope,
+          instantiate: true,
+          emit: emitEvent,
+        }),
+      ),
+    };
+  }
+  const innerNodes = childCache.current.nodes;
+
   return createElement(
     'div',
     {
@@ -278,7 +303,7 @@ function ComponentView({
       'data-state': widgetStateAttr(widget, ctx),
       style: mergeCss(
         frameStyle(nested?.style, { ...options, bindingScope: scope }),
-        innerWidgets.length === 0 ? { minHeight: '72px', alignItems: 'center', justifyContent: 'center' } : undefined,
+        innerNodes.length === 0 ? { minHeight: '72px', alignItems: 'center', justifyContent: 'center' } : undefined,
         dynamicStyleCss(widget.style, options),
         flexItemCss(widget.item, options),
         widget.item?.flexShrink == null ? { flexShrink: 0 } : undefined,
@@ -289,18 +314,8 @@ function ComponentView({
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,
     },
-    nested ? createElement('style', { dangerouslySetInnerHTML: { __html: pageCssText(template) } }) : null,
-    innerWidgets.length > 0
-      ? innerWidgets.map((child) =>
-          ctx.render(child, {
-            componentStack: nestedStack,
-            commitModelValue: commitNestedModel,
-            assignScope,
-            instantiate: true,
-            emit: emitEvent,
-          }),
-        )
-      : widget.name || widget.componentKey,
+    nested ? createElement('style', { dangerouslySetInnerHTML: { __html: nestedStyle } }) : null,
+    innerNodes.length > 0 ? innerNodes : widget.name || widget.componentKey,
   );
 }
 

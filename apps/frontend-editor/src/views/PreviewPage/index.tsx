@@ -11,7 +11,7 @@ import { previewVisualScale, setSpacingActiveEdge, setSpacingDragCursor, setSpac
 import type { BoxDragKind, SpacingEdge } from '../../utils/spacingDrag';
 import { isBoxDragKind, isSpacingNudgeKey, isSpacingValueKey, SPACING_EDGES } from '../../utils/spacingDrag';
 import { pointerAngleDeg, type RotateAxis } from '../../utils/rotateDrag';
-import { applyEditorChromeScale, applyLiveWidgetCss, applyViewport, applyWidgetState, FOCUS_DBLCLICK_MS, focusModifier, paintPreviewCamera, paintWidgetChrome, parentWidgetId, postCanvasPointer, postToParent, postWidgetHover, setSelectFaded } from './helpers';
+import { applyEditorChromeScale, applyLiveWidgetCss, applyViewport, applyWidgetState, clearLiveInlineStyles, FOCUS_DBLCLICK_MS, focusModifier, paintPreviewCamera, paintWidgetChrome, parentWidgetId, postCanvasPointer, postToParent, postWidgetHover, setSelectFaded } from './helpers';
 import { applyLiveTableTrack, readTableTrackPair, syncTableChrome, syncTableReveal, type TableChromeLabels } from './tableChrome';
 import { leafOpenEditor, paintScrollModeButton, paintSwiperModeButton, syncScrollReveal, syncSwiperReveal, type ScrollChromeLabels, type SwiperChromeLabels } from './scrollChrome';
 
@@ -454,6 +454,43 @@ export function PreviewPage() {
         typeof overflowY === 'number' ? overflowY : nextEditing ? 2 : 0,
         scale,
       );
+      const paintChrome = () => {
+        if (shouldRender) {
+          clearLiveInlineStyles(mountRef.current);
+        }
+        applyWidgetState(
+          mountRef.current,
+          selectedId,
+          isBoxDragKind(spacingDragRef.current) ? spacingDragRef.current : null,
+        );
+        paintWidgetChrome(
+          hostRef.current,
+          mountRef.current,
+          chromeTargetRef.current,
+          viewScaleRef.current,
+          nextEditing,
+          spacingDragRef.current,
+          !nextTableEditing && !nextScrollEditing && !nextSwiperEditing,
+        );
+        refreshTableChrome();
+        syncSpacingGuides(
+          hostRef.current,
+          mountRef.current,
+          isBoxDragKind(spacingDragRef.current) ? spacingDragRef.current : null,
+          viewScaleRef.current,
+          activeSpacingEdgeRef.current,
+          snapRef.current,
+          mirrorRef.current,
+          heldEdgesRef.current,
+        );
+        postSelectedLayoutSize();
+        if (!nextEditing) {
+          postWidgetHover(null);
+        }
+        if (typeof settle === 'number') {
+          scheduleCanvasSettle(settle);
+        }
+      };
       if (shouldRender) {
         documentKeyRef.current = nextDocumentKey;
         componentsKeyRef.current = nextComponentsKey;
@@ -484,40 +521,11 @@ export function PreviewPage() {
           useComponentTestData: nextUseComponentTestData,
           icons: nextIcons,
           previewEpoch: nextPreviewEpoch,
+          onCommit: paintChrome,
         });
         setError(result.ok ? null : result.error);
-      }
-      applyWidgetState(
-        mountRef.current,
-        selectedId,
-        isBoxDragKind(spacingDragRef.current) ? spacingDragRef.current : null,
-      );
-      paintWidgetChrome(
-        hostRef.current,
-        mountRef.current,
-        chromeTargetRef.current,
-        viewScaleRef.current,
-        nextEditing,
-        spacingDragRef.current,
-        !nextTableEditing && !nextScrollEditing && !nextSwiperEditing,
-      );
-      refreshTableChrome();
-      syncSpacingGuides(
-        hostRef.current,
-        mountRef.current,
-        isBoxDragKind(spacingDragRef.current) ? spacingDragRef.current : null,
-        viewScaleRef.current,
-        activeSpacingEdgeRef.current,
-        snapRef.current,
-        mirrorRef.current,
-        heldEdgesRef.current,
-      );
-      postSelectedLayoutSize();
-      if (!nextEditing) {
-        postWidgetHover(null);
-      }
-      if (typeof settle === 'number') {
-        scheduleCanvasSettle(settle);
+      } else {
+        paintChrome();
       }
     }
 

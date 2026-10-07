@@ -16,7 +16,7 @@ import {
   type ScopeAssign,
   type WidgetStateLayer,
 } from '@vanstack/xml';
-import { pageCss, pageCssText, pageScrollCss } from './css';
+import { libraryPaintKey, pageCss, pageCssText, pageScrollCss, widgetPaintKey } from './css';
 import { bindDrawerHandles, drawerRailMetrics } from './elements/drawer';
 import { bindOverlayScrollbar } from './overlay-scrollbar';
 import { widgetElement } from './elements';
@@ -52,6 +52,7 @@ export type LowcodePageProps = {
   centerContent?: boolean;
   useComponentTestData?: boolean;
   icons?: Readonly<Record<string, string>>;
+  onCommit?: () => void;
 };
 
 const EMPTY_SCOPE: BindingScope = { data: Object.create(null) as Record<string, unknown> };
@@ -63,7 +64,7 @@ function pageDataKey(data: PageVariable[] | undefined) {
     .join('\n');
 }
 
-export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel, onModelValue, onQueryValue, loadWidgetEvent, pageId, query, components, centerContent, useComponentTestData, icons }: LowcodePageProps): ReactElement {
+export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel, onModelValue, onQueryValue, loadWidgetEvent, pageId, query, components, centerContent, useComponentTestData, icons, onCommit }: LowcodePageProps): ReactElement {
   installPageIcons(icons);
   installPageI18n(catalog, locale || pickPageLocale(catalog));
   const pageQuery = query ?? EMPTY_QUERY;
@@ -76,6 +77,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
   const [openDrawerIds, setOpenDrawerIds] = useState<string[]>([]);
   const [editRail, setEditRail] = useState({ tail: 0, column: 0 });
   const pageRef = useRef<HTMLDivElement>(null);
+  const treeCache = useRef<{ key: string; flow: Array<ReactElement | null>; drawers: Array<ReactElement | null> } | null>(null);
   const dataKey = pageDataKey(page.data);
   const [appliedDataKey, setAppliedDataKey] = useState(dataKey);
   const [modelOverrides, setModelOverrides] = useState<Record<string, string>>({});
@@ -251,6 +253,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     commitModelValue(name, stored, true);
   };
   scriptScopeRef.current = { data: dataScope, props: propsScope, query: liveQuery, assign: assignScope };
+  const paintKey = widgetPaintKey(page.widgets);
   const { widgets, stateLayers } = useMemo(() => {
     const sink = new WeakMap<object, WidgetStateLayer[]>();
     const expanded = expandLoopTree(page.widgets, { data: dataScope, props: propsScope, query: liveQuery, aliases: {} }, editing);
@@ -259,7 +262,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       stateLayersSink: sink,
     });
     return { widgets: resolved, stateLayers: sink };
-  }, [page.widgets, viewing, dataScope, propsScope, liveQuery, editing, hoverInstanceKeys]);
+  }, [paintKey, viewing, dataScope, propsScope, liveQuery, editing, hoverInstanceKeys]);
   const drawerBoardIndexes = new Map<string, number>();
   {
     let index = 0;
@@ -430,6 +433,9 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
   const pageScrollYRef = useRef<HTMLDivElement>(null);
   const pageScrollXRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
+    onCommit?.();
+  }, [onCommit]);
+  useLayoutEffect(() => {
     if (!editing || drawerBoardIndexes.size === 0) {
       return undefined;
     }
@@ -459,6 +465,29 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     return bindOverlayScrollbar(view, yThumb, xThumb);
   }, []);
   const rootDrawers = widgets.filter((widget) => widget.type === 'drawer');
+  const treeKey = [
+    paintKey,
+    libraryPaintKey(components),
+    editing ? '1' : '0',
+    tableLayout ? '1' : '0',
+    currentLocale ?? '',
+    dataKey,
+    hoverInstanceKeys.join(','),
+    openDrawerIds.join(','),
+    `${editRail.tail}:${editRail.column}`,
+    centerContent ? '1' : '0',
+    useComponentTestData ? '1' : '0',
+    JSON.stringify(viewing),
+    JSON.stringify(modelOverrides),
+  ].join('\n');
+  const cachedTree = treeCache.current?.key === treeKey ? treeCache.current : null;
+  const flowNodes = cachedTree
+    ? cachedTree.flow
+    : widgets.filter((widget) => widget.type !== 'drawer').map((widget) => render(widget));
+  const drawerNodes = cachedTree ? cachedTree.drawers : rootDrawers.map((widget) => render(widget));
+  if (!cachedTree) {
+    treeCache.current = { key: treeKey, flow: flowNodes, drawers: drawerNodes };
+  }
   const pageNode = createElement(
     'div',
     {
@@ -505,12 +534,12 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
             ...(centerContent ? { alignItems: 'center', justifyContent: 'center' } : null),
           },
         },
-        widgets.filter((widget) => widget.type !== 'drawer').map((widget) => render(widget)),
+        flowNodes,
       ),
       createElement('div', { ref: pageScrollYRef, className: 'lowcode-scroll-thumb is-y' }),
       createElement('div', { ref: pageScrollXRef, className: 'lowcode-scroll-thumb is-x' }),
     ),
-    ...(editing ? [] : rootDrawers.map((widget) => render(widget))),
+    ...(editing ? [] : drawerNodes),
     toast,
   );
   if (!editing || rootDrawers.length === 0) {
@@ -545,7 +574,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
             style: { flex: '0 0 auto', width: editRail.tail, pointerEvents: 'none' },
           })
         : null,
-      ...rootDrawers.map((widget) => render(widget)),
+      ...drawerNodes,
     ),
   );
 }

@@ -513,7 +513,11 @@ export function WidgetStyleBubble({
   }, [widget.type, listenEmits]);
   const modifier = modifierShortcutLabel();
   const rootRef = useRef<HTMLDivElement>(null);
-  const current = style ?? {};
+  const [styleDraft, setStyleDraft] = useState<WidgetStyle | null>(null);
+  useEffect(() => {
+    setStyleDraft(null);
+  }, [widget.id, style]);
+  const current = styleDraft ?? style ?? {};
   const isInherited = (key: string) => (ownKeys ? !ownKeys.has(key) : false);
   const hasValue = (key: string) => {
     const v = (current as Record<string, unknown>)[key];
@@ -585,16 +589,17 @@ export function WidgetStyleBubble({
     if (disabled) {
       return;
     }
+    const merged = { ...current, ...next };
+    const sanitized =
+      widget.type === 'drawer'
+        ? compactDrawerStyle(merged, widget.place ?? DEFAULT_DRAWER_PLACE)
+        : sanitizeWidgetStyle(widget.type, merged);
+    setStyleDraft(sanitized ?? {});
     if (onStyleDelta) {
       onStyleDelta(next);
       return;
     }
-    const merged = { ...current, ...next };
-    onChange(
-      widget.type === 'drawer'
-        ? compactDrawerStyle(merged, widget.place ?? DEFAULT_DRAWER_PLACE)
-        : sanitizeWidgetStyle(widget.type, merged),
-    );
+    onChange(sanitized);
   }
 
   function patchFlex(next: Partial<FlexContainerStyle>) {

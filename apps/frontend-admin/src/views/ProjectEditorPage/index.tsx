@@ -13,9 +13,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 import type { ProjectComponentDto, ProjectDto, ProjectPageDto, ProjectPageVersionDto, ProjectVersionDto } from '@vanstack/shared';
-import { pageCssText } from '@vanstack/lowcode-runtime';
 import {
-  DEFAULT_DRAWER_PLACE,
   DEFAULT_TABLE_HEADER_HEIGHT,
   EMPTY_PAGE_DOCUMENT,
   applyTestValues,
@@ -44,6 +42,7 @@ import {
 } from '@vanstack/xml';
 import { api } from '../../apis/api';
 import { ProjectVersionProvider } from '../../utils/projectVersion';
+import { deleteDraft, getDraft, putDraft, putDraftNow } from '../../utils/draftStore';
 import {
   putCachedVersion,
   readOwnerVersionCache,
@@ -64,7 +63,6 @@ import {
 } from '../../utils/editorSelection';
 import { isLowcodeMessage, LOWCODE_MESSAGE_SOURCE } from '../../utils/lowcode-protocol';
 import { isBoxGroupAllowed, type BoxGroup, type TableBubbleModel, type TableCommand } from '../../components/WidgetStyleBubble';
-import { drawerSizeAxis, drawerStyleFromDrag } from '../../widgets/drawer';
 import {
   applyRadiusDrag,
   applySizeDrag,
@@ -102,7 +100,7 @@ import {
   type RotateAxis,
   type RotateTriple,
 } from '../../utils/rotateDrag';
-import { fixedPositionContainer, previewVisualScale, setSpacingDragCursor } from '../../utils/spacingGuides';
+import { previewScreenElement, previewVisualScale, setSpacingDragCursor } from '../../utils/spacingGuides';
 import type { BoxQuad } from '../../components/StyleBoxEdges';
 import {
   isBoxGroupShortcut,
@@ -170,7 +168,7 @@ import {
 } from '../../utils/widgetStates';
 import { refreshIconCatalog, subscribeIconCatalog } from '../../utils/iconCatalog';
 import { publishEditorI18n } from '../../utils/i18nRuntime';
-import { CANVAS_RASTER_SCALE, canEditPositionInsets, clampScale, closeStyleToolbarPopups, computeFitView, dragLengthPx, edgeBoxLength, EDIT_OVERFLOW_X, EDIT_OVERFLOW_Y, ENTER_DOUBLE_MS, FOCUS_PADDING, HISTORY_LIMIT, iframePointToClient, isAutoLength, isBoxDragGroup, isSpacingNudgeGroup, liveWidgetCss, mapIframePoint, MAX_SCALE, paintCanvasView, SCREEN_HEIGHT, SCREEN_WIDTH, sizeLock, snapDevicePixel, spacingAllowsNegative, styleBoxQuad, styleFromBoxQuad, zoomViewAt, ZOOM_IDLE_MS, ZOOM_STEP, type CanvasMode, type CenterTab, type HistoryEntry, type SaveStatus, type ViewTransform } from './helpers';
+import { CANVAS_RASTER_SCALE, canEditPositionInsets, clampScale, closeStyleToolbarPopups, computeFitView, dragLengthPx, edgeBoxLength, EDIT_OVERFLOW_X, EDIT_OVERFLOW_Y, ENTER_DOUBLE_MS, FOCUS_PADDING, HISTORY_LIMIT, iframePointToClient, isAutoLength, isBoxDragGroup, isSpacingNudgeGroup, LANGS_DEBOUNCE_MS, liveWidgetCss, mapIframePoint, MAX_SCALE, paintCanvasView, SCREEN_HEIGHT, SCREEN_WIDTH, SERVER_IDLE_MS, sizeLock, snapDevicePixel, spacingAllowsNegative, styleBoxQuad, styleFromBoxQuad, zoomViewAt, ZOOM_IDLE_MS, ZOOM_STEP, type CanvasMode, type CenterTab, type HistoryEntry, type SaveStatus, type ViewTransform } from './helpers';
 import {
   AddWidgetModal,
   AliasModal,
@@ -204,15 +202,11 @@ function presentCanvasDocument(
   useTest: boolean,
   freezeData = true,
   dataEdits?: Readonly<Record<string, string>>,
-  propEdits?: Readonly<Record<string, string>>,
 ): PageXmlDocument {
-  const hasPropEdits = Boolean(propEdits && Object.keys(propEdits).length > 0);
-  if (!useTest && !dataEdits && !hasPropEdits) {
+  if (!useTest && !dataEdits) {
     return doc;
   }
-  const props = useTest || hasPropEdits
-    ? applyTestValues(doc.props, { ...doc.testData?.props, ...propEdits })
-    : doc.props;
+  const props = useTest ? applyTestValues(doc.props, doc.testData?.props) : doc.props;
   const dataOverrides = {
     ...(useTest ? doc.testData?.data : undefined),
     ...dataEdits,
@@ -307,11 +301,7 @@ export function ProjectEditorPage() {
   const readyRef = useRef(false);
   const [view, setView] = useState<ViewTransform>({ x: 0, y: 0, scale: 1 });
   const viewRef = useRef(view);
-  const editViewRef = useRef<ViewTransform>({ x: 0, y: 0, scale: 1 });
-  const previewViewRef = useRef<ViewTransform>({ x: 0, y: 0, scale: 1 });
   const userAdjustedRef = useRef(false);
-  const editUserAdjustedRef = useRef(false);
-  const previewUserAdjustedRef = useRef(false);
   const [panning, setPanning] = useState(false);
   const panningRef = useRef(false);
   const panRafRef = useRef(0);
@@ -327,7 +317,6 @@ export function ProjectEditorPage() {
   const modeRef = useRef<CanvasMode>('edit');
   const previewNavRef = useRef<Array<{ pageId: string; query: Record<string, unknown> }>>([]);
   const previewQueryRef = useRef<Record<string, unknown>>({});
-  const previewEpochRef = useRef(0);
   const pagesRef = useRef<ProjectPageDto[]>([]);
   const navigatePreviewRef = useRef<
     (message: { action: 'to' | 'back'; pageKey?: string; query?: Record<string, unknown>; times?: number }) => void
@@ -367,10 +356,6 @@ export function ProjectEditorPage() {
   const testDataRef = useRef(testData);
   const previewDataEditsRef = useRef<Record<string, string>>({});
   const [previewDataEdits, setPreviewDataEdits] = useState<Record<string, string>>({});
-  const previewPropEditsRef = useRef<Record<string, string>>({});
-  const [previewPropEdits, setPreviewPropEdits] = useState<Record<string, string>>({});
-  const previewQueryEditsRef = useRef<Record<string, string>>({});
-  const [previewQueryEdits, setPreviewQueryEdits] = useState<Record<string, string>>({});
   const pageEventsRef = useRef(pageEvents);
   const pageMethodsRef = useRef(pageMethods);
   const commitModelRef = useRef<(name: string, value: string, done?: boolean) => void>(() => {});
@@ -387,17 +372,14 @@ export function ProjectEditorPage() {
   const pastRef = useRef<HistoryEntry[]>([]);
   const futureRef = useRef<HistoryEntry[]>([]);
   const coalesceKeyRef = useRef<string | null>(null);
-  const editorFlushRef = useRef(false);
-  const historyDirtyRef = useRef(false);
-  const expandBaseRef = useRef<{ widgets: PageWidget[]; selectedId: string | null } | null>(null);
   const selectWidgetRef = useRef<(id: string | null) => void>(() => undefined);
   const tableRangeRef = useRef<TableRange | null>(null);
   const tableEditIdRef = useRef<string | null>(null);
+  const tableEditViewRef = useRef<ViewTransform | null>(null);
   const scrollEditIdRef = useRef<string | null>(null);
+  const scrollEditViewRef = useRef<ViewTransform | null>(null);
   const swiperEditIdRef = useRef<string | null>(null);
-  const editOriginViewRef = useRef<ViewTransform | null>(null);
-  const centeredEditIdRef = useRef<string | null>(null);
-  const exitOneEditRef = useRef<() => boolean>(() => false);
+  const swiperEditViewRef = useRef<ViewTransform | null>(null);
   const tableContentPinRef = useRef({ x: 0, y: 0 });
   const enterTableEditRef = useRef<() => void>(() => undefined);
   const exitTableEditRef = useRef<() => boolean>(() => false);
@@ -483,6 +465,8 @@ export function ProjectEditorPage() {
   const inspectorInvalidRef = useRef(false);
   const saveInFlightRef = useRef(false);
   const saveAgainRef = useRef(false);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const langsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const langsInFlightRef = useRef(false);
   const langsAgainRef = useRef(false);
   const hydrateSeqRef = useRef(0);
@@ -520,27 +504,6 @@ export function ProjectEditorPage() {
   const documentKey = JSON.stringify(pageDocument);
   documentRef.current = pageDocument;
   documentKeyRef.current = documentKey;
-  if (modeRef.current === 'preview' && mode !== 'preview') {
-    modeRef.current = mode;
-    previewEpochRef.current += 1;
-    previewNavRef.current = [];
-    if (Object.keys(previewQueryRef.current).length > 0) {
-      previewQueryRef.current = {};
-      setPreviewQuery({});
-    }
-    if (Object.keys(previewDataEditsRef.current).length > 0) {
-      previewDataEditsRef.current = {};
-      setPreviewDataEdits({});
-    }
-    if (Object.keys(previewPropEditsRef.current).length > 0) {
-      previewPropEditsRef.current = {};
-      setPreviewPropEdits({});
-    }
-    if (Object.keys(previewQueryEditsRef.current).length > 0) {
-      previewQueryEditsRef.current = {};
-      setPreviewQueryEdits({});
-    }
-  }
   modeRef.current = mode;
   const selectedPage = pages.find((page) => page.id === selectedPageId) ?? null;
   const selectedComponent = components.find((item) => item.id === selectedComponentId) ?? null;
@@ -603,12 +566,6 @@ export function ProjectEditorPage() {
     liveComponentDocsRef.current[selectedComponentId] = pageDocument;
   }
   componentEmitsRef.current = componentEmits;
-  const componentEmitsById: Record<string, ComponentEmit[]> = {};
-  for (const [id, doc] of Object.entries({ ...componentDocsRef.current, ...liveComponentDocsRef.current })) {
-    if (doc.emits?.length) {
-      componentEmitsById[id] = doc.emits;
-    }
-  }
   selectedVersionIdRef.current = selectedVersionId;
   projectVersionIdRef.current = projectVersionId;
   pageSnapshotIdRef.current = pageSnapshotId;
@@ -659,17 +616,6 @@ export function ProjectEditorPage() {
       y: snapDevicePixel(next.y),
     };
     viewRef.current = snapped;
-    if (modeRef.current === 'preview') {
-      previewViewRef.current = snapped;
-      if (fromUser) {
-        previewUserAdjustedRef.current = true;
-      }
-    } else {
-      editViewRef.current = snapped;
-      if (fromUser) {
-        editUserAdjustedRef.current = true;
-      }
-    }
     paintCanvasView(iframeRef.current, phoneFrameRef.current, snapped, modeRef.current !== 'preview', tableContentPinRef.current);
     if (fromUser) {
       userAdjustedRef.current = true;
@@ -825,45 +771,21 @@ export function ProjectEditorPage() {
       if (zoomIdleTimerRef.current) {
         window.clearTimeout(zoomIdleTimerRef.current);
       }
+      if (langsTimerRef.current) {
+        clearTimeout(langsTimerRef.current);
+      }
     };
   }, []);
 
   useLayoutEffect(() => {
-    if (zoomRafRef.current) {
-      window.cancelAnimationFrame(zoomRafRef.current);
-      zoomRafRef.current = 0;
-    }
-    if (panRafRef.current) {
-      window.cancelAnimationFrame(panRafRef.current);
-      panRafRef.current = 0;
-    }
-    if (zoomIdleTimerRef.current) {
-      window.clearTimeout(zoomIdleTimerRef.current);
-      zoomIdleTimerRef.current = 0;
-    }
-    pendingZoomRef.current = null;
-    pendingPanRef.current = null;
-    zoomingRef.current = false;
-    panningRef.current = false;
-    dragRef.current = null;
-    setPanning(false);
-    stageRef.current?.classList.remove('is-zooming', 'is-panning');
-    const preview = mode === 'preview';
-    const adjusted = preview ? previewUserAdjustedRef.current : editUserAdjustedRef.current;
-    userAdjustedRef.current = adjusted;
-    const stage = stageRef.current;
-    if (!adjusted && stage && stage.clientWidth > 0 && stage.clientHeight > 0) {
-      applyView(canvasHomeView(stage), false);
-      return;
-    }
-    const stored = preview ? previewViewRef.current : editViewRef.current;
-    viewRef.current = stored;
-    setView((current) =>
-      current.x === stored.x && current.y === stored.y && current.scale === stored.scale ? current : stored,
+    paintCanvasView(
+      iframeRef.current,
+      phoneFrameRef.current,
+      viewRef.current,
+      mode !== 'preview',
+      tableContentPinRef.current,
     );
-    paintZoomLabel(stored.scale);
-    paintCanvasView(iframeRef.current, phoneFrameRef.current, stored, !preview, tableContentPinRef.current);
-  }, [mode, applyView, paintZoomLabel]);
+  }, [mode]);
 
   useLayoutEffect(() => {
     if (panningRef.current || zoomingRef.current) {
@@ -872,54 +794,15 @@ export function ProjectEditorPage() {
     paintCanvasView(iframeRef.current, phoneFrameRef.current, view, modeRef.current !== 'preview', tableContentPinRef.current);
   }, [view]);
 
-  /** 容器编辑中点还原时，用适配缩放，并把正在编辑的那一层放到画布中心。 */
-  function canvasHomeView(stage: HTMLElement): ViewTransform {
-    const fit = computeFitView(stage.clientWidth, stage.clientHeight, SCREEN_WIDTH);
-    const editingContainer =
-      modeRef.current !== 'preview' &&
-      Boolean(scrollEditIdRef.current || tableEditIdRef.current || swiperEditIdRef.current);
-    const doc = iframeRef.current?.contentDocument;
-    if (!editingContainer || !doc) {
-      return fit;
-    }
-    const nodes = [...doc.querySelectorAll<HTMLElement>('.is-scroll-open, .is-table-open, .is-swiper-open')];
-    const leaf = nodes.find((node) => !nodes.some((other) => other !== node && node.contains(other)));
-    if (!leaf) {
-      return fit;
-    }
-    const rect = leaf.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) {
-      return fit;
-    }
-    const current = viewRef.current;
-    const stageRect = stage.getBoundingClientRect();
-    const topLeft = mapIframePoint(iframeRef.current, rect.left, rect.top);
-    const bottomRight = mapIframePoint(iframeRef.current, rect.left + rect.width, rect.top + rect.height);
-    const centerX = (topLeft.x + bottomRight.x) / 2 - stageRect.left;
-    const centerY = (topLeft.y + bottomRight.y) / 2 - stageRect.top;
-    const pageX = (centerX - current.x) / Math.max(current.scale, 0.01);
-    const pageY = (centerY - current.y) / Math.max(current.scale, 0.01);
-    return {
-      scale: fit.scale,
-      x: stage.clientWidth / 2 - pageX * fit.scale,
-      y: stage.clientHeight / 2 - pageY * fit.scale,
-    };
-  }
-
   const fitCanvas = useCallback(
     (fromUser = false) => {
       const stage = stageRef.current;
       if (!stage) {
         return;
       }
-      const next = canvasHomeView(stage);
+      const next = computeFitView(stage.clientWidth, stage.clientHeight, SCREEN_WIDTH);
       if (!fromUser) {
         userAdjustedRef.current = false;
-        if (modeRef.current === 'preview') {
-          previewUserAdjustedRef.current = false;
-        } else {
-          editUserAdjustedRef.current = false;
-        }
       }
       applyView(next, fromUser);
     },
@@ -992,34 +875,6 @@ export function ProjectEditorPage() {
     [applyView, fitCanvas],
   );
 
-  /** 进入表格 / 滚动 / 滑动器编辑时，保持当前缩放，把这一层挪到画布中心。 */
-  const centerWidgetInView = useCallback(
-    (box: { left: number; top: number; width: number; height: number }) => {
-      const stage = stageRef.current;
-      if (!stage || box.width <= 0 || box.height <= 0) {
-        return;
-      }
-      const current = viewRef.current;
-      const stageRect = stage.getBoundingClientRect();
-      const topLeft = mapIframePoint(iframeRef.current, box.left, box.top);
-      const bottomRight = mapIframePoint(
-        iframeRef.current,
-        box.left + box.width,
-        box.top + box.height,
-      );
-      const centerX = (topLeft.x + bottomRight.x) / 2 - stageRect.left;
-      const centerY = (topLeft.y + bottomRight.y) / 2 - stageRect.top;
-      const pageX = (centerX - current.x) / Math.max(current.scale, 0.01);
-      const pageY = (centerY - current.y) / Math.max(current.scale, 0.01);
-      applyView({
-        scale: current.scale,
-        x: stage.clientWidth / 2 - pageX * current.scale,
-        y: stage.clientHeight / 2 - pageY * current.scale,
-      });
-    },
-    [applyView],
-  );
-
   useEffect(() => subscribeIconCatalog(setIconCatalog), []);
 
   useLayoutEffect(() => {
@@ -1035,39 +890,6 @@ export function ProjectEditorPage() {
 
   const sendPreview = useCallback(() => {
     publishEditorI18n(pageI18n, previewLocale);
-    const depthOf = (widgetId: string) => {
-      let depth = 0;
-      let current = findWidget(widgetsRef.current, widgetId);
-      while (current) {
-        depth += 1;
-        current = findParentWidget(widgetsRef.current, current.id);
-      }
-      return depth;
-    };
-    const editLayers: { kind: 'table' | 'scroll' | 'swiper'; depth: number }[] = [];
-    if (
-      mode !== 'preview' &&
-      tableEditId != null &&
-      findOwningTable(widgetsRef.current, selectedWidgetId)?.table.id === tableEditId
-    ) {
-      editLayers.push({ kind: 'table', depth: depthOf(tableEditId) });
-    }
-    if (
-      mode !== 'preview' &&
-      scrollEditId != null &&
-      findOwningScroll(widgetsRef.current, selectedWidgetId)?.id === scrollEditId
-    ) {
-      editLayers.push({ kind: 'scroll', depth: depthOf(scrollEditId) });
-    }
-    if (
-      mode !== 'preview' &&
-      swiperEditId != null &&
-      findOwningSwiper(widgetsRef.current, selectedWidgetId)?.id === swiperEditId
-    ) {
-      editLayers.push({ kind: 'swiper', depth: depthOf(swiperEditId) });
-    }
-    editLayers.sort((a, b) => b.depth - a.depth);
-    const editLeaf = editLayers[0]?.kind ?? null;
     iframeRef.current?.contentWindow?.postMessage(
       {
         source: LOWCODE_MESSAGE_SOURCE,
@@ -1077,7 +899,6 @@ export function ProjectEditorPage() {
           mode === 'preview' && catalogKindRef.current === 'component',
           mode === 'preview',
           mode === 'preview' ? previewDataEditsRef.current : undefined,
-          mode === 'preview' ? previewPropEditsRef.current : undefined,
         ),
         components: (() => {
           const library = { ...componentDocsRef.current, ...liveComponentDocsRef.current };
@@ -1104,14 +925,10 @@ export function ProjectEditorPage() {
         pageId: selectedPageId,
         query: mode === 'preview'
           ? {
-              ...buildPropsRecord(applyTestValues(documentRef.current.query, {
-                ...documentRef.current.testData?.query,
-                ...previewQueryEditsRef.current,
-              })),
-              ...previewQueryRef.current,
+              ...buildPropsRecord(applyTestValues(documentRef.current.query, documentRef.current.testData?.query)),
+              ...previewQuery,
             }
           : {},
-        previewEpoch: previewEpochRef.current,
         viewingOwnerId: mode === 'edit' ? viewingOwnerId : null,
         viewingState: mode === 'edit' ? viewingState : null,
         viewingStates: mode === 'edit' ? viewingListFromMap(viewingByOwner) : null,
@@ -1124,11 +941,23 @@ export function ProjectEditorPage() {
               canEditPositionInsets(findViewed(selectedWidgetId)?.style))
             ? openBoxGroup
             : null,
-        tableEditing: editLeaf === 'table',
-        scrollEditing: editLeaf === 'scroll',
-        swiperEditing: editLeaf === 'swiper',
+        tableEditing:
+          mode !== 'preview' &&
+          tableEditId != null &&
+          findOwningTable(widgetsRef.current, selectedWidgetId)?.table.id === tableEditId,
+        scrollEditing:
+          mode !== 'preview' &&
+          scrollEditId != null &&
+          findOwningScroll(widgetsRef.current, selectedWidgetId)?.id === scrollEditId,
+        swiperEditing:
+          mode !== 'preview' &&
+          swiperEditId != null &&
+          findOwningSwiper(widgetsRef.current, selectedWidgetId)?.id === swiperEditId,
         tableChrome:
-          editLeaf === 'table' && !readOnlyRef.current
+          mode !== 'preview' &&
+          !readOnlyRef.current &&
+          tableEditId != null &&
+          findOwningTable(widgetsRef.current, selectedWidgetId)?.table.id === tableEditId
             ? tableChromeState(widgetsRef.current, selectedWidgetId, tableRangeRef.current)
             : null,
         ...(canvasSettlingRef.current ? { settle: settleGenRef.current } : {}),
@@ -1242,7 +1071,7 @@ export function ProjectEditorPage() {
         };
         return;
       }
-        if (event.data.type === 'focus-widget') {
+      if (event.data.type === 'focus-widget') {
         if (modeRef.current !== 'edit') {
           return;
         }
@@ -1250,39 +1079,11 @@ export function ProjectEditorPage() {
         focusWidgetInView(event.data, true);
         return;
       }
-      if (event.data.type === 'edit-leaf') {
-        const leafId = event.data.widgetId;
-        if (!leafId || event.data.left == null || event.data.top == null || event.data.width == null || event.data.height == null) {
-          centeredEditIdRef.current = null;
-          return;
-        }
-        if (leafId === centeredEditIdRef.current) {
-          return;
-        }
-        if (!tableEditIdRef.current && !scrollEditIdRef.current && !swiperEditIdRef.current) {
-          return;
-        }
-        if (event.data.width <= 0 || event.data.height <= 0) {
-          return;
-        }
-        if (!editOriginViewRef.current) {
-          const current = viewRef.current;
-          editOriginViewRef.current = { scale: current.scale, x: current.x, y: current.y };
-        }
-        centeredEditIdRef.current = leafId;
-        centerWidgetInView({
-          left: event.data.left,
-          top: event.data.top,
-          width: event.data.width,
-          height: event.data.height,
-        });
-        return;
-      }
       if (event.data.type === 'keydown' || event.data.type === 'keyup') {
         if (event.data.type === 'keydown' && event.data.key === 'Escape' && !event.data.ctrlKey && !event.data.metaKey) {
-          if (exitOneEditRef.current()) {
-            return;
-          }
+          exitTableEditRef.current();
+          exitScrollEditRef.current();
+          exitSwiperEditRef.current();
           commitSpacingEditRef.current('cancel');
           return;
         }
@@ -1309,6 +1110,9 @@ export function ProjectEditorPage() {
         return;
       }
       if (event.data.type === 'canvas-wheel') {
+        if (modeRef.current !== 'edit') {
+          return;
+        }
         const stage = stageRef.current;
         if (!stage) {
           return;
@@ -1330,7 +1134,7 @@ export function ProjectEditorPage() {
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [centerWidgetInView, focusWidgetInView, scheduleZoom, sendPreview, enterTableEditRef, exitTableEditRef]);
+  }, [focusWidgetInView, scheduleZoom, sendPreview, enterTableEditRef, exitTableEditRef]);
 
   useEffect(() => {
     sendPreview();
@@ -1413,18 +1217,56 @@ export function ProjectEditorPage() {
   }, [previewLangKeys.join('\0')]);
 
   useEffect(() => {
-    if (!id || !persistEnabledRef.current || !loadedOwnerRef.current) {
+    const loaded = loadedOwnerRef.current;
+    const draftVersionId = catalogKind === 'component' ? selectedVersionId : pageSnapshotId;
+    if (
+      !id ||
+      !loaded ||
+      loaded.kind !== catalogKind ||
+      loaded.ownerId !== activeOwnerId ||
+      loaded.versionId !== draftVersionId ||
+      !persistEnabledRef.current
+    ) {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
       return;
     }
     if (documentKey === lastServerKeyRef.current) {
       if (!saveInFlightRef.current) {
         setSaveStatus('saved');
       }
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
       return;
     }
     setSaveStatus('unsaved');
-    void saveCurrentVersionRef.current({ silent: true });
-  }, [documentKey, id, inspectorInvalid, hydrateEpoch]);
+    const draftId = loaded.kind === 'component' ? `component:${loaded.ownerId}` : loaded.ownerId;
+    void putDraft(id, draftId, loaded.versionId, documentKey);
+    if (inspectorInvalid) {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+      return;
+    }
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+    }
+    idleTimerRef.current = setTimeout(() => {
+      idleTimerRef.current = null;
+      void saveCurrentVersionRef.current({ silent: true });
+    }, SERVER_IDLE_MS);
+    return () => {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+    };
+  }, [documentKey, id, activeOwnerId, catalogKind, selectedVersionId, pageSnapshotId, inspectorInvalid, hydrateEpoch]);
 
   useEffect(() => {
     function onPageHide() {
@@ -1432,7 +1274,9 @@ export function ProjectEditorPage() {
       if (!id || !loaded || !persistEnabledRef.current) {
         return;
       }
-      if (documentKeyRef.current === lastServerKeyRef.current || emptyCanvasWouldErase()) {
+      const draftId = loaded.kind === 'component' ? `component:${loaded.ownerId}` : loaded.ownerId;
+      void putDraftNow(id, draftId, loaded.versionId, documentKeyRef.current);
+      if (inspectorInvalidRef.current || documentKeyRef.current === lastServerKeyRef.current || emptyCanvasWouldErase()) {
         return;
       }
       if (loaded.kind === 'component') {
@@ -1488,6 +1332,9 @@ export function ProjectEditorPage() {
         return;
       }
       event.preventDefault();
+      if (modeRef.current !== 'edit') {
+        return;
+      }
       scheduleZoom(event.clientX, event.clientY, event.deltaY > 0 ? 1 / ZOOM_STEP : ZOOM_STEP);
     }
     stage.addEventListener('wheel', onWheel, { passive: false });
@@ -1548,7 +1395,7 @@ export function ProjectEditorPage() {
         event.key === 'Escape' &&
         !isEditableKeyboardTarget(event.target)
       ) {
-        if (exitOneEditRef.current()) {
+        if (exitTableEditRef.current() || exitScrollEditRef.current() || exitSwiperEditRef.current()) {
           event.preventDefault();
           event.stopPropagation();
           commitSpacingEditRef.current('cancel');
@@ -1980,6 +1827,21 @@ export function ProjectEditorPage() {
   }, [id, components, catalogKind]);
 
   useEffect(() => {
+    if (mode === 'preview') {
+      return;
+    }
+    previewNavRef.current = [];
+    if (Object.keys(previewQueryRef.current).length > 0) {
+      previewQueryRef.current = {};
+      setPreviewQuery({});
+    }
+    if (Object.keys(previewDataEditsRef.current).length > 0) {
+      previewDataEditsRef.current = {};
+      setPreviewDataEdits({});
+    }
+  }, [mode]);
+
+  useEffect(() => {
     if (!id) {
       return;
     }
@@ -2101,7 +1963,14 @@ export function ProjectEditorPage() {
     const loaded = loadedOwnerRef.current;
     persistEnabledRef.current = false;
     loadedOwnerRef.current = null;
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
     if (!id || !loaded) {
+      return;
+    }
+    if (readOnlyRef.current || inspectorInvalidRef.current) {
       return;
     }
     if (documentKeyRef.current === lastServerKeyRef.current || emptyCanvasWouldErase()) {
@@ -2114,7 +1983,6 @@ export function ProjectEditorPage() {
   }
 
   async function hydrateVersion(version: ProjectPageVersionDto | null, pageId: string, stillCurrent: () => boolean) {
-    void pageId;
     if (!stillCurrent()) {
       return;
     }
@@ -2122,6 +1990,10 @@ export function ProjectEditorPage() {
     persistEnabledRef.current = false;
     loadedOwnerRef.current = null;
     editedRef.current = false;
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
     const serverDocument = readPageDocument(version?.document);
     const serverKey = JSON.stringify(serverDocument);
     const fresh = () => stillCurrent() && seq === hydrateSeqRef.current;
@@ -2136,10 +2008,25 @@ export function ProjectEditorPage() {
       finishOwnerCanvas();
       return;
     }
+    let nextDocument = serverDocument;
+    const local = await getDraft(id, pageId, version.id);
     if (!fresh()) {
       return;
     }
-    applyDocument(serverDocument);
+    if (local) {
+      const localDocument = readDraftDocument(local);
+      const localKey = localDocument ? JSON.stringify(localDocument) : local;
+      const emptyDraftWouldErase = Boolean(localDocument && localDocument.widgets.length === 0 && serverDocument.widgets.length > 0);
+      if (localDocument && localKey !== serverKey && !emptyDraftWouldErase) {
+        nextDocument = localDocument;
+      } else {
+        await deleteDraft(id, pageId, version.id);
+      }
+    }
+    if (!fresh()) {
+      return;
+    }
+    applyDocument(nextDocument);
     lastServerKeyRef.current = serverKey;
     const kind = catalogKindRef.current;
     const ownerId = kind === 'component' ? selectedComponentIdRef.current : selectedPageIdRef.current;
@@ -2152,7 +2039,7 @@ export function ProjectEditorPage() {
       };
       persistEnabledRef.current = true;
     }
-    setSaveStatus('saved');
+    setSaveStatus(JSON.stringify(nextDocument) === serverKey ? 'saved' : 'unsaved');
     setHydrateEpoch((epoch) => epoch + 1);
     finishOwnerCanvas();
   }
@@ -2283,11 +2170,7 @@ export function ProjectEditorPage() {
     componentEmitsRef.current = nextEmits;
     testDataRef.current = nextTestData;
     previewDataEditsRef.current = {};
-    previewPropEditsRef.current = {};
-    previewQueryEditsRef.current = {};
     setPreviewDataEdits({});
-    setPreviewPropEdits({});
-    setPreviewQueryEdits({});
     selectedWidgetIdRef.current = selectedId;
     setWidgets(nextWidgets);
     setPageStyle(nextPageStyle);
@@ -2311,6 +2194,14 @@ export function ProjectEditorPage() {
     }
   }
 
+  function readDraftDocument(raw: string): PageXmlDocument | null {
+    try {
+      return normalizePageDocument(JSON.parse(raw) as unknown);
+    } catch {
+      return null;
+    }
+  }
+
   async function componentDocumentForCanvas(
     projectId: string,
     componentId: string,
@@ -2319,9 +2210,13 @@ export function ProjectEditorPage() {
     if (!version) {
       return null;
     }
-    void projectId;
-    void componentId;
-    return readPageDocument(version.document);
+    const saved = readPageDocument(version.document);
+    const local = await getDraft(projectId, `component:${componentId}`, version.id);
+    const draft = local ? readDraftDocument(local) : null;
+    if (draft && JSON.stringify(draft) !== JSON.stringify(saved)) {
+      return draft;
+    }
+    return saved;
   }
 
   function applyDocument(next: PageXmlDocument) {
@@ -2389,7 +2284,6 @@ export function ProjectEditorPage() {
 
   function flushLiveWidgets() {
     setWidgets(widgetsRef.current);
-    queueDraftSave();
   }
 
   function clearTableRange() {
@@ -2435,26 +2329,32 @@ export function ProjectEditorPage() {
       return;
     }
     if (tableEditIdRef.current && owning?.table.id !== tableEditIdRef.current) {
+      restoreTableEditView();
       tableEditIdRef.current = null;
       setTableEditId(null);
     }
     if (scrollEditIdRef.current && owningScroll?.id !== scrollEditIdRef.current) {
+      restoreScrollEditView();
       scrollEditIdRef.current = null;
       setScrollEditId(null);
     }
     if (swiperEditIdRef.current && owningSwiper?.id !== swiperEditIdRef.current) {
+      restoreSwiperEditView();
       swiperEditIdRef.current = null;
       setSwiperEditId(null);
     }
     if (owning && selected && selected.id !== owning.table.id && tableEditIdRef.current !== owning.table.id) {
+      rememberTableEditView();
       tableEditIdRef.current = owning.table.id;
       setTableEditId(owning.table.id);
     }
     if (owningScroll && selected && selected.id !== owningScroll.id && scrollEditIdRef.current !== owningScroll.id) {
+      rememberScrollEditView();
       scrollEditIdRef.current = owningScroll.id;
       setScrollEditId(owningScroll.id);
     }
     if (owningSwiper && selected && selected.id !== owningSwiper.id && swiperEditIdRef.current !== owningSwiper.id) {
+      rememberSwiperEditView();
       swiperEditIdRef.current = owningSwiper.id;
       setSwiperEditId(owningSwiper.id);
     }
@@ -2462,7 +2362,6 @@ export function ProjectEditorPage() {
     selectedWidgetIdRef.current = id;
     setSelectedWidgetId(id);
     setExpandedKeys((prev) => nextExpandedKeys(prev, widgetsRef.current, widgetsRef.current, id));
-    syncEditOrigin();
   }
   selectWidgetRef.current = selectWidget;
 
@@ -2474,6 +2373,7 @@ export function ProjectEditorPage() {
     tableEditIdRef.current = null;
     setTableEditId(null);
     selectWidgetRef.current(editingId);
+    restoreTableEditView();
     return true;
   }
 
@@ -2715,23 +2615,20 @@ export function ProjectEditorPage() {
     return true;
   }
 
-  function syncEditOrigin() {
-    const active = Boolean(tableEditIdRef.current || scrollEditIdRef.current || swiperEditIdRef.current);
-    if (active) {
-      if (!editOriginViewRef.current) {
-        const current = viewRef.current;
-        editOriginViewRef.current = { scale: current.scale, x: current.x, y: current.y };
-      }
+  function rememberScrollEditView() {
+    if (scrollEditViewRef.current) {
       return;
     }
-    const previous = editOriginViewRef.current;
-    if (!previous) {
-      return;
+    const current = viewRef.current;
+    scrollEditViewRef.current = { scale: current.scale, x: current.x, y: current.y };
+  }
+
+  function restoreScrollEditView() {
+    const previous = scrollEditViewRef.current;
+    scrollEditViewRef.current = null;
+    if (previous) {
+      applyView(previous);
     }
-    editOriginViewRef.current = null;
-    centeredEditIdRef.current = null;
-    tableContentPinRef.current = { x: 0, y: 0 };
-    applyView(previous);
   }
 
   function enterScrollEdit() {
@@ -2742,13 +2639,28 @@ export function ProjectEditorPage() {
     if (scrollEditIdRef.current === selected.id) {
       return;
     }
+    rememberScrollEditView();
     scrollEditIdRef.current = selected.id;
     setScrollEditId(selected.id);
     const childId = selected.children[0]?.id;
     if (childId) {
       selectWidget(childId);
-    } else {
-      syncEditOrigin();
+    }
+  }
+
+  function rememberSwiperEditView() {
+    if (swiperEditViewRef.current) {
+      return;
+    }
+    const current = viewRef.current;
+    swiperEditViewRef.current = { scale: current.scale, x: current.x, y: current.y };
+  }
+
+  function restoreSwiperEditView() {
+    const previous = swiperEditViewRef.current;
+    swiperEditViewRef.current = null;
+    if (previous) {
+      applyView(previous);
     }
   }
 
@@ -2760,13 +2672,12 @@ export function ProjectEditorPage() {
     if (swiperEditIdRef.current === selected.id) {
       return;
     }
+    rememberSwiperEditView();
     swiperEditIdRef.current = selected.id;
     setSwiperEditId(selected.id);
     const childId = selected.children[0]?.id;
     if (childId) {
       selectWidget(childId);
-    } else {
-      syncEditOrigin();
     }
   }
 
@@ -2778,6 +2689,7 @@ export function ProjectEditorPage() {
     swiperEditIdRef.current = null;
     setSwiperEditId(null);
     selectWidgetRef.current(editingId);
+    restoreSwiperEditView();
     return true;
   }
 
@@ -2789,7 +2701,25 @@ export function ProjectEditorPage() {
     scrollEditIdRef.current = null;
     setScrollEditId(null);
     selectWidgetRef.current(editingId);
+    restoreScrollEditView();
     return true;
+  }
+
+  function rememberTableEditView() {
+    if (tableEditViewRef.current) {
+      return;
+    }
+    const current = viewRef.current;
+    tableEditViewRef.current = { scale: current.scale, x: current.x, y: current.y };
+  }
+
+  function restoreTableEditView() {
+    const previous = tableEditViewRef.current;
+    tableEditViewRef.current = null;
+    tableContentPinRef.current = { x: 0, y: 0 };
+    if (previous) {
+      applyView(previous);
+    }
   }
 
   function enterTableEdit() {
@@ -2800,39 +2730,13 @@ export function ProjectEditorPage() {
     if (tableEditIdRef.current === selected.id) {
       return;
     }
+    rememberTableEditView();
     tableEditIdRef.current = selected.id;
     setTableEditId(selected.id);
     const headerId = findOwningTable(widgetsRef.current, selected.id)?.headers[0]?.id;
     if (headerId) {
       selectWidget(headerId);
-    } else {
-      syncEditOrigin();
     }
-  }
-
-  function widgetDepth(id: string) {
-    let depth = 0;
-    let current = findWidget(widgetsRef.current, id);
-    while (current) {
-      depth += 1;
-      current = findParentWidget(widgetsRef.current, current.id);
-    }
-    return depth;
-  }
-
-  function exitOneEditLayer() {
-    const layers: { depth: number; exit: () => boolean }[] = [];
-    if (tableEditIdRef.current) {
-      layers.push({ depth: widgetDepth(tableEditIdRef.current), exit: () => exitTableEdit() });
-    }
-    if (scrollEditIdRef.current) {
-      layers.push({ depth: widgetDepth(scrollEditIdRef.current), exit: () => exitScrollEdit() });
-    }
-    if (swiperEditIdRef.current) {
-      layers.push({ depth: widgetDepth(swiperEditIdRef.current), exit: () => exitSwiperEdit() });
-    }
-    layers.sort((a, b) => b.depth - a.depth);
-    return layers[0]?.exit() ?? false;
   }
 
   function handleWidgetEnter(event: {
@@ -2904,7 +2808,6 @@ export function ProjectEditorPage() {
   exitScrollEditRef.current = exitScrollEdit;
   enterSwiperEditRef.current = enterSwiperEdit;
   exitSwiperEditRef.current = exitSwiperEdit;
-  exitOneEditRef.current = exitOneEditLayer;
 
   useEffect(() => {
     if (!selectedWidgetId) {
@@ -3010,14 +2913,11 @@ export function ProjectEditorPage() {
         },
       ].slice(-HISTORY_LIMIT);
       futureRef.current = [];
-      historyDirtyRef.current = true;
+      setHistoryTick((tick) => tick + 1);
     }
     coalesceKeyRef.current = coalesceKey ?? null;
     const previousWidgets = widgetsRef.current;
     const previousSelectedId = selectedWidgetIdRef.current;
-    if (!expandBaseRef.current) {
-      expandBaseRef.current = { widgets: previousWidgets, selectedId: previousSelectedId };
-    }
     widgetsRef.current = nextWidgets;
     pageStyleRef.current = nextPageStyle;
     pageDataRef.current = nextPageData;
@@ -3028,83 +2928,24 @@ export function ProjectEditorPage() {
     componentEmitsRef.current = emits;
     testDataRef.current = nextTest;
     selectedWidgetIdRef.current = nextSelectedId;
-    if (nextWidgets !== previousWidgets) {
-      const sheet = iframeRef.current?.contentDocument?.querySelector('.lowcode-page > style');
-      if (sheet) {
-        sheet.textContent = pageCssText(nextWidgets);
-      }
-    }
-    if (editorFlushRef.current) {
-      return;
-    }
-    editorFlushRef.current = true;
-    // 先让这次点击画出下一帧，再提交整页 React 状态。否则编辑器重渲染会算进 INP。
-    requestAnimationFrame(() => {
-      window.setTimeout(() => {
-        editorFlushRef.current = false;
-        setWidgets(widgetsRef.current);
-        setPageStyle(pageStyleRef.current);
-        setPageData(pageDataRef.current);
-        setPageEvents(pageEventsRef.current);
-        setPageMethods(pageMethodsRef.current);
-        setComponentProps(componentPropsRef.current);
-        setPageQuery(pageQueryRef.current);
-        setComponentEmits(componentEmitsRef.current);
-        setTestData(testDataRef.current);
-        setSelectedWidgetId(selectedWidgetIdRef.current);
-        if (historyDirtyRef.current) {
-          historyDirtyRef.current = false;
-          setHistoryTick((tick) => tick + 1);
-        }
-        const base = expandBaseRef.current;
-        expandBaseRef.current = null;
-        if (base) {
-          const selectedId = selectedWidgetIdRef.current;
-          setExpandedKeys((prev) => {
-            const next = nextExpandedKeys(
-              prev,
-              base.widgets,
-              widgetsRef.current,
-              selectedId !== base.selectedId ? selectedId : null,
-            );
-            if (next.length === prev.length && next.every((key, index) => key === prev[index])) {
-              return prev;
-            }
-            return next;
-          });
-        }
-        queueDraftSave();
-      }, 0);
-    });
-  }
-
-  function queueDraftSave() {
-    try {
-      const next = normalizePageDocument({
-        widgets: widgetsRef.current,
-        style: pageStyleRef.current,
-        data: pageDataRef.current.length > 0 ? pageDataRef.current : undefined,
-        events: pageEventsRef.current,
-        methods: pageMethodsRef.current.length > 0 ? pageMethodsRef.current : undefined,
-        props: componentPropsRef.current.length > 0 ? componentPropsRef.current : undefined,
-        query: pageQueryRef.current.length > 0 ? pageQueryRef.current : undefined,
-        emits: componentEmitsRef.current.length > 0 ? componentEmitsRef.current : undefined,
-        testData: compactPageTestData(
-          testDataRef.current,
-          componentPropsRef.current,
-          pageDataRef.current,
-          pageQueryRef.current,
-        ),
-      });
-      documentRef.current = next;
-      documentKeyRef.current = JSON.stringify(next);
-    } catch {
-      return;
-    }
-    if (!persistEnabledRef.current) {
-      return;
-    }
-    void saveCurrentVersionRef.current({ silent: true });
+    setWidgets(nextWidgets);
+    setPageStyle(nextPageStyle);
+    setPageData(nextPageData);
+    setPageEvents(events);
+    setPageMethods(methods);
+    setComponentProps(props);
+    setPageQuery(query);
+    setComponentEmits(emits);
+    setTestData(nextTest);
+    setSelectedWidgetId(nextSelectedId);
+    setExpandedKeys((prev) =>
+      nextExpandedKeys(
+        prev,
+        previousWidgets,
+        nextWidgets,
+        nextSelectedId !== previousSelectedId ? nextSelectedId : null,
+      ),
+    );
   }
 
   function commitWidgets(nextWidgets: PageWidget[], nextSelectedId: string | null, coalesceKey?: string) {
@@ -3282,70 +3123,25 @@ export function ProjectEditorPage() {
     );
   }
 
-  function rememberPreviewEdit(
-    bagRef: { current: Record<string, string> },
-    publish: (next: Record<string, string>) => void,
-    baseline: string | undefined,
-    name: string,
-    stored: string,
-  ) {
-    const next = { ...bagRef.current };
+  function rememberPreviewData(name: string, stored: string) {
+    const schema = pageDataRef.current.find((item) => item.name === name)?.value;
+    const saved = testDataRef.current?.data?.[name];
+    const baseline = saved !== undefined ? saved : schema;
+    const next = { ...previewDataEditsRef.current };
     if (baseline !== undefined && stored === baseline) {
       delete next[name];
     } else {
       next[name] = stored;
     }
-    bagRef.current = next;
-    publish(next);
+    previewDataEditsRef.current = next;
+    setPreviewDataEdits(next);
     sendPreview();
   }
 
-  function rememberPreviewData(name: string, stored: string) {
-    const schema = pageDataRef.current.find((item) => item.name === name)?.value;
-    const saved = testDataRef.current?.data?.[name];
-    rememberPreviewEdit(
-      previewDataEditsRef,
-      setPreviewDataEdits,
-      saved !== undefined ? saved : schema,
-      name,
-      stored,
-    );
-  }
-
-  function rememberPreviewProp(name: string, stored: string) {
-    const schema = componentPropsRef.current.find((item) => item.name === name)?.value;
-    const saved = testDataRef.current?.props?.[name];
-    rememberPreviewEdit(
-      previewPropEditsRef,
-      setPreviewPropEdits,
-      saved !== undefined ? saved : schema,
-      name,
-      stored,
-    );
-  }
-
-  function rememberPreviewQuery(name: string, stored: string) {
-    const schema = pageQueryRef.current.find((item) => item.name === name)?.value;
-    const saved = testDataRef.current?.query?.[name];
-    rememberPreviewEdit(
-      previewQueryEditsRef,
-      setPreviewQueryEdits,
-      saved !== undefined ? saved : schema,
-      name,
-      stored,
-    );
-  }
-
   function commitPreviewTest(section: 'props' | 'data' | 'query', name: string, type: string, text: string) {
-    const testProps = buildPropsRecord(applyTestValues(componentPropsRef.current, {
-      ...testDataRef.current?.props,
-      ...previewPropEditsRef.current,
-    }));
+    const testProps = buildPropsRecord(applyTestValues(componentPropsRef.current, testDataRef.current?.props));
     const schemaProps = buildPropsRecord(componentPropsRef.current);
-    const queryScope = buildPropsRecord(applyTestValues(pageQueryRef.current, {
-      ...testDataRef.current?.query,
-      ...previewQueryEditsRef.current,
-    }));
+    const queryScope = buildPropsRecord(applyTestValues(pageQueryRef.current, testDataRef.current?.query));
     const variables = pageDataRef.current;
     const index = section === 'data' ? variables.findIndex((item) => item.name === name) : -1;
     const props = section === 'data' ? schemaProps : testProps;
@@ -3368,19 +3164,8 @@ export function ProjectEditorPage() {
       rememberPreviewData(name, stored);
       return true;
     }
-    if (section === 'props') {
-      commitTestField('props', name, stored, `test:props:${name}`);
-      endCoalesce();
-      if (Object.prototype.hasOwnProperty.call(previewPropEditsRef.current, name)) {
-        const next = { ...previewPropEditsRef.current };
-        delete next[name];
-        previewPropEditsRef.current = next;
-        setPreviewPropEdits(next);
-      }
-      sendPreview();
-      return true;
-    }
-    rememberPreviewQuery(name, stored);
+    commitTestField(section, name, stored, `test:${section}:${name}`);
+    endCoalesce();
     return true;
   }
 
@@ -3411,13 +3196,6 @@ export function ProjectEditorPage() {
                   ? value
                   : null;
       if (stored == null) {
-        return;
-      }
-      if (modeRef.current === 'preview') {
-        rememberPreviewProp(propName, stored);
-        if (done) {
-          endCoalesce();
-        }
         return;
       }
       commitTestField('props', propName, stored, `test:props:${propName}`);
@@ -3458,7 +3236,21 @@ export function ProjectEditorPage() {
     }
   };
 
+  function schedulePutLangs() {
+    if (langsTimerRef.current) {
+      clearTimeout(langsTimerRef.current);
+    }
+    langsTimerRef.current = setTimeout(() => {
+      langsTimerRef.current = null;
+      void flushProjectLangs();
+    }, LANGS_DEBOUNCE_MS);
+  }
+
   async function flushProjectLangs() {
+    if (langsTimerRef.current) {
+      clearTimeout(langsTimerRef.current);
+      langsTimerRef.current = null;
+    }
     if (!id) {
       return;
     }
@@ -3485,9 +3277,13 @@ export function ProjectEditorPage() {
     }
   }
 
-  function commitPageI18n(next: PageI18n | undefined, _coalesceKey?: string) {
+  function commitPageI18n(next: PageI18n | undefined, coalesceKey?: string) {
     pageI18nRef.current = next;
     setPageI18n(next);
+    if (coalesceKey) {
+      schedulePutLangs();
+      return;
+    }
     void flushProjectLangs();
   }
 
@@ -3576,7 +3372,7 @@ export function ProjectEditorPage() {
     const rect = node.getBoundingClientRect();
     let container: { top: number; right: number; bottom: number; left: number };
     if (position === 'fixed') {
-      const screen = fixedPositionContainer(node, doc);
+      const screen = previewScreenElement(doc);
       if (screen) {
         const screenRect = screen.getBoundingClientRect();
         container = {
@@ -3713,7 +3509,6 @@ export function ProjectEditorPage() {
       });
       widgetsRef.current = restored;
       setWidgets(restored);
-      queueDraftSave();
       pastRef.current = pastRef.current.slice(0, session.pastLength);
       futureRef.current = [];
       coalesceKeyRef.current = null;
@@ -3908,21 +3703,6 @@ export function ProjectEditorPage() {
     return styleFromBoxQuad(style, kind, quad);
   }
 
-  function writeSizedStyle(widget: PageWidget, kind: BoxDragKind | 'border', quad: BoxQuad) {
-    if (kind === 'size' && widget.type === 'drawer') {
-      const place = widget.place ?? DEFAULT_DRAWER_PLACE;
-      const axis = drawerSizeAxis(place);
-      const raw = axis === 'width' ? (quad.right ?? quad.left) : (quad.top ?? quad.bottom);
-      const px = typeof raw === 'number' && Number.isFinite(raw) ? raw : 0;
-      const node = iframeRef.current?.contentDocument?.querySelector<HTMLElement>(
-        `[data-widget-id="${CSS.escape(widget.id)}"]`,
-      );
-      const container = axis === 'width' ? (node?.offsetWidth ?? 0) : (node?.offsetHeight ?? 0);
-      return drawerStyleFromDrag(widget.style, place, px, container);
-    }
-    return writeNudgeStyle(widget.style, kind, quad);
-  }
-
   function writeHeldSpacingValue(kind: BoxDragKind | 'border', value: number) {
     const held = kind === 'size' ? uniqueSizeEdges([...heldSpacingEdgesRef.current]) : [...heldSpacingEdgesRef.current];
     const widgetId = selectedWidgetIdRef.current;
@@ -3947,7 +3727,7 @@ export function ProjectEditorPage() {
       kind === 'margin' || kind === 'position' ? undefined : 0,
     );
     const quad = kind === 'size' ? syncSizeQuad(next) : next;
-    updateWidget(widget.id, { style: writeSizedStyle(widget, kind, quad) }, `edit:${widget.id}:style`);
+    updateWidget(widget.id, { style: writeNudgeStyle(widget.style, kind, quad) }, `edit:${widget.id}:style`);
   }
 
   function heldSpacingValueText(kind: BoxDragKind | 'border') {
@@ -4005,7 +3785,7 @@ export function ProjectEditorPage() {
     }
     const next = applySpacingNudge(readNudgeQuad(widget.style, kind), edges, delta, spacingAllowsNegative(kind) ? undefined : 0);
     const quad = kind === 'size' ? syncSizeQuad(next) : next;
-    updateWidget(widget.id, { style: writeSizedStyle(widget, kind, quad) }, `edit:${widget.id}:style`);
+    updateWidget(widget.id, { style: writeNudgeStyle(widget.style, kind, quad) }, `edit:${widget.id}:style`);
   }
 
   function startSpacingNudgeRepeat(key: string) {
@@ -4357,7 +4137,7 @@ export function ProjectEditorPage() {
             inward: spacing.kind === 'padding' || spacing.kind === 'position',
             mirror: altKey,
           });
-    patchLiveWidgetStyle(spacing.widgetId, writeSizedStyle(widget, spacing.kind, quad));
+    patchLiveWidgetStyle(spacing.widgetId, styleFromBoxQuad(widget.style, spacing.kind, quad));
   }
 
   function handleCanvasPointer(data: {
@@ -4621,7 +4401,6 @@ export function ProjectEditorPage() {
     setSelectedWidgetId(previous.selectedWidgetId);
     setExpandedKeys((prev) => nextExpandedKeys(prev, previousWidgets, previous.widgets, previous.selectedWidgetId));
     setHistoryTick((tick) => tick + 1);
-    queueDraftSave();
   }
 
   function redoWidgetEdit() {
@@ -4668,7 +4447,6 @@ export function ProjectEditorPage() {
     setSelectedWidgetId(next.selectedWidgetId);
     setExpandedKeys((prev) => nextExpandedKeys(prev, previousWidgets, next.widgets, next.selectedWidgetId));
     setHistoryTick((tick) => tick + 1);
-    queueDraftSave();
   }
 
   function dispatchShortcut(shortcut: WidgetShortcut) {
@@ -4695,7 +4473,7 @@ export function ProjectEditorPage() {
       }
       const style = widget.style;
       if (shortcut === 'fontSizeUp' || shortcut === 'fontSizeDown') {
-        const from = typeof style?.fontSize === 'number' && style.fontSize > 0 ? style.fontSize : (measuredFontSize(widget.id) ?? 14);
+        const from = typeof style?.fontSize === 'number' && style.fontSize > 0 ? style.fontSize : (measuredFontSize(widget.id) ?? 16);
         const nextSize = Math.min(999, Math.max(1, from + (shortcut === 'fontSizeUp' ? 1 : -1)));
         if (nextSize === style?.fontSize) {
           return;
@@ -4863,14 +4641,17 @@ export function ProjectEditorPage() {
       return;
     }
     if (!forced) {
-      if (!persistEnabledRef.current || !sameLoaded(target)) {
+      const selectedId = target.kind === 'component' ? selectedComponentIdRef.current : selectedPageIdRef.current;
+      if (!persistEnabledRef.current || catalogKindRef.current !== target.kind || selectedId !== target.ownerId || !sameLoaded(target)) {
         return;
       }
     }
     if (target.kind === 'page' && !target.projectVersionId) {
       return;
     }
-    // 预览态仍要落盘：组件入参测试样本在预览里编辑，并写入 testData。
+    if (readOnlyRef.current || inspectorInvalidRef.current) {
+      return;
+    }
     if (keyToSave === lastServerKeyRef.current || emptyCanvasWouldErase()) {
       return;
     }
@@ -4879,6 +4660,7 @@ export function ProjectEditorPage() {
       return;
     }
     const projectId = id;
+    const draftId = target.kind === 'component' ? `component:${target.ownerId}` : target.ownerId;
     saveInFlightRef.current = true;
     if (!forced) {
       setSaveStatus('saving');
@@ -4888,7 +4670,8 @@ export function ProjectEditorPage() {
         const updated = await api.updateComponentVersion(projectId, target.ownerId, target.versionId, {
           document: documentToSave,
         });
-        void putCachedVersion(projectId, target.ownerId, { ...updated, document: documentToSave });
+        await deleteDraft(projectId, draftId, target.versionId);
+        void putCachedVersion(projectId, draftId, { ...updated, document: documentToSave });
         if (sameLoaded(target) && documentKeyRef.current === keyToSave) {
           lastServerKeyRef.current = keyToSave;
           setVersions((current) =>
@@ -4899,6 +4682,7 @@ export function ProjectEditorPage() {
         const updated = await api.updatePageDocument(projectId, target.projectVersionId, target.ownerId, {
           document: documentToSave,
         });
+        await deleteDraft(projectId, draftId, target.versionId);
         if (updated.id !== target.versionId) {
           setPages((current) =>
             current.map((page) => (page.id === target.ownerId ? { ...page, currentVersionId: updated.id } : page)),
@@ -4920,9 +4704,11 @@ export function ProjectEditorPage() {
         setSaveStatus(documentKeyRef.current === lastServerKeyRef.current ? 'saved' : 'unsaved');
       }
     } catch (error) {
-      if (sameLoaded(target) || forced) {
+      if (sameLoaded(target)) {
         setSaveStatus('unsaved');
-        message.error(error instanceof Error ? error.message : t('lowcode.saveFailed'));
+        if (!options?.silent) {
+          message.error(error instanceof Error ? error.message : t('lowcode.saveFailed'));
+        }
       }
     } finally {
       saveInFlightRef.current = false;
@@ -5186,8 +4972,6 @@ export function ProjectEditorPage() {
               pageData={pageData}
               testData={pageDocument.testData}
               previewDataEdits={previewDataEdits}
-              previewPropEdits={previewPropEdits}
-              previewQueryEdits={previewQueryEdits}
               commitPreviewTest={commitPreviewTest}
               componentMode={catalogKind === 'component'}
               pageQuery={pageQuery}
@@ -5195,7 +4979,6 @@ export function ProjectEditorPage() {
               commitPageQuery={commitPageQuery}
               componentProps={componentProps}
               componentEmits={componentEmits}
-              componentEmitsById={componentEmitsById}
               commitComponentProps={commitComponentProps}
               commitComponentEmits={commitComponentEmits}
               pageEvents={pageEvents}

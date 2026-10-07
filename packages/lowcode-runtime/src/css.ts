@@ -722,6 +722,48 @@ function hasExplicitFontSize(style: WidgetStyle | undefined): boolean {
   return (typeof value === 'number' && Number.isFinite(value)) || (typeof value === 'string' && value.trim().length > 0);
 }
 
+const LAYOUT_STYLE_FIELDS = ['width', 'height', 'position', 'top', 'right', 'bottom', 'left', 'zIndex'] as const;
+
+/** 忽略字号、颜色、边距这类只进样式表的字段，用来判断要不要重挂控件树。 */
+export function widgetPaintKey(widgets: readonly PageWidget[]): string {
+  return JSON.stringify(widgets, (key, value: unknown) => {
+    if (key !== 'style' || value == null || typeof value !== 'object' || Array.isArray(value)) {
+      return value;
+    }
+    const style = value as Record<string, unknown>;
+    const layout: Record<string, unknown> = {};
+    for (const field of LAYOUT_STYLE_FIELDS) {
+      if (style[field] != null) {
+        layout[field] = style[field];
+      }
+    }
+    return layout;
+  });
+}
+
+const libraryPaintCache = new WeakMap<object, string>();
+
+/** 组件文档对象不变时直接复用，避免每次预览都重算整库样式。 */
+export function libraryPaintKey(components: Record<string, { widgets: PageWidget[] }> | undefined): string {
+  if (!components) {
+    return '';
+  }
+  let key = '';
+  for (const id of Object.keys(components).sort()) {
+    const doc = components[id];
+    if (!doc) {
+      continue;
+    }
+    let cached = libraryPaintCache.get(doc);
+    if (!cached) {
+      cached = `${widgetPaintKey(doc.widgets)}\n${pageCssText(doc.widgets)}`;
+      libraryPaintCache.set(doc, cached);
+    }
+    key += `${id}\n${cached}\n`;
+  }
+  return key;
+}
+
 export function pageCssText(widgets: PageWidget[]): string {
   const blocks: string[] = [];
 

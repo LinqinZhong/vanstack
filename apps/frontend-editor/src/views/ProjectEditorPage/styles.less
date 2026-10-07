@@ -874,8 +874,16 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 }
 
 .widget-tree-panel .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+
+.widget-tree-host {
+  flex: 1;
+  min-height: 0;
 }
 
 .widget-tree-panel .ant-card-body:hover {

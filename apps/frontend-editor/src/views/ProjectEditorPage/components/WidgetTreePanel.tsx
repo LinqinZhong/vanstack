@@ -11,7 +11,7 @@ import {
   UnorderedListOutlined,
 } from '@ant-design/icons';
 import { Button, Card, Dropdown, Empty, Tooltip, Tree, type TreeDataNode } from 'antd';
-import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { memo, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { hasWidgetEvents, isLoopConfigured, type PageWidget } from '@vanstack/xml';
@@ -67,20 +67,168 @@ type WidgetTreePanelProps = {
  * 横向滚动时靠 sticky 留在面板右侧，标题从它左边滚过去。
  */
 function TreeRowEye({ className, children }: { className: string; children: ReactNode }) {
-  const anchorRef = useRef<HTMLSpanElement>(null);
   const [row, setRow] = useState<HTMLElement | null>(null);
-  useLayoutEffect(() => {
-    const next = anchorRef.current?.closest<HTMLElement>('.ant-tree-treenode') ?? null;
-    setRow((current) => (current === next ? current : next));
-  });
   const eye = <span className={className}>{children}</span>;
   return (
     <>
-      <span ref={anchorRef} className="widget-tree-eye-anchor" />
+      <span
+        className="widget-tree-eye-anchor"
+        ref={(node) => {
+          const next = node?.closest<HTMLElement>('.ant-tree-treenode') ?? null;
+          setRow((current) => (current === next ? current : next));
+        }}
+      />
       {row ? createPortal(eye, row) : eye}
     </>
   );
 }
+
+const TreeTitle = memo(function TreeTitle({
+  widgetId,
+  label,
+  alias,
+  hidden,
+  looped,
+  hasEvents,
+  selected,
+  readOnly,
+  canDragWidgetToData,
+  onSelect,
+  onOpenAlias,
+  onOpenLoop,
+  onOpenEvents,
+  onToggleHidden,
+  loopTitle,
+  eventsTitle,
+  showTitle,
+  hideTitle,
+  aliasMenuLabel,
+}: {
+  widgetId: string;
+  label: string;
+  alias?: string;
+  hidden: boolean;
+  looped: boolean;
+  hasEvents: boolean;
+  selected: boolean;
+  readOnly: boolean;
+  canDragWidgetToData: boolean;
+  onSelect: (widgetId: string) => void;
+  onOpenAlias: (widgetId: string) => void;
+  onOpenLoop: (widgetId: string) => void;
+  onOpenEvents: (widgetId: string) => void;
+  onToggleHidden: (widgetId: string) => void;
+  loopTitle: string;
+  eventsTitle: string;
+  showTitle: string;
+  hideTitle: string;
+  aliasMenuLabel: string;
+}) {
+  const titleClasses = ['widget-tree-title', hidden ? 'is-hidden' : '', selected ? 'is-row-selected' : '']
+    .filter(Boolean)
+    .join(' ');
+  return (
+    <Dropdown
+      trigger={['contextMenu']}
+      menu={{
+        items: [
+          {
+            key: 'alias',
+            label: aliasMenuLabel,
+            disabled: readOnly,
+          },
+        ],
+        onClick: ({ key }) => {
+          if (key === 'alias') {
+            onOpenAlias(widgetId);
+          }
+        },
+      }}
+    >
+      <span className={titleClasses} onContextMenu={() => onSelect(widgetId)}>
+        <span
+          className={
+            canDragWidgetToData
+              ? 'widget-tree-drag-title'
+              : alias
+                ? 'widget-tree-title-label is-alias'
+                : 'widget-tree-title-label'
+          }
+          draggable={canDragWidgetToData}
+          onDragStart={(event) => {
+            event.stopPropagation();
+            event.dataTransfer.effectAllowed = 'copy';
+            writeWidgetDrag(event.dataTransfer, widgetId);
+          }}
+        >
+          {alias ?? label}
+        </span>
+        {looped ? (
+          <button
+            type="button"
+            className="widget-tree-loop"
+            title={loopTitle}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenLoop(widgetId);
+            }}
+          >
+            <UnorderedListOutlined />
+          </button>
+        ) : null}
+        {hasEvents ? (
+          <button
+            type="button"
+            className="widget-tree-event"
+            title={eventsTitle}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenEvents(widgetId);
+            }}
+          >
+            <ThunderboltOutlined />
+          </button>
+        ) : null}
+        <TreeRowEye
+          className={['widget-tree-actions-inline', hidden ? 'is-hidden' : '', selected ? 'is-row-selected' : '']
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <button
+            type="button"
+            className="widget-tree-visibility"
+            title={hidden ? showTitle : hideTitle}
+            disabled={readOnly}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleHidden(widgetId);
+            }}
+          >
+            {hidden ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+          </button>
+        </TreeRowEye>
+      </span>
+    </Dropdown>
+  );
+}, (prev, next) =>
+  prev.widgetId === next.widgetId &&
+  prev.label === next.label &&
+  prev.alias === next.alias &&
+  prev.hidden === next.hidden &&
+  prev.looped === next.looped &&
+  prev.hasEvents === next.hasEvents &&
+  prev.selected === next.selected &&
+  prev.readOnly === next.readOnly &&
+  prev.canDragWidgetToData === next.canDragWidgetToData &&
+  prev.loopTitle === next.loopTitle &&
+  prev.eventsTitle === next.eventsTitle &&
+  prev.showTitle === next.showTitle &&
+  prev.hideTitle === next.hideTitle &&
+  prev.aliasMenuLabel === next.aliasMenuLabel,
+);
 
 function treeDropPlacement(dropToGap: boolean, nodePos: string, dropPosition: number): WidgetDropPlacement {
   if (!dropToGap) {
@@ -121,6 +269,21 @@ export function WidgetTreePanel({
   onMove,
 }: WidgetTreePanelProps) {
   const { t } = useTranslation();
+  const [treeHeight, setTreeHeight] = useState(320);
+  useLayoutEffect(() => {
+    const node = treeHostRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const measure = () => {
+      const next = Math.floor(node.clientHeight);
+      setTreeHeight((current) => (next > 0 && current !== next ? next : current));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [treeHostRef, widgets.length]);
   return (
     <Card
       size="small"
@@ -168,11 +331,13 @@ export function WidgetTreePanel({
       {widgets.length === 0 ? (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('lowcode.emptyWidgets')} />
       ) : (
-        <div ref={treeHostRef}>
+        <div ref={treeHostRef} className="widget-tree-host">
           <Tree
             className="widget-tree"
             blockNode
-            virtual={false}
+            virtual
+            height={treeHeight}
+            itemHeight={24}
             autoExpandParent={false}
             // 只读，或标题要拖进数据面板时，关掉树内排序。
             draggable={!readOnly && !canDragWidgetToData ? { icon: false } : false}
@@ -187,107 +352,29 @@ export function WidgetTreePanel({
             titleRender={(node) => {
               const widgetId = String(node.key);
               const widget = findWidget(widgets, widgetId);
-              const looped = isLoopConfigured(widget?.loop);
-              const hasEvents = hasWidgetEvents(widget?.events);
-              const hidden = Boolean(widget?.hidden);
               const alias = widget?.alias?.trim();
-              const titleClasses = [
-                'widget-tree-title',
-                hidden ? 'is-hidden' : '',
-                selectedWidgetId === widgetId ? 'is-row-selected' : '',
-              ]
-                .filter(Boolean)
-                .join(' ');
               return (
-                <Dropdown
-                  trigger={['contextMenu']}
-                  menu={{
-                    items: [
-                      {
-                        key: 'alias',
-                        label: t('lowcode.setAlias'),
-                        disabled: readOnly,
-                      },
-                    ],
-                    onClick: ({ key }) => {
-                      if (key === 'alias') {
-                        onOpenAlias(widgetId);
-                      }
-                    },
-                  }}
-                >
-                  <span className={titleClasses} onContextMenu={() => onSelect(widgetId)}>
-                    <span
-                      className={
-                        canDragWidgetToData
-                          ? 'widget-tree-drag-title'
-                          : alias
-                            ? 'widget-tree-title-label is-alias'
-                            : 'widget-tree-title-label'
-                      }
-                      draggable={canDragWidgetToData}
-                      onDragStart={(event) => {
-                        // 阻止冒泡，否则会同时触发树节点的排序拖拽。
-                        event.stopPropagation();
-                        event.dataTransfer.effectAllowed = 'copy';
-                        writeWidgetDrag(event.dataTransfer, widgetId);
-                      }}
-                    >
-                      {alias ?? (typeof node.title === 'string' ? node.title : widgetId)}
-                    </span>
-                    {looped ? (
-                      <button
-                        type="button"
-                        className="widget-tree-loop"
-                        title={t('lowcode.styleLoop')}
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onOpenLoop(widgetId);
-                        }}
-                      >
-                        <UnorderedListOutlined />
-                      </button>
-                    ) : null}
-                    {hasEvents ? (
-                      <button
-                        type="button"
-                        className="widget-tree-event"
-                        title={t('lowcode.styleEvents')}
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onOpenEvents(widgetId);
-                        }}
-                      >
-                        <ThunderboltOutlined />
-                      </button>
-                    ) : null}
-                    <TreeRowEye
-                      className={[
-                        'widget-tree-actions-inline',
-                        hidden ? 'is-hidden' : '',
-                        selectedWidgetId === widgetId ? 'is-row-selected' : '',
-                      ]
-                        .filter(Boolean)
-                        .join(' ')}
-                    >
-                      <button
-                        type="button"
-                        className="widget-tree-visibility"
-                        title={hidden ? t('lowcode.showWidget') : t('lowcode.hideWidget')}
-                        disabled={readOnly}
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onToggleHidden(widgetId);
-                        }}
-                      >
-                        {hidden ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-                      </button>
-                    </TreeRowEye>
-                  </span>
-                </Dropdown>
+                <TreeTitle
+                  widgetId={widgetId}
+                  label={typeof node.title === 'string' ? node.title : widgetId}
+                  alias={alias || undefined}
+                  hidden={Boolean(widget?.hidden)}
+                  looped={isLoopConfigured(widget?.loop)}
+                  hasEvents={hasWidgetEvents(widget?.events)}
+                  selected={selectedWidgetId === widgetId}
+                  readOnly={readOnly}
+                  canDragWidgetToData={canDragWidgetToData}
+                  onSelect={onSelect}
+                  onOpenAlias={onOpenAlias}
+                  onOpenLoop={onOpenLoop}
+                  onOpenEvents={onOpenEvents}
+                  onToggleHidden={onToggleHidden}
+                  loopTitle={t('lowcode.styleLoop')}
+                  eventsTitle={t('lowcode.styleEvents')}
+                  showTitle={t('lowcode.showWidget')}
+                  hideTitle={t('lowcode.hideWidget')}
+                  aliasMenuLabel={t('lowcode.setAlias')}
+                />
               );
             }}
             onExpand={(keys) => onExpand(keys.map(String))}

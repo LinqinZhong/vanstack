@@ -1,5 +1,4 @@
 import { createElement } from 'react';
-import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import {
   isPageLangSnapshot,
@@ -35,6 +34,8 @@ export type RenderPageXmlOptions = {
   icons?: Readonly<Record<string, string>>;
   /** 变化时整页重挂，清掉预览里改过的数据和控件状态。 */
   previewEpoch?: number;
+  /** React 提交完 DOM 之后调用，用来画选中框。不要在渲染过程里同步读布局。 */
+  onCommit?: () => void;
 };
 
 function resolveRenderCatalog(catalog: RenderPageXmlOptions['catalog']): PageI18n | undefined {
@@ -96,20 +97,18 @@ export function renderPage(
       centerContent: options?.centerContent,
       useComponentTestData: options?.useComponentTestData,
       icons: options?.icons,
+      onCommit: options?.onCommit,
     });
-    flushSync(() => {
-      root.render(tree);
-    });
+    root.render(tree);
     return { ok: true };
   } catch (error) {
-    flushSync(() => {
-      root.render(null);
-    });
+    root.render(null);
     const message = error instanceof Error ? error.message : 'Invalid page';
     return { ok: false, error: message };
   }
 }
 
+export { pageCssText } from './css';
 export { HOVER_STATE_NAME, mergeHoverViewing, widgetHasHoverState } from './hover';
 export { installPageIcons } from './icon';
 export { installPageI18n } from './i18n';

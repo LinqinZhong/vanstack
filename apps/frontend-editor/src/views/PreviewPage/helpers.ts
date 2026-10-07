@@ -117,12 +117,39 @@ export function setSelectFaded(host: HTMLElement | null, faded: boolean) {
   host?.classList.toggle('is-select-faded', faded);
 }
 
+/** 清掉拖拽时写上的行内样式，让样式表里的字号、边距重新生效。 */
+export function clearLiveInlineStyles(root: HTMLElement | null) {
+  if (!root) {
+    return;
+  }
+  for (const node of root.querySelectorAll<HTMLElement>('[data-live-style]')) {
+    for (const key of LIVE_STYLE_KEYS) {
+      node.style[key] = '';
+    }
+    delete node.dataset.liveStyle;
+    if (node.dataset.widgetType !== 'drawer') {
+      continue;
+    }
+    const panel = node.querySelector<HTMLElement>(':scope > .lowcode-drawer-panel');
+    if (!panel) {
+      continue;
+    }
+    for (const key of LIVE_STYLE_KEYS) {
+      panel.style[key] = '';
+    }
+    const place = node.dataset.drawerPlace ?? 'bottom';
+    const axis = place === 'left' || place === 'right' ? 'height' : 'width';
+    panel.style[axis] = '100%';
+  }
+}
+
 /** applyLiveWidgetCss：父页推送的即时样式写到 DOM，拖拽过程中不必整页重渲。 */
 export function applyLiveWidgetCss(root: HTMLElement | null, widgetId: string, css: Record<string, string>) {
   const node = root?.querySelector<HTMLElement>(`[data-widget-id="${CSS.escape(widgetId)}"]`);
   if (!node) {
     return false;
   }
+  node.dataset.liveStyle = '';
   if (node.dataset.widgetType === 'drawer') {
     const panel = node.querySelector<HTMLElement>(':scope > .lowcode-drawer-panel');
     const place = node.dataset.drawerPlace ?? 'bottom';

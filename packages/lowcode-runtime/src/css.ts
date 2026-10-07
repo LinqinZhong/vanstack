@@ -9,6 +9,7 @@ import {
   type BoxLength,
   type FlexContainerStyle,
   type FlexItemStyle,
+  readPresenceFlag,
   type PageStyle,
   type PageWidget,
   type SizeValue,
@@ -130,6 +131,25 @@ export function mergeCss(...parts: Array<CSSProperties | undefined>): CSSPropert
 
 export function hiddenCss(hidden: boolean | undefined, editing: boolean): CSSProperties | undefined {
   return hidden && editing ? { visibility: 'hidden' } : undefined;
+}
+
+/** 入参已求值时：显示为 false 不占位，可见为 false 占位但没有视图。 */
+export function presenceCss(
+  widget: { displayFn?: string; visibleFn?: string },
+  options?: WidgetCssOptions,
+): CSSProperties | undefined {
+  if (!options?.evaluateBindings) {
+    return undefined;
+  }
+  const scope = options.bindingScope ?? { data: Object.create(null) as Record<string, unknown> };
+  const css: CSSProperties = {};
+  if (!readPresenceFlag(widget.displayFn, scope)) {
+    css.display = 'none';
+  }
+  if (!readPresenceFlag(widget.visibleFn, scope)) {
+    css.visibility = 'hidden';
+  }
+  return Object.keys(css).length > 0 ? css : undefined;
 }
 
 function pageOverflowValue(style: PageStyle | undefined, editing: boolean, options?: WidgetCssOptions) {
@@ -738,10 +758,21 @@ export function pageCssText(widgets: PageWidget[]): string {
   }
 
   walk(widgets, true);
+  blocks.unshift('.lowcode-drawer-panel { box-sizing: border-box; background: #fff; }');
   blocks.push(
     '.lowcode-page-scroll > [data-widget-id] { flex: 0 0 auto; max-width: none; }',
+    '.lowcode-drawer-board > [data-widget-id] { flex: 0 0 auto; max-width: none; }',
+    '.lowcode-page-scroll { scrollbar-width: none; -ms-overflow-style: none; }',
+    '.lowcode-page-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }',
+    '.lowcode-page-scroll-port > .lowcode-scroll-thumb { z-index: 30; }',
     '.lowcode-table { scrollbar-width: none; }',
     '.lowcode-table::-webkit-scrollbar { width: 0; height: 0; display: none; }',
+    '.lowcode-scroll-port { position: relative; width: 100%; height: 100%; }',
+    '.lowcode-scroll-view { width: 100%; height: 100%; scrollbar-width: none; -ms-overflow-style: none; }',
+    '.lowcode-scroll-view::-webkit-scrollbar { width: 0; height: 0; display: none; }',
+    '.lowcode-scroll-thumb { position: absolute; z-index: 1; pointer-events: none; border-radius: 999px; background: rgba(0, 0, 0, 0.25); opacity: 0; }',
+    '.lowcode-scroll-thumb.is-y { top: 2px; right: 2px; width: 4px; }',
+    '.lowcode-scroll-thumb.is-x { left: 2px; bottom: 2px; height: 4px; }',
     '.lowcode-table-slot { display: flex; align-items: center; }',
     '.lowcode-dynamic-copy { cursor: help; }',
     '.lowcode-dynamic-copy-tip { position: fixed; z-index: 80; max-width: 360px; padding: 6px 8px; border-radius: 6px; background: rgba(21, 28, 34, 0.96); color: #fff; font: 12px/1.45 "Segoe UI", sans-serif; white-space: pre-wrap; word-break: break-all; pointer-events: none; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28); }',

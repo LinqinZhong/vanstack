@@ -735,6 +735,163 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     }
     return uses;
   }
+
+  async dumpProject(projectId: string) {
+    const project = await this.getProject(projectId);
+    if (!project) {
+      return null;
+    }
+    const [
+      projectVersions,
+      pageVersions,
+      components,
+      componentVersions,
+      functions,
+      events,
+      langVersions,
+      assetVersions,
+      iconVersions,
+      namespaceVersions,
+    ] = await Promise.all([
+      this.listProjectVersions(projectId),
+      this.listProjectPageSnapshots(projectId),
+      this.listComponents(projectId),
+      this.componentVersionDocs().find({ projectId }).toArray(),
+      this.listFunctions(projectId),
+      this.listEvents(projectId),
+      this.langVersionDocs().find({ projectId }).toArray(),
+      this.libraryDocs('asset').find({ projectId }).toArray(),
+      this.libraryDocs('icon').find({ projectId }).toArray(),
+      this.namespaceVersionDocs().find({ projectId }).toArray(),
+    ]);
+    return {
+      project,
+      projectVersions,
+      pageVersions,
+      components,
+      componentVersions,
+      functions,
+      events,
+      langVersions,
+      assetVersions,
+      iconVersions,
+      namespaceVersions,
+    };
+  }
+
+  async upsertBundleDoc(collection: string, doc: Record<string, unknown>): Promise<void> {
+    const revived = reviveDates(doc);
+    switch (collection) {
+      case 'project.version':
+        await this.saveProjectVersion(revived as ProjectVersionRecord);
+        return;
+      case 'page.version':
+        await this.pageDocs().replaceOne({ _id: String(revived._id) }, revived as PageVersionRecord, { upsert: true });
+        return;
+      case 'component':
+        await this.saveComponent(revived as ComponentRecord);
+        return;
+      case 'component.version':
+        await this.componentVersionDocs().replaceOne(
+          { _id: String(revived._id) },
+          revived as ComponentVersionRecord,
+          { upsert: true },
+        );
+        return;
+      case 'function': {
+        const row = stripMongoId(revived) as unknown as FunctionRecord;
+        await this.functionDocs().replaceOne({ projectId: row.projectId, id: row.id }, row, { upsert: true });
+        return;
+      }
+      case 'event': {
+        const row = stripMongoId(revived) as unknown as EventRecord;
+        await this.eventDocs().replaceOne({ projectId: row.projectId, id: row.id }, row, { upsert: true });
+        return;
+      }
+      case 'lang.version':
+        await this.saveLangVersion(revived as LangVersionRecord);
+        return;
+      case 'asset.version':
+        await this.saveLibraryVersion('asset', revived as LibraryVersionRecord);
+        return;
+      case 'icon.version':
+        await this.saveLibraryVersion('icon', revived as LibraryVersionRecord);
+        return;
+      case 'namespace.version':
+        await this.saveNamespaceVersion(revived as NamespaceVersionRecord);
+        return;
+      default:
+        throw new Error(`unknown collection ${collection}`);
+    }
+  }
+
+  async deleteBundleDoc(collection: string, id: string, projectId?: string): Promise<void> {
+    switch (collection) {
+      case 'project.version':
+        await this.deleteProjectVersion(id);
+        return;
+      case 'page.version':
+        await this.deletePage(id);
+        return;
+      case 'component':
+        await this.deleteComponent(id);
+        return;
+      case 'component.version':
+        await this.deleteComponentVersion(id);
+        return;
+      case 'function':
+        await this.functionDocs().deleteOne({ projectId: projectId ?? '', id });
+        return;
+      case 'event':
+        await this.deleteEvent(projectId ?? '', id);
+        return;
+      case 'lang.version':
+        await this.deleteLangVersion(id);
+        return;
+      case 'asset.version':
+        await this.deleteLibraryVersion('asset', id);
+        return;
+      case 'icon.version':
+        await this.deleteLibraryVersion('icon', id);
+        return;
+      case 'namespace.version':
+        await this.deleteNamespaceVersion(id);
+        return;
+      default:
+        throw new Error(`unknown collection ${collection}`);
+    }
+  }
+}
+
+const DATE_FIELDS = new Set(['createdAt', 'updatedAt']);
+
+function reviveDates(value: unknown): Record<string, unknown> {
+  return reviveValue(value) as Record<string, unknown>;
+}
+
+function reviveValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => reviveValue(item));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  const next: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (DATE_FIELDS.has(key) && typeof item === 'string') {
+      const date = new Date(item);
+      next[key] = Number.isNaN(date.getTime()) ? item : date;
+      continue;
+    }
+    next[key] = reviveValue(item);
+  }
+  return next;
+}
+
+function stripMongoId(doc: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...doc };
+  delete next._id;
+  return next;
 }
 
 async function adoptBusinessId(

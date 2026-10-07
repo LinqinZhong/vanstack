@@ -6,19 +6,19 @@ import {
   isBackendHealthy,
   resolveNodeExecutable,
   spawnBackend,
+  spawnEditorServer,
   stopBackend,
   waitForHealth,
 } from './backend';
 import { errorPageHtml, startingPageHtml } from './error-page';
 import { listenStatic, setBackendOrigin, getBackendOrigin } from './host';
+import path from 'node:path';
 import {
   ADMIN_ORIGIN,
   ADMIN_PORT,
-  APP_ORIGIN,
-  APP_PORT,
+  EDITOR_SERVER_ORIGIN,
   LOOPBACK,
   adminDist,
-  appDist,
   isDevMode,
   preloadPath,
 } from './paths';
@@ -27,6 +27,7 @@ import { isLoopbackHost, loadServer, saveServer, serverOrigin } from './server-s
 const devMode = isDevMode();
 let mainWindow: BrowserWindow | undefined;
 let backendProcess: ReturnType<typeof spawnBackend> | undefined;
+let editorServerProcess: ReturnType<typeof spawnEditorServer> | undefined;
 const servers: http.Server[] = [];
 
 function windowPrefs() {
@@ -49,15 +50,6 @@ function createMainWindow(): BrowserWindow {
   return win;
 }
 
-function openH5Window(url: string): void {
-  const child = new BrowserWindow({
-    width: 420,
-    height: 800,
-    webPreferences: windowPrefs(),
-  });
-  void child.loadURL(url);
-}
-
 function isOrigin(url: string, origin: string): boolean {
   try {
     return new URL(url).origin === origin;
@@ -70,27 +62,18 @@ function isAllowedNavigation(url: string): boolean {
   if (url.startsWith('data:text/html')) {
     return true;
   }
-  return isOrigin(url, ADMIN_ORIGIN) || isOrigin(url, APP_ORIGIN) || isOrigin(url, getBackendOrigin());
+  return isOrigin(url, ADMIN_ORIGIN) || isOrigin(url, getBackendOrigin());
 }
 
 function attachNavigationGuards(): void {
   app.on('web-contents-created', (_event, contents) => {
     contents.setWindowOpenHandler(({ url }) => {
-      if (isOrigin(url, APP_ORIGIN)) {
-        openH5Window(url);
-        return { action: 'deny' };
-      }
       if (isAllowedNavigation(url)) {
         return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: windowPrefs() } };
       }
       return { action: 'deny' };
     });
     contents.on('will-navigate', (event, url) => {
-      if (contents === mainWindow?.webContents && isOrigin(url, APP_ORIGIN)) {
-        event.preventDefault();
-        openH5Window(url);
-        return;
-      }
       if (!isAllowedNavigation(url)) {
         event.preventDefault();
       }
@@ -156,19 +139,14 @@ function isAddrInUse(error: unknown): boolean {
 
 async function startProductionHosts(): Promise<void> {
   const adminRoot = adminDist();
-  const h5Root = appDist();
   if (!existsSync(adminRoot)) {
-    throw new Error(`找不到管理后台构建产物：${adminRoot}`);
-  }
-  if (!existsSync(h5Root)) {
-    throw new Error(`找不到 H5 构建产物：${h5Root}`);
+    throw new Error(`找不到编辑器构建产物：${adminRoot}`);
   }
   try {
     servers.push(await listenStatic({ host: LOOPBACK, port: ADMIN_PORT, root: adminRoot }));
-    servers.push(await listenStatic({ host: LOOPBACK, port: APP_PORT, root: h5Root }));
   } catch (error) {
     if (isAddrInUse(error)) {
-      throw new Error('端口 5173 或 5174 已被占用。请先关闭 pnpm dev 或其它占用进程后再启动桌面生产模式。');
+      throw new Error('端口 5174 已被占用。请先关闭 pnpm dev 或其它占用进程后再启动桌面生产模式。');
     }
     throw error;
   }
@@ -177,37 +155,40 @@ async function startProductionHosts(): Promise<void> {
 async function startProductionBackend(): Promise<void> {
   const server = loadServer();
   const origin = serverOrigin(server);
-  setBackendOrigin(origin);
-  if (await isBackendHealthy(origin)) {
-    return;
-  }
-  if (!isLoopbackHost(server.host)) {
-    throw new Error(`无法连接后端 ${origin}。请检查 IP 与端口，或在登录页修改服务器地址。`);
-  }
   const nodeExecutable = resolveNodeExecutable();
   const nodeCheck = checkNode(nodeExecutable);
   if (!nodeCheck.ok) {
     throw new Error(nodeCheck.reason);
   }
-  backendProcess = spawnBackend(nodeExecutable, server.port);
-  backendProcess.once('error', (error) => {
-    showError(error.message);
-  });
-  await waitForHealth(origin);
+  if (!(await isBackendHealthy(origin))) {
+    if (!isLoopbackHost(server.host)) {
+      throw new Error(`无法连接后端 ${origin}。请检查 IP 与端口，或在登录页修改服务器地址。`);
+    }
+    backendProcess = spawnBackend(nodeExecutable, server.port);
+    backendProcess.once('error', (error) => {
+      showError(error.message);
+    });
+    await waitForHealth(origin);
+  }
+  if (!(await isBackendHealthy(EDITOR_SERVER_ORIGIN))) {
+    editorServerProcess = spawnEditorServer(nodeExecutable, origin, path.join(app.getPath('userData'), 'projects'));
+    editorServerProcess.once('error', (error) => {
+      showError(error.message);
+    });
+    await waitForHealth(EDITOR_SERVER_ORIGIN);
+  }
 }
 
 function registerServerIpc(): void {
   ipcMain.handle('server:get', () => loadServer());
   ipcMain.handle('server:set', (_event, raw: unknown) => {
-    const config = saveServer(raw);
-    setBackendOrigin(serverOrigin(config));
-    return config;
+    return saveServer(raw);
   });
 }
 
 async function boot(): Promise<void> {
   registerServerIpc();
-  setBackendOrigin(serverOrigin(loadServer()));
+  setBackendOrigin(EDITOR_SERVER_ORIGIN);
   attachNavigationGuards();
   mainWindow = createMainWindow();
   if (devMode) {
@@ -238,7 +219,9 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   stopBackend(backendProcess);
+  stopBackend(editorServerProcess);
   backendProcess = undefined;
+  editorServerProcess = undefined;
   for (const server of servers) {
     server.close();
   }

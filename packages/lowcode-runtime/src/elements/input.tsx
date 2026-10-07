@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import { inputBoundText, isCopyBinding, propModelName, resolveCopyBinding, type PageWidget } from '@vanstack/xml';
-import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
+import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, presenceCss, widgetClassName } from '../css';
 import { chainEventProps, rememberWidgetValue } from '../events';
 import { readPropText, resolveWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
@@ -60,6 +60,7 @@ function InputField({
       dynamicStyleCss(widget.style, widgetCssOptions(ctx)),
       flexItemCss(widget.item, widgetCssOptions(ctx)),
       hiddenCss(widget.hidden, ctx.editing),
+      presenceCss(widget, widgetCssOptions(ctx)),
     ),
     placeholder: widget.placeholder ? resolveWidgetCopy(widget.placeholder, ctx) : undefined,
     value: displayed,

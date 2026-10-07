@@ -14,7 +14,7 @@ import {
   type PageXmlDocument,
   type ScopeAssign,
 } from '@vanstack/xml';
-import { cssMeasure, cssText, dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, pageCssText, widgetClassName, type WidgetCssOptions } from '../css';
+import { cssMeasure, cssText, dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, pageCssText, presenceCss, widgetClassName, type WidgetCssOptions } from '../css';
 import { resolveRuntimeOwnState } from '../hover';
 import { expandLoopTree, widgetInstanceKey } from '../loop';
 import { formatStoredValue } from '../stored';
@@ -166,11 +166,13 @@ function ComponentView({
   const stack = ctx.componentStack ?? [];
   const doc = ctx.components?.[widget.componentId];
   const nested = doc && !stack.includes(widget.componentId) ? doc : undefined;
-  const definedProps = ctx.useComponentTestData
+  const useTestProps = Boolean(ctx.useComponentTestData) && !widget.editProps;
+  const definedProps = useTestProps
     ? applyTestValues(nested?.props, nested?.testData?.props)
     : nested?.props;
+  const evaluateArgs = ctx.evaluateBindings || Boolean(widget.editProps);
   const query = ctx.bindingScope.query;
-  const dataKey = `${componentDataKey(nested?.data, definedProps, widget.args, ctx.evaluateBindings)}\0${ctx.useComponentTestData ? 1 : 0}`;
+  const dataKey = `${componentDataKey(nested?.data, definedProps, widget.args, evaluateArgs)}\0${useTestProps ? 1 : 0}`;
   const [writesStamp, setWritesStamp] = useState(dataKey);
   const [writes, setWrites] = useState<Record<string, string>>({});
   if (writesStamp !== dataKey) {
@@ -178,7 +180,7 @@ function ComponentView({
     setWrites({});
   }
   const activeWrites = writesStamp === dataKey ? writes : {};
-  const writtenProps = applyPropWrites(propsWithArgs(definedProps, widget.args, ctx.bindingScope, ctx.evaluateBindings), activeWrites);
+  const writtenProps = applyPropWrites(propsWithArgs(definedProps, widget.args, ctx.bindingScope, evaluateArgs), activeWrites);
   const propsScope = buildPropsRecord(writtenProps, query);
   const createdRef = useRef<{ key: string; props: Record<string, unknown> } | null>(null);
   if (!createdRef.current || createdRef.current.key !== dataKey) {
@@ -264,6 +266,7 @@ function ComponentView({
         widget.item?.flexShrink == null ? { flexShrink: 0 } : undefined,
         widget.style?.height == null ? { minHeight: 'min-content' } : undefined,
         hiddenCss(widget.hidden, ctx.editing),
+        presenceCss(widget, options),
       ),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,

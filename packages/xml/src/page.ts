@@ -360,9 +360,24 @@ export type WidgetLoop = {
 type WidgetCommon = WidgetStates & {
   loop?: WidgetLoop;
   hidden?: boolean;
+  /** 为 false 时控件不进入程序。空函数或非布尔返回值按 true。 */
+  existsFn?: string;
+  /** 为 false 时不显示、不占位，控件本身仍在。空函数或非布尔返回值按 true。 */
+  displayFn?: string;
+  /** 为 false 时没有视图，但仍占位。空函数或非布尔返回值按 true。 */
+  visibleFn?: string;
   alias?: string;
   events?: WidgetEvents;
 };
+
+export const DRAWER_PLACES = ['top', 'bottom', 'left', 'right'] as const;
+export type DrawerPlace = (typeof DRAWER_PLACES)[number];
+/** 内容区默认贴在页面底部。 */
+export const DEFAULT_DRAWER_PLACE: DrawerPlace = 'bottom';
+/** 内容区沿弹出方向的尺寸，百分比。左右是宽度，上下是高度。 */
+export const DEFAULT_DRAWER_SIZE = 40;
+/** 遮罩不透明度，百分比。 */
+export const DEFAULT_DRAWER_MASK = 40;
 
 export type PageWidget =
   | ({ type: 'image'; id: string; src: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
@@ -376,6 +391,8 @@ export type PageWidget =
       name: string;
       /** 页面上传给这个组件实例的入参。键是入参名，值是字面量或 `$data` / `$()` 绑定。 */
       args?: Record<string, string>;
+      /** 编辑画布使用传入的入参，不再用组件测试数据里的入参。 */
+      editProps?: boolean;
       style?: WidgetStyle;
       item?: FlexItemStyle;
     } & WidgetCommon)
@@ -441,6 +458,37 @@ export type PageWidget =
       style?: WidgetStyle;
     } & WidgetCommon)
   | ({
+      type: 'windows';
+      id: string;
+      children: PageWidget[];
+      current?: string;
+      style?: WidgetStyle;
+      item?: FlexItemStyle;
+    } & WidgetCommon)
+  | ({
+      type: 'window';
+      id: string;
+      value: string;
+      children: PageWidget[];
+      style?: WidgetStyle;
+      item?: FlexItemStyle;
+    } & WidgetCommon)
+  | ({
+      type: 'drawer';
+      id: string;
+      children: PageWidget[];
+      /** 内容区贴边。缺省为 bottom。 */
+      place?: DrawerPlace;
+      /** 内容区沿弹出方向的百分比。缺省为 40。 */
+      size?: number;
+      /** 遮罩不透明度百分比。缺省为 40。 */
+      mask?: number;
+      /** 为 false 时点击遮罩不关闭。缺省为关闭。 */
+      maskClose?: boolean;
+      style?: WidgetStyle;
+      item?: FlexItemStyle;
+    } & WidgetCommon)
+  | ({
       type: 'table';
       id: string;
       children: PageWidget[];
@@ -478,12 +526,18 @@ export type PageWidget =
       style?: WidgetStyle;
     } & WidgetCommon);
 
-type WidgetParent = 'page' | 'flex' | 'scroll' | 'swiper' | 'swiper-item' | 'table' | 'tr' | 'th' | 'td';
+type WidgetParent = 'page' | 'flex' | 'scroll' | 'swiper' | 'swiper-item' | 'windows' | 'window' | 'drawer' | 'table' | 'tr' | 'th' | 'td';
 
 function hasFlexItem(
   widget: PageWidget,
-): widget is Exclude<PageWidget, { type: 'swiper-item' | 'th' | 'tr' | 'td' }> {
-  return widget.type !== 'swiper-item' && widget.type !== 'th' && widget.type !== 'tr' && widget.type !== 'td';
+): widget is Exclude<PageWidget, { type: 'swiper-item' | 'window' | 'th' | 'tr' | 'td' }> {
+  return (
+    widget.type !== 'swiper-item' &&
+    widget.type !== 'window' &&
+    widget.type !== 'th' &&
+    widget.type !== 'tr' &&
+    widget.type !== 'td'
+  );
 }
 
 export type PageStyle = {
@@ -701,6 +755,14 @@ export function compactStateFn(source: string | undefined | null): string | unde
 
 export function isStateFnConfigured(source: string | undefined | null): boolean {
   return compactStateFn(source) != null;
+}
+
+export function isPresenceConfigured(widget: {
+  existsFn?: string;
+  displayFn?: string;
+  visibleFn?: string;
+}): boolean {
+  return Boolean(compactStateFn(widget.existsFn) || compactStateFn(widget.displayFn) || compactStateFn(widget.visibleFn));
 }
 
 function parseHostStateFn(raw: string, ownedIds: string[]): string | undefined {
@@ -952,8 +1014,21 @@ function parseWidgetLoop(node: OrderedNode): { loop?: WidgetLoop } {
   return loop ? { loop } : {};
 }
 
-function parseWidgetHidden(node: OrderedNode): { hidden?: true } {
-  return isTrue(attr(node, 'hidden')) ? { hidden: true } : {};
+function parseWidgetHost(node: OrderedNode): {
+  hidden?: true;
+  existsFn?: string;
+  displayFn?: string;
+  visibleFn?: string;
+} {
+  const existsFn = compactStateFn(attr(node, 'exists'));
+  const displayFn = compactStateFn(attr(node, 'shown'));
+  const visibleFn = compactStateFn(attr(node, 'visible'));
+  return {
+    ...(isTrue(attr(node, 'hidden')) ? { hidden: true as const } : {}),
+    ...(existsFn ? { existsFn } : {}),
+    ...(displayFn ? { displayFn } : {}),
+    ...(visibleFn ? { visibleFn } : {}),
+  };
 }
 
 function parseWidgetAlias(node: OrderedNode): { alias?: string } {
@@ -974,6 +1049,9 @@ const WIDGET_TAGS = [
   'scroll',
   'swiper',
   'swiper-item',
+  'windows',
+  'window',
+  'drawer',
   'table',
   'th',
   'tr',
@@ -1105,6 +1183,17 @@ function parseNonNegativeInteger(value: string): number | string | undefined {
   }
   const parsed = parseInteger(value);
   return typeof parsed === 'number' && parsed >= 0 ? parsed : undefined;
+}
+
+function parsePercent(value: string): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  return Math.min(100, Math.max(0, parsed));
 }
 
 function parsePositiveInteger(value: string): number | string | undefined {
@@ -1710,6 +1799,21 @@ export function sanitizeWidgetStyle(
     delete next.radiusTopRight;
     delete next.radiusBottomRight;
     delete next.radiusBottomLeft;
+    delete next.position;
+    delete next.zIndex;
+    delete next.top;
+    delete next.right;
+    delete next.bottom;
+    delete next.left;
+  }
+  if (type === 'drawer') {
+    delete next.marginTop;
+    delete next.marginRight;
+    delete next.marginBottom;
+    delete next.marginLeft;
+    delete next.rotateX;
+    delete next.rotateY;
+    delete next.rotateZ;
     delete next.position;
     delete next.zIndex;
     delete next.top;
@@ -3111,7 +3215,20 @@ function mergeProps(base?: WidgetContentProps, overlay?: WidgetContentProps): Wi
   if (!overlay) {
     return compactWidgetProps(base);
   }
-  return compactWidgetProps({ ...base, ...overlay });
+  const next: WidgetContentProps = { ...(base ?? {}) };
+  if (overlay.value) {
+    next.value = overlay.value;
+  }
+  if (overlay.text) {
+    next.text = overlay.text;
+  }
+  if (overlay.src) {
+    next.src = overlay.src;
+  }
+  if (typeof overlay.size === 'number' && overlay.size > 0) {
+    next.size = overlay.size;
+  }
+  return compactWidgetProps(next);
 }
 
 function widgetBaseProps(widget: PageWidget): WidgetContentProps | undefined {
@@ -3119,7 +3236,7 @@ function widgetBaseProps(widget: PageWidget): WidgetContentProps | undefined {
     ...('value' in widget && widget.type !== 'checkbox' && widget.type !== 'switch' ? { value: widget.value } : {}),
     ...('text' in widget ? { text: widget.text } : {}),
     ...('src' in widget ? { src: widget.src } : {}),
-    ...('size' in widget && typeof widget.size === 'number' ? { size: widget.size } : {}),
+    ...('size' in widget && widget.type !== 'drawer' && typeof widget.size === 'number' ? { size: widget.size } : {}),
   });
 }
 
@@ -3589,7 +3706,13 @@ function serializeStateChildren(widget: PageWidget, ids: { n: number }, parent: 
         ? 'swiper'
         : widget.type === 'swiper-item'
           ? 'swiper-item'
-          : widget.type === 'table'
+          : widget.type === 'windows'
+            ? 'windows'
+            : widget.type === 'window'
+              ? 'window'
+              : widget.type === 'drawer'
+                ? 'drawer'
+              : widget.type === 'table'
             ? 'table'
             : widget.type === 'tr'
               ? 'tr'
@@ -3604,6 +3727,9 @@ function serializeStateChildren(widget: PageWidget, ids: { n: number }, parent: 
     widget.type === 'scroll' ||
     widget.type === 'swiper' ||
     widget.type === 'swiper-item' ||
+    widget.type === 'windows' ||
+    widget.type === 'window' ||
+    widget.type === 'drawer' ||
     widget.type === 'table' ||
     widget.type === 'tr' ||
     widget.type === 'th' ||
@@ -3693,7 +3819,7 @@ function parseWidgets(
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -3721,7 +3847,7 @@ function parseWidgets(
         ...(mergedStyle ? { style: mergedStyle } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -3747,10 +3873,11 @@ function parseWidgets(
         componentKey: attr(child, 'component-key').trim(),
         name,
         ...(args ? { args } : {}),
+        ...(isTrue(attr(child, 'edit-props')) ? { editProps: true } : {}),
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -3773,7 +3900,7 @@ function parseWidgets(
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -3802,7 +3929,7 @@ function parseWidgets(
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -3833,7 +3960,7 @@ function parseWidgets(
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -3858,7 +3985,7 @@ function parseWidgets(
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -3881,7 +4008,7 @@ function parseWidgets(
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -3907,7 +4034,7 @@ function parseWidgets(
         ...(flex ? { flex } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -3935,7 +4062,7 @@ function parseWidgets(
         ...(scrollY === false ? { scrollY } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -3961,7 +4088,7 @@ function parseWidgets(
         ...(swiper ? { swiper } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -3993,7 +4120,87 @@ function parseWidgets(
         ...(lines ? { lines } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
+        ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
+    if (allowContent && Object.prototype.hasOwnProperty.call(child, 'windows')) {
+      ids.n += 1;
+      const style = sanitizeWidgetStyle('windows', parseStyle(child));
+      const item = asItem ? parseItem(child) : undefined;
+      const current = attr(child, 'current').trim();
+      const extra = widgetStateSpread(child, nodeList(child.windows), ancestorIds);
+      const nextIds = [...ancestorIds, ...extraDeclaredIds(extra)];
+      widgets.push({
+        type: 'windows',
+        id: attr(child, 'id') || `n${ids.n}`,
+        children: parseWidgets(extra.rest, ids, 'windows', nextIds),
+        ...(current ? { current } : {}),
+        ...(style ? { style } : {}),
+        ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHost(child),
+        ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
+    if (parent === 'page' && Object.prototype.hasOwnProperty.call(child, 'drawer')) {
+      ids.n += 1;
+      const style = sanitizeWidgetStyle('drawer', parseStyle(child));
+      const place = parseEnum(attr(child, 'place'), DRAWER_PLACES);
+      const size = parsePercent(attr(child, 'size'));
+      const mask = parsePercent(attr(child, 'mask'));
+      const extra = widgetStateSpread(child, nodeList(child.drawer), ancestorIds);
+      const nextIds = [...ancestorIds, ...extraDeclaredIds(extra)];
+      widgets.push({
+        type: 'drawer',
+        id: attr(child, 'id') || `n${ids.n}`,
+        children: parseWidgets(extra.rest, ids, 'drawer', nextIds),
+        ...(place && place !== DEFAULT_DRAWER_PLACE ? { place } : {}),
+        ...(size != null && size !== DEFAULT_DRAWER_SIZE ? { size } : {}),
+        ...(mask != null && mask !== DEFAULT_DRAWER_MASK ? { mask } : {}),
+        ...(attr(child, 'mask-close') === 'false' ? { maskClose: false } : {}),
+        ...(style ? { style } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHost(child),
+        ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
+    if (allowContent && Object.prototype.hasOwnProperty.call(child, 'window')) {
+      ids.n += 1;
+      const style = sanitizeWidgetStyle('window', parseStyle(child));
+      const item = asItem ? parseItem(child) : undefined;
+      const extra = widgetStateSpread(child, nodeList(child.window), ancestorIds);
+      const nextIds = [...ancestorIds, ...extraDeclaredIds(extra)];
+      widgets.push({
+        type: 'window',
+        id: attr(child, 'id') || `n${ids.n}`,
+        value: attr(child, 'value'),
+        children: parseWidgets(extra.rest, ids, 'window', nextIds),
+        ...(style ? { style } : {}),
+        ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -4015,7 +4222,7 @@ function parseWidgets(
         children: parseWidgets(extra.rest, ids, 'swiper-item', nextIds),
         ...(style ? { style } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -4046,7 +4253,7 @@ function parseWidgets(
         ...(storedValign ? { valign: storedValign } : {}),
         ...(style ? { style } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -4070,7 +4277,7 @@ function parseWidgets(
         ...(height != null ? { height } : {}),
         ...(style ? { style } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -4099,7 +4306,7 @@ function parseWidgets(
         ...(storedValign ? { valign: storedValign } : {}),
         ...(style ? { style } : {}),
         ...parseWidgetLoop(child),
-        ...parseWidgetHidden(child),
+        ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
@@ -4121,6 +4328,9 @@ function widgetHostAttrs(
   extra: Record<string, string>,
 ): Record<string, string> {
   const applied = compactStateFn(widget.stateFn);
+  const existsFn = compactStateFn(widget.existsFn);
+  const displayFn = compactStateFn(widget.displayFn);
+  const visibleFn = compactStateFn(widget.visibleFn);
   const hover = widget.hoverStateId;
   const hoverValid = hover && ownedStateIds(widget).includes(hover) ? hover : null;
   const transition = compactTransition(widget.transition);
@@ -4130,6 +4340,9 @@ function widgetHostAttrs(
     ...extra,
     ...loopAttrs(widget.loop),
     ...(widget.hidden ? { '@_hidden': 'true' } : {}),
+    ...(existsFn ? { '@_exists': existsFn } : {}),
+    ...(displayFn ? { '@_shown': displayFn } : {}),
+    ...(visibleFn ? { '@_visible': visibleFn } : {}),
     ...(widget.alias?.trim() ? { '@_alias': widget.alias.trim() } : {}),
     ...widgetEventAttrs(widget.type, widget.events),
     ...(applied ? { '@_state': applied } : {}),
@@ -4175,6 +4388,7 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
           '@_component-id': widget.componentId,
           '@_component-key': widget.componentKey,
           '@_name': widget.name,
+          ...(widget.editProps ? { '@_edit-props': 'true' } : {}),
           ...item,
         }),
       };
@@ -4243,6 +4457,33 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
       return {
         swiper: inner,
         ':@': widgetHostAttrs(widget, id, style, { ...swiperAttrs(widget.swiper), ...item }),
+      };
+    }
+    if (widget.type === 'windows') {
+      return {
+        windows: inner,
+        ':@': widgetHostAttrs(widget, id, style, {
+          ...(widget.current?.trim() ? { '@_current': widget.current.trim() } : {}),
+          ...item,
+        }),
+      };
+    }
+    if (widget.type === 'window') {
+      return {
+        window: inner,
+        ':@': widgetHostAttrs(widget, id, style, { '@_value': widget.value, ...item }),
+      };
+    }
+    if (widget.type === 'drawer') {
+      return {
+        drawer: inner,
+        ':@': widgetHostAttrs(widget, id, style, {
+          ...(widget.place && widget.place !== DEFAULT_DRAWER_PLACE ? { '@_place': widget.place } : {}),
+          ...(typeof widget.size === 'number' && widget.size !== DEFAULT_DRAWER_SIZE ? { '@_size': String(widget.size) } : {}),
+          ...(typeof widget.mask === 'number' && widget.mask !== DEFAULT_DRAWER_MASK ? { '@_mask': String(widget.mask) } : {}),
+          ...(widget.maskClose === false ? { '@_mask-close': 'false' } : {}),
+          ...item,
+        }),
       };
     }
     if (widget.type === 'table') {

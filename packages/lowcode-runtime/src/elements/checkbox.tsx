@@ -26,7 +26,7 @@ function sameOption(left: unknown, right: unknown): boolean {
 function optionText(value: unknown): string {
   return bindingToString(value);
 }
-import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
+import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, presenceCss, widgetClassName } from '../css';
 import { chainEventProps, rememberWidgetValue, type WidgetRuntimeBindings } from '../events';
 import { readPropList, resolveWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
@@ -110,6 +110,7 @@ function CheckboxField({
       dynamicStyleCss(widget.style, widgetCssOptions(ctx)),
       flexItemCss(widget.item, widgetCssOptions(ctx)),
       hiddenCss(widget.hidden, ctx.editing),
+      presenceCss(widget, widgetCssOptions(ctx)),
     ),
     onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
     onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,

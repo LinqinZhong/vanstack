@@ -11,12 +11,13 @@ import {
   isCopyBinding,
   resolveCopyBinding,
   SWIPER_EASINGS,
+  readPresenceFlag,
   type PageWidget,
   type SwiperEasing,
   type SwiperStyle,
   type WidgetStyle,
 } from '@vanstack/xml';
-import { widgetInstanceKey } from './loop';
+import { widgetInstanceKey, widgetInstanceMeta } from './loop';
 import type { WidgetRenderContext } from './widget-render';
 import { chainEventProps } from './events';
 
@@ -133,9 +134,25 @@ function isSwiperItem(widget: PageWidget): widget is Extract<PageWidget, { type:
   return widget.type === 'swiper-item';
 }
 
+function itemPresenceStyle(item: Extract<PageWidget, { type: 'swiper-item' }>, active: boolean): CSSProperties | undefined {
+  if (!active) {
+    return undefined;
+  }
+  const scope = widgetInstanceMeta(item)?.scope ?? { data: Object.create(null) as Record<string, unknown> };
+  const css: CSSProperties = {};
+  if (!readPresenceFlag(item.displayFn, scope)) {
+    css.display = 'none';
+  }
+  if (!readPresenceFlag(item.visibleFn, scope)) {
+    css.visibility = 'hidden';
+  }
+  return Object.keys(css).length > 0 ? css : undefined;
+}
+
 export function SwiperView({
   widget,
   editing,
+  resolvePresence = !editing,
   style,
   className,
   dataState,
@@ -151,13 +168,14 @@ export function SwiperView({
 }: {
   widget: Extract<PageWidget, { type: 'swiper' }>;
   editing: boolean;
+  resolvePresence?: boolean;
   style?: CSSProperties;
   className?: string;
   dataState?: string;
   itemClassName?: (item: Extract<PageWidget, { type: 'swiper-item' }>) => string;
   itemDataState?: (item: Extract<PageWidget, { type: 'swiper-item' }>) => string | undefined;
   itemCss: (style: WidgetStyle | undefined) => CSSProperties | undefined;
-  renderChild: (child: PageWidget) => ReactElement;
+  renderChild: (child: PageWidget) => ReactElement | null;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
   itemHover?: (item: Extract<PageWidget, { type: 'swiper-item' }>) =>
@@ -166,7 +184,13 @@ export function SwiperView({
   eventHandlers?: Record<string, (...args: unknown[]) => void>;
   onIndexChange?: (index: number, oldIndex: number) => void;
 }): ReactElement {
-  const items = widget.children.filter(isSwiperItem);
+  const items = widget.children.filter(isSwiperItem).filter((item) => {
+    if (!resolvePresence) {
+      return true;
+    }
+    const scope = widgetInstanceMeta(item)?.scope ?? { data: Object.create(null) as Record<string, unknown> };
+    return readPresenceFlag(item.existsFn, scope);
+  });
   const swiper = widget.swiper;
   const count = items.length;
   const vertical = swiper?.vertical === true;
@@ -348,7 +372,7 @@ export function SwiperView({
             {
               key: widgetInstanceKey(item),
               className: 'lowcode-swiper-item',
-              style: slotStyle,
+              style: { ...slotStyle, ...itemPresenceStyle(item, resolvePresence) },
             },
             createElement(
               'div',

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import { isCopyBinding, propModelName, resolveCopyBinding, switchBoundOn, type PageWidget } from '@vanstack/xml';
-import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
+import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, presenceCss, widgetClassName } from '../css';
 import { chainEventProps, rememberWidgetValue, type WidgetRuntimeBindings } from '../events';
 import { readPropFlag, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
@@ -70,6 +70,7 @@ function SwitchField({
       dynamicStyleCss(widget.style, widgetCssOptions(ctx)),
       flexItemCss(widget.item, widgetCssOptions(ctx)),
       hiddenCss(widget.hidden, ctx.editing),
+      presenceCss(widget, widgetCssOptions(ctx)),
     ),
     onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
     onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,

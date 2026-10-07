@@ -1,6 +1,6 @@
 # 定义新控件
 
-新增一种控件要走完四层：XML 类型、解析与序列化、运行时渲染、编辑器 helper。`PageWidget['type']` 和 `widgetHelpers` 用 `satisfies` 绑在一起，类型加了但 helper 没登记，`frontend-admin` 的类型检查会失败。
+新增一种控件要走完四层：XML 类型、解析与序列化、运行时渲染、编辑器 helper。`PageWidget['type']` 和 `widgetHelpers` 用 `satisfies` 绑在一起，类型加了但 helper 没登记，`frontend-editor` 的类型检查会失败。
 
 下面用 `badge` 举例。标签名用 kebab-case，和 XML 标签一致。
 
@@ -39,7 +39,7 @@
 
 ## 4. 编辑器 helper
 
-在 `apps/frontend-admin/src/widgets/` 下新增 `badge.ts`，实现 `WidgetHelperInterface`。
+在 `apps/frontend-editor/src/widgets/` 下新增 `badge.ts`，实现 `WidgetHelperInterface`。
 
 ```ts
 export const badgeHelper = {
@@ -86,13 +86,13 @@ export const badgeHelper = {
 
 在 `widgets/index.ts` 的 `widgetHelpers` 里登记。要出现在添加弹窗里，再放进 `ADDABLE_WIDGET_TYPES`，顺序就是弹窗按钮顺序。
 
-`nameKey` 要在 `apps/frontend-admin/src/locales/zh.json` 和 `en.json` 的 `lowcode` 下各加一条。
+`nameKey` 要在 `apps/frontend-editor/src/locales/zh.json` 和 `en.json` 的 `lowcode` 下各加一条。
 
-本控件如果有专属字段，把字段加到 `widgets/types.ts` 的 `WidgetPatch`。状态视图下改这些字段时，还要在 `apps/frontend-admin/src/utils/widgetStates.ts` 的 `applyPropsToWidget` 里写回。
+本控件如果有专属字段，把字段加到 `widgets/types.ts` 的 `WidgetPatch`。状态视图下改这些字段时，还要在 `apps/frontend-editor/src/utils/widgetStates.ts` 的 `applyPropsToWidget` 里写回。
 
 ## 5. 检查器
 
-工作台属性网格在 `apps/frontend-admin/src/components/InspectorPropertyGrid.tsx`。盒模型、定位、循环、状态是公共的。只有文本、图片、图标这类多出来的字段，才在这里按 `widget.type` 加一行，并通过 `onPatch` 交给 helper 的 `patch`。
+工作台属性网格在 `apps/frontend-editor/src/components/InspectorPropertyGrid.tsx`。盒模型、定位、循环、状态是公共的。只有文本、图片、图标这类多出来的字段，才在这里按 `widget.type` 加一行，并通过 `onPatch` 交给 helper 的 `patch`。
 
 样式气泡 `WidgetStyleFields.tsx`、`WidgetStyleBubble.tsx` 里也有按类型隐藏某一组样式的判断（例如图标不编辑宽高、滑动器页去掉一部分盒属性）。新控件如果要少显示一组，加在 `isBoxGroupAllowed`。默认宽高、默认背景这类例外在 `sanitizeWidgetStyle`（`packages/xml/src/page.ts`）。
 

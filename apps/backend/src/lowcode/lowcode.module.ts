@@ -4,10 +4,12 @@ import { LowcodeController } from './lowcode.controller';
 import { LowcodeMongo } from './lowcode-mongo';
 import { LowcodeService } from './lowcode.service';
 import { RuntimeController } from './runtime.controller';
+import { WorkspaceBundleController } from './workspace-bundle.controller';
+import { WorkspaceBundleService } from './workspace-bundle.service';
 
 @Module({
   imports: [OssModule],
-  controllers: [LowcodeController, RuntimeController],
-  providers: [LowcodeService, LowcodeMongo],
+  controllers: [WorkspaceBundleController, LowcodeController, RuntimeController],
+  providers: [LowcodeService, LowcodeMongo, WorkspaceBundleService],
 })
 export class LowcodeModule {}

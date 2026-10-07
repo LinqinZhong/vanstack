@@ -1,6 +1,6 @@
 import { createElement, type CSSProperties, type ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
-import { dynamicStyleCss, flexContainerCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
+import { dynamicStyleCss, flexContainerCss, flexItemCss, hiddenCss, mergeCss, presenceCss, widgetClassName } from '../css';
 import { widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
 /** 预览页高度固定，未写高度的弹性盒不要被压到比内容更矮。 */
@@ -33,6 +33,7 @@ export function renderFlex(
         flexItemCss(widget.item, widgetCssOptions(ctx)),
         flexContentLock(widget),
         hiddenCss(widget.hidden, ctx.editing),
+        presenceCss(widget, widgetCssOptions(ctx)),
       ),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,

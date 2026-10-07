@@ -2,7 +2,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 
-let backendOrigin = 'http://127.0.0.1:3000';
+let backendOrigin = 'http://127.0.0.1:3010';
 
 export function setBackendOrigin(origin: string): void {
   backendOrigin = origin.replace(/\/$/, '');

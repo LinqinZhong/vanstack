@@ -1,6 +1,6 @@
 import { createElement, type ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
-import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
+import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, presenceCss, widgetClassName } from '../css';
 import { displayWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
 export function renderText(
@@ -19,10 +19,11 @@ export function renderText(
         dynamicStyleCss(widget.style, widgetCssOptions(ctx)),
         flexItemCss(widget.item, widgetCssOptions(ctx)),
         hiddenCss(widget.hidden, ctx.editing),
+        presenceCss(widget, widgetCssOptions(ctx)),
       ),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,
     },
-    displayWidgetCopy(widget.value, ctx, Boolean(ctx.summarizeCopy)),
+    displayWidgetCopy(widget.value, ctx, Boolean(ctx.summarizeCopy) || (ctx.editing && !ctx.evaluateBindings)),
   );
 }

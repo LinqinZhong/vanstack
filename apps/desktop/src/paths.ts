@@ -1,12 +1,12 @@
 import path from 'node:path';
 
 export const ADMIN_ORIGIN = 'http://127.0.0.1:5174';
-export const APP_ORIGIN = 'http://127.0.0.1:5173';
+export const EDITOR_SERVER_ORIGIN = 'http://127.0.0.1:3010';
 export const BACKEND_ORIGIN = 'http://127.0.0.1:3000';
 export const HEALTH_URL = `${BACKEND_ORIGIN}/api/health`;
 export const LOOPBACK = '127.0.0.1';
 export const ADMIN_PORT = 5174;
-export const APP_PORT = 5173;
+export const EDITOR_SERVER_PORT = 3010;
 export const BACKEND_PORT = 3000;
 
 export function desktopRoot(): string {
@@ -22,11 +22,11 @@ export function backendRoot(): string {
 }
 
 export function adminDist(): string {
-  return path.resolve(repoRoot(), 'apps/frontend-admin/dist');
+  return path.resolve(repoRoot(), 'apps/frontend-editor/dist');
 }
 
-export function appDist(): string {
-  return path.resolve(repoRoot(), 'apps/frontend-app/dist');
+export function editorServerRoot(): string {
+  return path.resolve(repoRoot(), 'apps/frontend-editor-server');
 }
 
 export function preloadPath(): string {

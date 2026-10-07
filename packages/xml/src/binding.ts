@@ -83,6 +83,20 @@ export function evaluateStateFunction(body: string, scope: BindingScope): unknow
   );
 }
 
+/** 空函数、非布尔值或运行出错都按 true。只有明确的 false 才是 false。 */
+export function readPresenceFlag(body: string | undefined, scope: BindingScope): boolean {
+  const source = body?.trim();
+  if (!source) {
+    return true;
+  }
+  try {
+    const result = evaluateStateFunction(source, scope);
+    return typeof result === 'boolean' ? result : true;
+  } catch {
+    return true;
+  }
+}
+
 export function resolveStateFnId(widget: PageWidget, scope?: BindingScope): string | null {
   const body = widget.stateFn?.trim();
   if (!body) {

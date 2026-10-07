@@ -1,6 +1,6 @@
 import { createElement, useEffect, useState, type ReactElement } from 'react';
 import type { PageWidget } from '@vanstack/xml';
-import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, widgetClassName } from '../css';
+import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, presenceCss, widgetClassName } from '../css';
 import { resolveWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
 function brokenImageIcon() {
@@ -68,6 +68,7 @@ export function renderImage(
         flexItemCss(widget.item, widgetCssOptions(ctx)),
         { overflow: 'hidden' },
         hiddenCss(widget.hidden, ctx.editing),
+        presenceCss(widget, widgetCssOptions(ctx)),
       ),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,

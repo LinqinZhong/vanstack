@@ -33,6 +33,8 @@ export type RenderPageXmlOptions = {
   centerContent?: boolean;
   useComponentTestData?: boolean;
   icons?: Readonly<Record<string, string>>;
+  /** 变化时整页重挂，清掉预览里改过的数据和控件状态。 */
+  previewEpoch?: number;
 };
 
 function resolveRenderCatalog(catalog: RenderPageXmlOptions['catalog']): PageI18n | undefined {
@@ -77,6 +79,7 @@ export function renderPage(
 
   try {
     const tree = createElement(LowcodePage, {
+      key: options?.previewEpoch ?? 0,
       page,
       editing,
       tableLayout: Boolean(options?.tableLayout),

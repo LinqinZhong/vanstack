@@ -14,7 +14,7 @@ import {
   type TableAlign,
   type TableValign,
 } from '@vanstack/xml';
-import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, sizeCss, widgetClassName } from '../css';
+import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, presenceCss, sizeCss, widgetClassName } from '../css';
 import { widgetInstanceKey } from '../loop';
 import { displayWidgetCopy, widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
 
@@ -122,6 +122,7 @@ function cellStyle(widget: Extract<PageWidget, { type: 'th' | 'td' }>, ctx: Widg
       ...(background ? { background } : {}),
     },
     hiddenCss(widget.hidden, ctx.editing),
+    presenceCss(widget, widgetCssOptions(ctx)),
   );
 }
 
@@ -225,6 +226,7 @@ export function renderTr(
             : { position: 'relative' }),
         },
         hiddenCss(widget.hidden, ctx.editing),
+        presenceCss(widget, widgetCssOptions(ctx)),
       ),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,
@@ -297,6 +299,7 @@ export function renderTable(
     dynamicStyleCss(style, widgetCssOptions(ctx)),
     flexItemCss(widget.item, widgetCssOptions(ctx)),
     hiddenCss(widget.hidden, ctx.editing),
+    presenceCss(widget, widgetCssOptions(ctx)),
     {
       width: sizeCss(style?.width ?? DEFAULT_TABLE_WIDTH, widgetCssOptions(ctx)),
       height: sizeCss(style?.height ?? DEFAULT_TABLE_HEIGHT, widgetCssOptions(ctx)),

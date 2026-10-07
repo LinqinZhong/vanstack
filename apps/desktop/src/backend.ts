@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { backendRoot } from './paths';
+import { backendRoot, editorServerRoot } from './paths';
 
 const HEALTH_TIMEOUT_MS = 45_000;
 const HEALTH_INTERVAL_MS = 400;
@@ -47,6 +47,25 @@ export function spawnBackend(nodeExecutable: string, port: number): ChildProcess
   return spawn(nodeExecutable, ['dist/main.js'], {
     cwd,
     env: { ...process.env, PORT: String(port) },
+    stdio: 'inherit',
+    windowsHide: true,
+  });
+}
+
+export function spawnEditorServer(nodeExecutable: string, backendOrigin: string, workspace: string): ChildProcess {
+  const cwd = editorServerRoot();
+  const entry = path.join(cwd, 'dist/index.js');
+  if (!existsSync(entry)) {
+    throw new Error(`编辑器服务尚未构建：找不到 ${entry}。请先执行 pnpm build。`);
+  }
+  return spawn(nodeExecutable, ['dist/index.js'], {
+    cwd,
+    env: {
+      ...process.env,
+      PORT: '3010',
+      BACKEND_ORIGIN: backendOrigin,
+      VANSTACK_WORKSPACE: workspace,
+    },
     stdio: 'inherit',
     windowsHide: true,
   });

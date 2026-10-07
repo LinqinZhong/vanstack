@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
-import { json, text, urlencoded } from 'express';
+import { json, raw, text, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { XmlResponseInterceptor } from './common/xml-response.interceptor';
 
@@ -16,9 +16,10 @@ async function bootstrap() {
   ensureLocalDirs();
   const app = await NestFactory.create(AppModule, { bodyParser: false });
 
-  app.use(json({ limit: '4mb' }));
+  app.use(json({ limit: '32mb' }));
   app.use(urlencoded({ extended: true, limit: '4mb' }));
   app.use(text({ type: ['application/xml', 'text/xml'], limit: '4mb' }));
+  app.use(raw({ type: 'application/octet-stream', limit: '32mb' }));
 
   app.setGlobalPrefix('api');
   app.enableCors({ origin: true, credentials: true });

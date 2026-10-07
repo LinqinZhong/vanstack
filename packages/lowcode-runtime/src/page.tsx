@@ -17,6 +17,8 @@ import {
   type WidgetStateLayer,
 } from '@vanstack/xml';
 import { pageCss, pageCssText, pageScrollCss } from './css';
+import { bindDrawerHandles, drawerRailMetrics } from './elements/drawer';
+import { bindOverlayScrollbar } from './overlay-scrollbar';
 import { widgetElement } from './elements';
 import { HOVER_STATE_NAME, resolveRuntimeOwnState, widgetHasHoverState } from './hover';
 import { expandLoopTree, widgetInstanceKey, widgetInstanceMeta } from './loop';
@@ -71,6 +73,9 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
   const eventsRef = useRef(page.events);
   eventsRef.current = page.events;
   const [hoverInstanceKeys, setHoverInstanceKeys] = useState<string[]>([]);
+  const [openDrawerIds, setOpenDrawerIds] = useState<string[]>([]);
+  const [editRail, setEditRail] = useState({ tail: 0, column: 0 });
+  const pageRef = useRef<HTMLDivElement>(null);
   const dataKey = pageDataKey(page.data);
   const [appliedDataKey, setAppliedDataKey] = useState(dataKey);
   const [modelOverrides, setModelOverrides] = useState<Record<string, string>>({});
@@ -207,6 +212,16 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     () => resolvePageData(page.data, dataOverrides, dataProps, propsScope, liveQuery),
     [page.data, dataOverrides, dataProps, propsScope, liveQuery],
   );
+  const setDrawerOpen = (id: string, open: boolean) => {
+    setOpenDrawerIds((prev) => {
+      const has = prev.includes(id);
+      if (open) {
+        return has ? prev : [...prev, id];
+      }
+      return has ? prev.filter((item) => item !== id) : prev;
+    });
+  };
+  bindDrawerHandles(dataScope, page.data, page.widgets, (id, method) => setDrawerOpen(id, method === 'show'));
   const assignScope = (bucket: 'data' | 'props' | 'query', name: string, value: unknown) => {
     if (bucket === 'query') {
       liveQuery[name] = value;
@@ -245,6 +260,16 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     });
     return { widgets: resolved, stateLayers: sink };
   }, [page.widgets, viewing, dataScope, propsScope, liveQuery, editing, hoverInstanceKeys]);
+  const drawerBoardIndexes = new Map<string, number>();
+  {
+    let index = 0;
+    for (const widget of widgets) {
+      if (widget.type === 'drawer') {
+        drawerBoardIndexes.set(widget.id, index);
+        index += 1;
+      }
+    }
+  }
   const toast = usePageToast();
   const currentLocale = locale || pickPageLocale(catalog);
   const dir = pageI18nDir(catalog, currentLocale);
@@ -349,7 +374,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       /** 组件被放到别的页面上时，内部按入参求值并展开循环。 */
       instantiate?: boolean;
     },
-  ): ReactElement {
+  ): ReactElement | null {
     const meta = widgetInstanceMeta(widget);
     const summarizeCopy = Boolean(options?.summarizeCopy);
     const componentStack = options?.componentStack ?? [];
@@ -378,6 +403,10 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       componentStack,
       useComponentTestData: Boolean(useComponentTestData),
       icons,
+      drawerBoardIndex: drawerBoardIndexes.get(widget.id),
+      drawerBoardColumn: editRail.column,
+      drawerOpen: openDrawerIds.includes(widget.id),
+      hideDrawer: () => setDrawerOpen(widget.id, false),
       render: (child, childOptions) =>
         render(child, {
           summarizeCopy: childOptions?.summarizeCopy ?? summarizeCopy,
@@ -394,9 +423,43 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     evaluateBindings: !editing,
     bindingScope: { data: dataScope, props: propsScope, query: liveQuery },
   };
-  return createElement(
+  const pageScrollRef = useRef<HTMLDivElement>(null);
+  const pageScrollYRef = useRef<HTMLDivElement>(null);
+  const pageScrollXRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!editing || drawerBoardIndexes.size === 0) {
+      return undefined;
+    }
+    const page = pageRef.current;
+    if (!page) {
+      return undefined;
+    }
+    const measure = () => {
+      const next = drawerRailMetrics(page);
+      setEditRail((prev) => (prev.tail === next.tail && prev.column === next.column ? prev : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(page);
+    page.querySelectorAll<HTMLElement>('.lowcode-windows, .lowcode-windows-slot.is-offset').forEach((node) => {
+      observer.observe(node);
+    });
+    return () => observer.disconnect();
+  }, [editing, widgets, drawerBoardIndexes.size]);
+  useEffect(() => {
+    const view = pageScrollRef.current;
+    const yThumb = pageScrollYRef.current;
+    const xThumb = pageScrollXRef.current;
+    if (!view || !yThumb || !xThumb) {
+      return undefined;
+    }
+    return bindOverlayScrollbar(view, yThumb, xThumb);
+  }, []);
+  const rootDrawers = widgets.filter((widget) => widget.type === 'drawer');
+  const pageNode = createElement(
     'div',
     {
+      ref: pageRef,
       className: 'lowcode-page',
       dir,
       'data-hover-active': hoverInstanceKeys.length > 0 ? HOVER_STATE_NAME : undefined,
@@ -415,14 +478,71 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     createElement(
       'div',
       {
-        className: 'lowcode-page-scroll',
+        className: 'lowcode-page-scroll-port',
         style: {
-          ...pageScrollCss(page.style, editing, bindingOptions),
-          ...(centerContent ? { alignItems: 'center', justifyContent: 'center' } : null),
+          position: 'relative',
+          flex: '1 1 auto',
+          alignSelf: 'stretch',
+          width: '100%',
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
         },
       },
-      widgets.map((widget) => render(widget)),
+      createElement(
+        'div',
+        {
+          ref: pageScrollRef,
+          className: 'lowcode-page-scroll',
+          style: {
+            ...pageScrollCss(page.style, editing, bindingOptions),
+            scrollbarWidth: 'none',
+            position: 'relative',
+            zIndex: 0,
+            ...(centerContent ? { alignItems: 'center', justifyContent: 'center' } : null),
+          },
+        },
+        widgets.filter((widget) => widget.type !== 'drawer').map((widget) => render(widget)),
+      ),
+      createElement('div', { ref: pageScrollYRef, className: 'lowcode-scroll-thumb is-y' }),
+      createElement('div', { ref: pageScrollXRef, className: 'lowcode-scroll-thumb is-x' }),
     ),
+    ...(editing ? [] : rootDrawers.map((widget) => render(widget))),
     toast,
+  );
+  if (!editing || rootDrawers.length === 0) {
+    return pageNode;
+  }
+  return createElement(
+    'div',
+    {
+      className: 'lowcode-edit-anchor',
+      style: { position: 'relative', width: '100%', height: '100%' },
+    },
+    pageNode,
+    createElement(
+      'div',
+      {
+        className: 'lowcode-edit-side',
+        style: {
+          position: 'absolute',
+          left: '100%',
+          top: 0,
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'stretch',
+          pointerEvents: 'none',
+          zIndex: 2,
+        },
+      },
+      editRail.tail > 0
+        ? createElement('div', {
+            className: 'lowcode-edit-window-gap',
+            style: { flex: '0 0 auto', width: editRail.tail, pointerEvents: 'none' },
+          })
+        : null,
+      ...rootDrawers.map((widget) => render(widget)),
+    ),
   );
 }

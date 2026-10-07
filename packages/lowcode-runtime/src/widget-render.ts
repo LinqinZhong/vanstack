@@ -40,7 +40,7 @@ export type WidgetRenderContext = {
       assignScope?: ScopeAssign;
       instantiate?: boolean;
     },
-  ) => ReactElement;
+  ) => ReactElement | null;
   summarizeCopy?: boolean;
   dynamicTextLabel?: string;
   stateLayers?: WeakMap<object, WidgetStateLayer[]>;
@@ -55,6 +55,13 @@ export type WidgetRenderContext = {
   useComponentTestData?: boolean;
   /** 图标路径 `分组.名称` 到文件地址。 */
   icons?: Readonly<Record<string, string>>;
+  /** 编辑态根上的抽屉序号。缺省表示这个抽屉不在页面根上。 */
+  drawerBoardIndex?: number;
+  /** 编辑态抽屉列宽，跟页面一样宽。 */
+  drawerBoardColumn?: number;
+  /** 预览态抽屉是否已 show。 */
+  drawerOpen?: boolean;
+  hideDrawer?: () => void;
 };
 
 export function readPropText(value: unknown): string {
@@ -95,7 +102,11 @@ export function resolveWidgetCopy(raw: string, ctx: WidgetRenderContext): string
     return resolveI18nCopy(raw, ctx.catalog, ctx.locale);
   }
   if (ctx.evaluateBindings || isCopyBinding(raw)) {
-    return resolveCopyBinding(raw, ctx.bindingScope);
+    const resolved = resolveCopyBinding(raw, ctx.bindingScope);
+    if (isI18nCopyExpr(resolved)) {
+      return resolveI18nCopy(resolved, ctx.catalog, ctx.locale);
+    }
+    return resolved;
   }
   return raw;
 }

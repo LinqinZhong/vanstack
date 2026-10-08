@@ -23,6 +23,7 @@ export type WidgetPatch = {
   selected?: string;
   src?: string;
   size?: number | string;
+  activeColor?: string;
   hidden?: boolean;
   alias?: string;
   loop?: WidgetLoop | undefined;

@@ -11,7 +11,7 @@ import {
   UnorderedListOutlined,
 } from '@ant-design/icons';
 import { Button, Card, Dropdown, Empty, Tooltip, Tree, type TreeDataNode } from 'antd';
-import { memo, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { memo, useLayoutEffect, useRef, useState, type ComponentRef, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { hasWidgetEvents, isLoopConfigured, type PageWidget } from '@vanstack/xml';
@@ -270,6 +270,15 @@ export function WidgetTreePanel({
 }: WidgetTreePanelProps) {
   const { t } = useTranslation();
   const [treeHeight, setTreeHeight] = useState(320);
+  const treeRef = useRef<ComponentRef<typeof Tree>>(null);
+  // 选中项变化时把它滚到可见位置。树是虚拟列表，视口外的节点尚未生成 DOM
+  // （例如新增到树尾的控件），DOM scrollIntoView 找不到节点，必须走 Tree 的 scrollTo(key)。
+  useLayoutEffect(() => {
+    if (!selectedWidgetId) {
+      return;
+    }
+    treeRef.current?.scrollTo({ key: selectedWidgetId, align: 'auto' });
+  }, [selectedWidgetId, expandedKeys]);
   useLayoutEffect(() => {
     const node = treeHostRef.current;
     if (!node || typeof ResizeObserver === 'undefined') {
@@ -333,6 +342,7 @@ export function WidgetTreePanel({
       ) : (
         <div ref={treeHostRef} className="widget-tree-host">
           <Tree
+            ref={treeRef}
             className="widget-tree"
             blockNode
             virtual

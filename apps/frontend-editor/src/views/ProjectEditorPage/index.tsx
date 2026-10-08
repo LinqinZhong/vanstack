@@ -388,6 +388,12 @@ export function ProjectEditorPage() {
   const futureRef = useRef<HistoryEntry[]>([]);
   const coalesceKeyRef = useRef<string | null>(null);
   const editorFlushRef = useRef(false);
+  /**
+   * 延迟 flush 期间真正要落到 React state 的快照。
+   * 渲染体每帧都会用 state 回写 widgetsRef 等 ref，若 flush 回调再读 ref，
+   * 等待窗口内的任意重渲染（如添加控件弹窗关闭）会把旧 state 写回 ref，导致提交被吞。
+   */
+  const flushPendingRef = useRef<HistoryEntry | null>(null);
   const historyDirtyRef = useRef(false);
   const expandBaseRef = useRef<{ widgets: PageWidget[]; selectedId: string | null } | null>(null);
   const selectWidgetRef = useRef<(id: string | null) => void>(() => undefined);
@@ -2388,6 +2394,11 @@ export function ProjectEditorPage() {
   }
 
   function flushLiveWidgets() {
+    // 延迟 flush 挂起时，把拖拽收尾的最新控件树并入待提交快照，交给统一 flush 落 state。
+    if (editorFlushRef.current && flushPendingRef.current) {
+      flushPendingRef.current = { ...flushPendingRef.current, widgets: widgetsRef.current };
+      return;
+    }
     setWidgets(widgetsRef.current);
     queueDraftSave();
   }
@@ -2907,27 +2918,6 @@ export function ProjectEditorPage() {
   exitOneEditRef.current = exitOneEditLayer;
 
   useEffect(() => {
-    if (!selectedWidgetId) {
-      return;
-    }
-    let cancelled = false;
-    const frame = window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        if (cancelled) {
-          return;
-        }
-        widgetTreeHostRef.current
-          ?.querySelector<HTMLElement>('.ant-tree-treenode-selected')
-          ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-      });
-    });
-    return () => {
-      cancelled = true;
-      window.cancelAnimationFrame(frame);
-    };
-  }, [selectedWidgetId]);
-
-  useEffect(() => {
     spacingDragRef.current = null;
     setSpacingDragCursor(null, null);
     const group = openBoxGroupRef.current;
@@ -2994,21 +2984,21 @@ export function ProjectEditorPage() {
     const nextTest = nextTestData === undefined ? testDataRef.current : nextTestData ?? undefined;
     const coalescing = Boolean(coalesceKey && coalesceKey === coalesceKeyRef.current);
     if (!coalescing) {
-      pastRef.current = [
-        ...pastRef.current,
-        {
-          widgets: widgetsRef.current,
-          pageStyle: pageStyleRef.current,
-          pageData: pageDataRef.current,
-          pageEvents: pageEventsRef.current,
-          pageMethods: pageMethodsRef.current,
-          componentProps: componentPropsRef.current,
-          pageQuery: pageQueryRef.current,
-          componentEmits: componentEmitsRef.current,
-          testData: testDataRef.current,
-          selectedWidgetId: selectedWidgetIdRef.current,
-        },
-      ].slice(-HISTORY_LIMIT);
+      // 上一次提交若还在延迟窗口内，ref 可能已被渲染体回写成旧 state，
+      // 历史检查点要以已提交快照为准。
+      const checkpoint = flushPendingRef.current ?? {
+        widgets: widgetsRef.current,
+        pageStyle: pageStyleRef.current,
+        pageData: pageDataRef.current,
+        pageEvents: pageEventsRef.current,
+        pageMethods: pageMethodsRef.current,
+        componentProps: componentPropsRef.current,
+        pageQuery: pageQueryRef.current,
+        componentEmits: componentEmitsRef.current,
+        testData: testDataRef.current,
+        selectedWidgetId: selectedWidgetIdRef.current,
+      };
+      pastRef.current = [...pastRef.current, checkpoint].slice(-HISTORY_LIMIT);
       futureRef.current = [];
       historyDirtyRef.current = true;
     }
@@ -3028,6 +3018,20 @@ export function ProjectEditorPage() {
     componentEmitsRef.current = emits;
     testDataRef.current = nextTest;
     selectedWidgetIdRef.current = nextSelectedId;
+    // 捕获本次提交快照。延迟窗口内若有其它 setState 引发重渲染，渲染体会用旧 state 回写上述 ref，
+    // flush 回调必须以快照为准，否则这次编辑会被静默吞掉（典型场景：添加控件后弹窗关闭）。
+    flushPendingRef.current = {
+      widgets: nextWidgets,
+      pageStyle: nextPageStyle,
+      pageData: nextPageData,
+      pageEvents: events,
+      pageMethods: methods,
+      componentProps: props,
+      pageQuery: query,
+      componentEmits: emits,
+      testData: nextTest,
+      selectedWidgetId: nextSelectedId,
+    };
     if (nextWidgets !== previousWidgets) {
       const sheet = iframeRef.current?.contentDocument?.querySelector('.lowcode-page > style');
       if (sheet) {
@@ -3041,17 +3045,33 @@ export function ProjectEditorPage() {
     // 先让这次点击画出下一帧，再提交整页 React 状态。否则编辑器重渲染会算进 INP。
     requestAnimationFrame(() => {
       window.setTimeout(() => {
+        const pending = flushPendingRef.current;
         editorFlushRef.current = false;
-        setWidgets(widgetsRef.current);
-        setPageStyle(pageStyleRef.current);
-        setPageData(pageDataRef.current);
-        setPageEvents(pageEventsRef.current);
-        setPageMethods(pageMethodsRef.current);
-        setComponentProps(componentPropsRef.current);
-        setPageQuery(pageQueryRef.current);
-        setComponentEmits(componentEmitsRef.current);
-        setTestData(testDataRef.current);
-        setSelectedWidgetId(selectedWidgetIdRef.current);
+        flushPendingRef.current = null;
+        if (!pending) {
+          return;
+        }
+        // refs 可能已在等待期间被渲染体回写成旧值，flush 前统一恢复为本批快照。
+        widgetsRef.current = pending.widgets;
+        pageStyleRef.current = pending.pageStyle;
+        pageDataRef.current = pending.pageData;
+        pageEventsRef.current = pending.pageEvents;
+        pageMethodsRef.current = pending.pageMethods;
+        componentPropsRef.current = pending.componentProps;
+        pageQueryRef.current = pending.pageQuery;
+        componentEmitsRef.current = pending.componentEmits;
+        testDataRef.current = pending.testData;
+        selectedWidgetIdRef.current = pending.selectedWidgetId;
+        setWidgets(pending.widgets);
+        setPageStyle(pending.pageStyle);
+        setPageData(pending.pageData);
+        setPageEvents(pending.pageEvents);
+        setPageMethods(pending.pageMethods);
+        setComponentProps(pending.componentProps);
+        setPageQuery(pending.pageQuery);
+        setComponentEmits(pending.componentEmits);
+        setTestData(pending.testData);
+        setSelectedWidgetId(pending.selectedWidgetId);
         if (historyDirtyRef.current) {
           historyDirtyRef.current = false;
           setHistoryTick((tick) => tick + 1);
@@ -3059,12 +3079,12 @@ export function ProjectEditorPage() {
         const base = expandBaseRef.current;
         expandBaseRef.current = null;
         if (base) {
-          const selectedId = selectedWidgetIdRef.current;
+          const selectedId = pending.selectedWidgetId;
           setExpandedKeys((prev) => {
             const next = nextExpandedKeys(
               prev,
               base.widgets,
-              widgetsRef.current,
+              pending.widgets,
               selectedId !== base.selectedId ? selectedId : null,
             );
             if (next.length === prev.length && next.every((key, index) => key === prev[index])) {
@@ -4582,6 +4602,8 @@ export function ProjectEditorPage() {
       return;
     }
     coalesceKeyRef.current = null;
+    // 撤销已同步落 state，丢弃延迟窗口内挂起的提交快照，否则 pending flush 会把撤销覆盖回去。
+    flushPendingRef.current = null;
     const current: HistoryEntry = {
       widgets: widgetsRef.current,
       pageStyle: pageStyleRef.current,
@@ -4629,6 +4651,8 @@ export function ProjectEditorPage() {
       return;
     }
     coalesceKeyRef.current = null;
+    // 重做已同步落 state，丢弃延迟窗口内挂起的提交快照。
+    flushPendingRef.current = null;
     const current: HistoryEntry = {
       widgets: widgetsRef.current,
       pageStyle: pageStyleRef.current,

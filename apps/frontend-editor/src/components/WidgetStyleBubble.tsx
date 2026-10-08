@@ -151,9 +151,6 @@ export function isBoxGroupAllowed(type: PageWidget['type'], group: BoxGroup) {
   ) {
     return false;
   }
-  if (type === 'icon' && group === 'size') {
-    return false;
-  }
   if (type === 'swiper' && group === 'padding') {
     return false;
   }
@@ -471,6 +468,7 @@ export function WidgetStyleBubble({
   onTableLines,
   onStyleDelta,
   onFlexChange,
+  onSizeChange,
 }: {
   widget: PageWidget;
   style?: WidgetStyle;
@@ -501,6 +499,7 @@ export function WidgetStyleBubble({
   table?: TableBubbleModel;
   onTableLines?: (lines: TableLines | undefined) => void;
   onFlexChange?: (flex: FlexContainerStyle | undefined) => void;
+  onSizeChange?: (size: number | string) => void;
 }) {
   const { t, i18n } = useTranslation();
   const eventSpecs = useMemo(() => {
@@ -1024,7 +1023,38 @@ export function WidgetStyleBubble({
                 />
               </div>
             ) : null}
-            {openGroup === 'size' && !drawerPlace && isBoxGroupAllowed(widget.type, 'size') ? (
+            {openGroup === 'size' && (widget.type === 'switch' || widget.type === 'icon') && onSizeChange ? (
+              <div className="style-size-panel">
+                <div className="style-size-row">
+                  <span className="style-size-label">{t('lowcode.prop.size', { defaultValue: 'Size' })}</span>
+                  <InputNumber
+                    size="small"
+                    min={widget.type === 'switch' ? 12 : 8}
+                    max={999}
+                    controls
+                    value={
+                      typeof widget.size === 'number'
+                        ? widget.size
+                        : typeof widget.size === 'string' && isCopyBinding(widget.size)
+                          ? widget.size
+                          : widget.size != null
+                            ? Number(widget.size) || undefined
+                            : widget.type === 'switch'
+                              ? 26
+                              : undefined
+                    }
+                    suffix="px"
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onChange={(value) => {
+                      if (typeof value === 'number' && value > 0) {
+                        onSizeChange(value);
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+            ) : null}
+            {openGroup === 'size' && !drawerPlace && isBoxGroupAllowed(widget.type, 'size') && !((widget.type === 'switch' || widget.type === 'icon') && onSizeChange) ? (
               <div className="style-size-panel">
                 <Inherited active={!!inheritedClass('width')}>
                   <SizeField

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { isCopyBinding, propModelName, resolveCopyBinding, switchBoundOn, type PageWidget } from '@vanstack/xml';
 import { dynamicStyleCss, flexItemCss, hiddenCss, mergeCss, presenceCss, widgetClassName } from '../css';
 import { chainEventProps, rememberWidgetValue, type WidgetRuntimeBindings } from '../events';
@@ -42,6 +42,28 @@ function SwitchField({
   rememberWidgetValue(widget.id, displayed ? 'true' : 'false');
   const { onClick, onChange, ...restHandlers } = eventHandlers ?? {};
 
+  const switchVars: CSSProperties = {};
+  if (widget.size != null) {
+    const resolvedSize =
+      typeof widget.size === 'string'
+        ? ctx.evaluateBindings && isCopyBinding(widget.size)
+          ? Number(resolveCopyBinding(widget.size, ctx.bindingScope))
+          : Number(widget.size)
+        : widget.size;
+    if (Number.isFinite(resolvedSize) && resolvedSize > 0) {
+      (switchVars as Record<string, string>)['--switch-h'] = `${resolvedSize}px`;
+    }
+  }
+  if (widget.activeColor?.trim()) {
+    const color =
+      ctx.evaluateBindings && isCopyBinding(widget.activeColor)
+        ? resolveCopyBinding(widget.activeColor, ctx.bindingScope)
+        : widget.activeColor;
+    if (color?.trim()) {
+      (switchVars as Record<string, string>)['--switch-active'] = color.trim();
+    }
+  }
+
   function toggle(event: { preventDefault: () => void }) {
     onClick?.(event);
     if (ctx.editing) {
@@ -69,6 +91,7 @@ function SwitchField({
     style: mergeCss(
       dynamicStyleCss(widget.style, widgetCssOptions(ctx)),
       flexItemCss(widget.item, widgetCssOptions(ctx)),
+      switchVars,
       hiddenCss(widget.hidden, ctx.editing),
       presenceCss(widget, widgetCssOptions(ctx)),
     ),

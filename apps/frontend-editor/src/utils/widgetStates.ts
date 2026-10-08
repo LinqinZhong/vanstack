@@ -875,7 +875,9 @@ export function patchResolvedWidget(
     baseContent.visibleFn = patch.visibleFn;
   }
   const contentPatch: WidgetPatch =
-    widget.type === 'checkbox' || widget.type === 'switch' ? { ...patch, value: undefined } : patch;
+    widget.type === 'checkbox' || widget.type === 'switch'
+      ? { ...patch, value: undefined, size: undefined, activeColor: undefined }
+      : patch;
   const hasPropPatch =
     contentPatch.value != null ||
     contentPatch.text != null ||
@@ -918,6 +920,14 @@ export function patchResolvedWidget(
   }
   if ((widget.type === 'checkbox' || widget.type === 'switch') && patch.value != null) {
     baseContent.value = patch.value;
+  }
+  if (widget.type === 'switch') {
+    if ('size' in patch) {
+      baseContent.size = patch.size;
+    }
+    if ('activeColor' in patch) {
+      baseContent.activeColor = patch.activeColor;
+    }
   }
   if ('placeholder' in patch) {
     baseContent.placeholder = patch.placeholder;

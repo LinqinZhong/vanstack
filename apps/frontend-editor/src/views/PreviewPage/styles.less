@@ -1,4 +1,4 @@
-﻿html:has(.preview-host),
+html:has(.preview-host),
 body:has(.preview-host),
 body:has(.preview-host) #root {
   position: relative;
@@ -250,31 +250,35 @@ body:has(.preview-host.is-editing) #root {
   display: inline-flex;
   align-items: center;
   box-sizing: border-box;
-  width: 40px;
-  height: 22px;
+  width: calc(var(--switch-h, 26px) * 46 / 26);
+  height: var(--switch-h, 26px);
   margin: 0 0.25em;
-  padding: 2px;
+  padding: calc(var(--switch-h, 26px) * 3 / 26);
   border: none;
   border-radius: 999px;
   background: #d9d9d9;
   vertical-align: middle;
   cursor: pointer;
   line-height: 0;
+  transition: background 0.2s ease;
 }
 
 .preview-mount .lowcode-switch.is-on {
-  background: #1677ff;
+  background: var(--switch-active, #1677ff);
 }
 
 .preview-mount .lowcode-switch-thumb {
-  height: 100%;
-  aspect-ratio: 1;
+  width: calc(var(--switch-h, 26px) * 16 / 26);
+  height: calc(var(--switch-h, 26px) * 16 / 26);
   border-radius: 50%;
   background: #fff;
+  transform: translateX(0);
+  transition: transform 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .preview-mount .lowcode-switch.is-on .lowcode-switch-thumb {
-  margin-left: auto;
+  transform: translateX(calc(var(--switch-h, 26px) * 24 / 26));
 }
 
 .preview-host.is-editing [data-widget-id] {

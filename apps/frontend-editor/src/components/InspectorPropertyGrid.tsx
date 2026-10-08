@@ -1439,6 +1439,37 @@ export function WidgetPropertyInspector({
         return true;
       },
     });
+    items.push({
+      key: 'size',
+      value: widget.size != null ? String(widget.size) : '',
+      category: 'basic',
+      placeholder: '26',
+      suffix: 'px',
+      onChange: (raw) => {
+        const trimmed = raw.trim();
+        if (!trimmed) {
+          onPatch({ size: 0 }, `edit:${widget.id}:size`);
+          return true;
+        }
+        if (isCopyBinding(trimmed)) {
+          onPatch({ size: trimmed }, `edit:${widget.id}:size`);
+          return true;
+        }
+        const num = Number(trimmed);
+        if (!Number.isFinite(num) || num <= 0) {
+          return false;
+        }
+        onPatch({ size: num }, `edit:${widget.id}:size`);
+        return true;
+      },
+    });
+    items.push({
+      key: 'activeColor',
+      value: widget.activeColor ?? '',
+      category: 'basic',
+      placeholder: '#1677ff',
+      onChange: (raw) => accepted(parseCssColor(raw), (activeColor) => onPatch({ activeColor }, `edit:${widget.id}:activeColor`)),
+    });
   }
   if (widget.type === 'button') {
     items.push({
@@ -2031,7 +2062,7 @@ export function WidgetPropertyInspector({
         inherited: !ownKeys.has(item.key),
       }))
     : items;
-  const shownItems =
+  const drawerFiltered =
     widget.type === 'drawer'
       ? markedItems.filter((item) => {
           const place = widget.place ?? DEFAULT_DRAWER_PLACE;
@@ -2065,6 +2096,10 @@ export function WidgetPropertyInspector({
           return true;
         })
       : markedItems;
+  const shownItems =
+    widget.type === 'switch' || widget.type === 'icon'
+      ? drawerFiltered.filter((item) => item.key !== 'width' && item.key !== 'height')
+      : drawerFiltered;
 
   return (
     <PropertyGrid

@@ -30,6 +30,8 @@ export const switchHelper = {
       id: ctx.nextId(),
       value: widget.value,
       ...(widget.modelValue?.trim() ? { modelValue: widget.modelValue.trim() } : {}),
+      ...(widget.size != null ? { size: widget.size } : {}),
+      ...(widget.activeColor?.trim() ? { activeColor: widget.activeColor.trim() } : {}),
       ...cloneShared(widget, ctx.stateIdMap),
       ...cloneItemField(widget),
     };
@@ -45,6 +47,32 @@ export const switchHelper = {
         next.modelValue = name;
       } else {
         delete next.modelValue;
+      }
+    }
+    if ('size' in patch) {
+      if (patch.size == null) {
+        delete next.size;
+      } else if (typeof patch.size === 'string' && isCopyBinding(patch.size)) {
+        next.size = patch.size.trim();
+      } else if (typeof patch.size === 'number' && patch.size > 0) {
+        next.size = patch.size;
+      } else if (typeof patch.size === 'string') {
+        const num = Number(patch.size);
+        if (Number.isFinite(num) && num > 0) {
+          next.size = num;
+        } else {
+          delete next.size;
+        }
+      } else {
+        delete next.size;
+      }
+    }
+    if ('activeColor' in patch) {
+      const color = patch.activeColor?.trim();
+      if (color) {
+        next.activeColor = color;
+      } else {
+        delete next.activeColor;
       }
     }
     return next;

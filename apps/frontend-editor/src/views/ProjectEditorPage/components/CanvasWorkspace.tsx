@@ -922,6 +922,11 @@ export function CanvasWorkspace({
                             updateWidget(bubbleWidget.id, { [axis]: enabled }, `edit:${bubbleWidget.id}:${axis}`)
                         : undefined
                     }
+                    onSizeChange={
+                      bubbleWidget.type === 'switch' || bubbleWidget.type === 'icon'
+                        ? (size) => updateWidget(bubbleWidget.id, { size }, `edit:${bubbleWidget.id}:size`)
+                        : undefined
+                    }
                     onOpenInspector={() => setInspectorOpen(true)}
                     onToolbarPopupChange={(open) => {
                       toolbarPopupOpenRef.current = open;

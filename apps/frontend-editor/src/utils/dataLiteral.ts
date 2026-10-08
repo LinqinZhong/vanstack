@@ -229,7 +229,7 @@ class Parser {
     return true;
   }
 
-  private skip() {
+  skip() {
     while (!this.done() && /\s/u.test(this.peek())) {
       this.index += 1;
     }

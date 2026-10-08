@@ -839,6 +839,10 @@ export function pageCssText(widgets: PageWidget[]): string {
     '.lowcode-dynamic-copy { cursor: help; }',
     '.lowcode-dynamic-copy-tip { position: fixed; z-index: 80; max-width: 360px; padding: 6px 8px; border-radius: 6px; background: rgba(21, 28, 34, 0.96); color: #fff; font: 12px/1.45 "Segoe UI", sans-serif; white-space: pre-wrap; word-break: break-all; pointer-events: none; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28); }',
     '.lowcode-table-slot > :where(.lowcode-icon, .lowcode-text, .lowcode-image, .lowcode-button, .lowcode-input, .lowcode-checkbox, .lowcode-switch) { vertical-align: middle; }',
+    '.lowcode-switch { display: inline-flex; align-items: center; box-sizing: border-box; width: calc(var(--switch-h, 26px) * 46 / 26); height: var(--switch-h, 26px); margin: 0 0.25em; padding: calc(var(--switch-h, 26px) * 3 / 26); border: none; border-radius: 999px; background: #d9d9d9; vertical-align: middle; cursor: pointer; line-height: 0; transition: background 0.2s ease; }',
+    '.lowcode-switch.is-on { background: var(--switch-active, #1677ff); }',
+    '.lowcode-switch-thumb { width: calc(var(--switch-h, 26px) * 16 / 26); height: calc(var(--switch-h, 26px) * 16 / 26); border-radius: 50%; background: #fff; transform: translateX(0); transition: transform 0.2s ease; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); }',
+    '.lowcode-switch.is-on .lowcode-switch-thumb { transform: translateX(calc(var(--switch-h, 26px) * 24 / 26)); }',
   );
   return blocks.join('\n');
 }

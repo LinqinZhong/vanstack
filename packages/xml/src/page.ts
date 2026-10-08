@@ -313,6 +313,7 @@ export type WidgetContentProps = {
   text?: string;
   src?: string;
   size?: number;
+  current?: string;
 };
 
 export type WidgetStateDelta = {
@@ -422,6 +423,8 @@ export type PageWidget =
       id: string;
       value: boolean | string;
       modelValue?: string;
+      size?: number | string;
+      activeColor?: string;
       style?: WidgetStyle;
       item?: FlexItemStyle;
     } & WidgetCommon)
@@ -3995,11 +3998,15 @@ function parseWidgets(
       const item = asItem ? parseItem(child) : undefined;
       const extra = widgetStateSpread(child, nodeList(child.switch), ancestorIds);
       const modelValue = attr(child, 'model-value').trim();
+      const size = parseNumber(attr(child, 'size'));
+      const activeColor = attr(child, 'active-color').trim();
       widgets.push({
         type: 'switch',
         id: attr(child, 'id') || `n${ids.n}`,
         value: storedBinding(attr(child, 'value')) ?? isTrue(attr(child, 'value')),
         ...(modelValue ? { modelValue } : {}),
+        ...(size != null ? { size } : {}),
+        ...(activeColor ? { activeColor } : {}),
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
@@ -4451,6 +4458,8 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
         ':@': widgetHostAttrs(widget, id, style, {
           '@_value': typeof widget.value === 'string' ? widget.value : widget.value ? 'true' : 'false',
           ...(widget.modelValue?.trim() ? { '@_model-value': widget.modelValue.trim() } : {}),
+          ...(widget.size != null ? { '@_size': String(widget.size) } : {}),
+          ...(widget.activeColor?.trim() ? { '@_active-color': widget.activeColor.trim() } : {}),
           ...item,
         }),
       };

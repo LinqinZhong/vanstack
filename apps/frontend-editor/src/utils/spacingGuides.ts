@@ -1199,21 +1199,28 @@ export function syncSpacingGuides(
     const spanX = Math.abs(rightX - leftX);
     const spanY = Math.abs(bottomY - topY);
     const resizeEdge = kind === 'size' ? drawerResizeEdgeOf(selected) : null;
+    const simpleSize =
+      kind === 'size' &&
+      (selected.dataset.widgetType === 'switch' || selected.dataset.widgetType === 'icon');
     for (const edge of EDGES) {
       const handle = overlay.querySelector<HTMLElement>(`.spacing-handle[data-spacing-edge="${edge}"]`);
       if (handle) {
-        const auto = edgeIsAuto(selected, kind, edge);
-        handle.hidden = auto || (resizeEdge != null && edge !== resizeEdge);
-        if (!auto) {
-          placeSpacingHandle(
-            handle,
-            edge,
-            leftX,
-            topY,
-            rightX,
-            bottomY,
-            edge === compactY || edge === compactX,
-          );
+        if (simpleSize) {
+          handle.hidden = true;
+        } else {
+          const auto = edgeIsAuto(selected, kind, edge);
+          handle.hidden = auto || (resizeEdge != null && edge !== resizeEdge);
+          if (!auto) {
+            placeSpacingHandle(
+              handle,
+              edge,
+              leftX,
+              topY,
+              rightX,
+              bottomY,
+              edge === compactY || edge === compactX,
+            );
+          }
         }
       }
       syncGuideLabel(
@@ -1222,6 +1229,7 @@ export function syncSpacingGuides(
         edgeIsAuto(selected, kind, edge) ? 0 : edges[edge],
         (label) => placeSpacingLabel(label, edge, leftX, topY, rightX, bottomY),
         (label) =>
+          !simpleSize &&
           (resizeEdge == null || edge === resizeEdge) &&
           (edge === 'top' || edge === 'bottom'
             ? spanX >= label.offsetWidth + LABEL_GAP

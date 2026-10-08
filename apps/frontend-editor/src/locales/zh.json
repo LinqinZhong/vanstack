@@ -269,7 +269,9 @@
       "nextMargin": "后边距",
       "displayMultipleItems": "同时显示",
       "snapToEdge": "贴边",
-      "easingFunction": "缓动"
+      "easingFunction": "缓动",
+      "size": "大小",
+      "activeColor": "激活颜色"
     },
     "widgetValue": "文案",
     "widgetLabel": "按钮文字",

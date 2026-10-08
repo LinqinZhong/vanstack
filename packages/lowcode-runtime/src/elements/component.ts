@@ -261,6 +261,18 @@ function ComponentView({
     }
   }
 
+  // childKey 必须覆盖内部树求值实际依赖的动态值：
+  // - propsValueKey：入参绑定在外层作用域的求值结果 + 组件内部对入参的写入。
+  //   dataKey 只含有 args 的表达式文本，外层数据变化时它不变，仅靠它会命中旧缓存。
+  // - dataWritesValueKey：组件事件对内部 data 变量的写入。
+  // - queryValueKey：$query 变化同样需要让内部树重新求值。
+  const propsValueKey = (writtenProps ?? [])
+    .map((prop) => `${prop.name}\0${prop.type}\0${prop.value}`)
+    .join('\n');
+  const dataWritesValueKey = Object.entries(dataWrites)
+    .map(([name, value]) => `${name}\0${value}`)
+    .join('\n');
+  const queryValueKey = JSON.stringify(query ?? {});
   const childKey = [
     widgetPaintKey(template),
     dataKey,
@@ -268,6 +280,9 @@ function ComponentView({
     ctx.editing ? '1' : '0',
     (ctx.hoverInstanceKeys ?? []).join(','),
     ctx.locale ?? '',
+    propsValueKey,
+    dataWritesValueKey,
+    queryValueKey,
   ].join('\0');
   if (!childCache.current || childCache.current.key !== childKey) {
     // 先展开循环，再按每一项求 state()。样式仍用模板，避免某一项的状态写进共用 class。

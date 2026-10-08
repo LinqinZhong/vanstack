@@ -269,7 +269,9 @@
       "nextMargin": "Next margin",
       "displayMultipleItems": "Display multiple items",
       "snapToEdge": "Snap to edge",
-      "easingFunction": "Easing"
+      "easingFunction": "Easing",
+      "size": "Size",
+      "activeColor": "Active color"
     },
     "widgetValue": "Text",
     "widgetLabel": "Button label",

@@ -123,23 +123,35 @@ export function clearLiveInlineStyles(root: HTMLElement | null) {
     return;
   }
   for (const node of root.querySelectorAll<HTMLElement>('[data-live-style]')) {
+    delete node.dataset.liveStyle;
+    if (node.dataset.widgetType === 'drawer') {
+      // 抽屉的即时样式只写在面板上，且只写盒模型/边框/圆角；面板的定位与尺寸是
+      // React 舞台布局（panelBox），React 不会重写未变化的行内值，清了就丢了。
+      const panel = node.querySelector<HTMLElement>(':scope > .lowcode-drawer-panel');
+      if (!panel) {
+        continue;
+      }
+      for (const key of LIVE_STYLE_KEYS) {
+        if (
+          key === 'width' ||
+          key === 'height' ||
+          key === 'position' ||
+          key === 'top' ||
+          key === 'right' ||
+          key === 'bottom' ||
+          key === 'left' ||
+          key === 'zIndex' ||
+          key === 'transform'
+        ) {
+          continue;
+        }
+        panel.style[key] = '';
+      }
+      continue;
+    }
     for (const key of LIVE_STYLE_KEYS) {
       node.style[key] = '';
     }
-    delete node.dataset.liveStyle;
-    if (node.dataset.widgetType !== 'drawer') {
-      continue;
-    }
-    const panel = node.querySelector<HTMLElement>(':scope > .lowcode-drawer-panel');
-    if (!panel) {
-      continue;
-    }
-    for (const key of LIVE_STYLE_KEYS) {
-      panel.style[key] = '';
-    }
-    const place = node.dataset.drawerPlace ?? 'bottom';
-    const axis = place === 'left' || place === 'right' ? 'height' : 'width';
-    panel.style[axis] = '100%';
   }
 }
 

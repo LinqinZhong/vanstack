@@ -9,6 +9,7 @@ import {
   resolveWidgetTree,
   type BindingScope,
   type ComponentProp,
+  type ComponentSlot,
   type PageStyle,
   type PageWidget,
   type PageXmlDocument,
@@ -117,6 +118,82 @@ function literalPropValue(type: ComponentProp['type'], raw: string): string | nu
   return raw;
 }
 
+/** 插槽参数的字面量按声明类型转成实际值。 */
+function literalSlotValue(type: ComponentProp['type'] | undefined, raw: string): unknown {
+  if (!type || type === 'str' || type === 'icon' || type === 'image') {
+    return raw;
+  }
+  if (type === 'bool') {
+    const lower = raw.toLowerCase();
+    if (lower === '1' || lower === 'true') {
+      return true;
+    }
+    if (lower === '0' || lower === 'false') {
+      return false;
+    }
+    return undefined;
+  }
+  if (type === 'num') {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+/** 在外层作用域里求值组件实例上的插槽参数。 */
+function evaluateSlotArgs(
+  slotArgs: Record<string, Record<string, string>> | undefined,
+  defs: ComponentSlot[] | undefined,
+  scope: BindingScope,
+  evaluate: boolean,
+): Record<string, Record<string, unknown>> | undefined {
+  if (!slotArgs) {
+    return undefined;
+  }
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [slotId, args] of Object.entries(slotArgs)) {
+    const def = defs?.find((item) => item.id === slotId);
+    const values: Record<string, unknown> = {};
+    for (const [param, text] of Object.entries(args)) {
+      const raw = text.trim();
+      if (!raw) {
+        continue;
+      }
+      if (isCopyBinding(raw)) {
+        if (evaluate) {
+          const value = resolveCopyValue(raw, scope);
+          if (value !== undefined) {
+            values[param] = value;
+          }
+        }
+        continue;
+      }
+      const paramDef = def?.params?.find((item) => item.name === param);
+      const value = literalSlotValue(paramDef?.type, raw);
+      if (value !== undefined) {
+        values[param] = value;
+      }
+    }
+    if (Object.keys(values).length > 0) {
+      out[slotId] = values;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function slotArgsText(slotArgs: Record<string, Record<string, string>> | undefined): string {
+  if (!slotArgs) {
+    return '';
+  }
+  return Object.entries(slotArgs)
+    .map(([name, args]) => `${name}\x01${Object.entries(args).map(([key, value]) => `${key}=${value}`).join('\x02')}`)
+    .join('\n');
+}
+
 function propsWithArgs(
   props: ComponentProp[] | undefined,
   args: Record<string, string> | undefined,
@@ -147,6 +224,7 @@ function componentDataKey(
   data: PageXmlDocument['data'],
   props: PageXmlDocument['props'],
   args: Record<string, string> | undefined,
+  slotArgs: Record<string, Record<string, string>> | undefined,
   evaluate: boolean,
 ) {
   const variables = (data ?? []).map((variable) => `${variable.name}\0${variable.type}\0${variable.value}`).join('\n');
@@ -154,7 +232,7 @@ function componentDataKey(
   const argText = Object.entries(args ?? {})
     .map(([name, value]) => `${name}=${value}`)
     .join('\n');
-  return `${variables}\0${propText}\0${argText}\0${evaluate ? 1 : 0}`;
+  return `${variables}\0${propText}\0${argText}\0${slotArgsText(slotArgs)}\0${evaluate ? 1 : 0}`;
 }
 
 function ComponentView({
@@ -173,7 +251,7 @@ function ComponentView({
     : nested?.props;
   const evaluateArgs = ctx.evaluateBindings || Boolean(widget.editProps);
   const query = ctx.bindingScope.query;
-  const dataKey = `${componentDataKey(nested?.data, definedProps, widget.args, evaluateArgs)}\0${useTestProps ? 1 : 0}`;
+  const dataKey = `${componentDataKey(nested?.data, definedProps, widget.args, widget.slotArgs, evaluateArgs)}\0${useTestProps ? 1 : 0}`;
   const [writesStamp, setWritesStamp] = useState(dataKey);
   const [writes, setWrites] = useState<Record<string, string>>({});
   if (writesStamp !== dataKey) {
@@ -202,7 +280,14 @@ function ComponentView({
   const options = widgetCssOptions(ctx);
   const prefix = `${widget.id}__`;
   const template = nested ? prefixTree(nested.widgets, prefix) : [];
-  const nestedStyle = template.length > 0 ? pageCssText(template) : '';
+  const prefixedSlotContent = widget.slotContent
+    ? Object.fromEntries(
+        Object.entries(widget.slotContent).map(([name, widgets]) => [name, prefixTree(widgets, `${prefix}slot-${name}__`)]),
+      )
+    : undefined;
+  const paintSource = prefixedSlotContent ? [...template, ...Object.values(prefixedSlotContent).flat()] : template;
+  const nestedStyle = paintSource.length > 0 ? pageCssText(paintSource) : '';
+  const slotArgValues = evaluateSlotArgs(widget.slotArgs, nested?.slots, ctx.bindingScope, evaluateArgs);
   const nestedStack = [...stack, widget.componentId];
   const dataArg = /^\$data\.([\p{ID_Start}$_][\p{ID_Continue}$]*)$/u;
   const assignScope: ScopeAssign = (bucket, name, value) => {
@@ -269,26 +354,52 @@ function ComponentView({
   const propsValueKey = (writtenProps ?? [])
     .map((prop) => `${prop.name}\0${prop.type}\0${prop.value}`)
     .join('\n');
+  const slotValueKey = slotArgValues
+    ? Object.entries(slotArgValues)
+        .map(([name, values]) => `${name}\x01${Object.entries(values).map(([key, value]) => `${key}=${JSON.stringify(value) ?? ''}`).join('\x02')}`)
+        .join('\n')
+    : '';
   const dataWritesValueKey = Object.entries(dataWrites)
     .map(([name, value]) => `${name}\0${value}`)
     .join('\n');
   const queryValueKey = JSON.stringify(query ?? {});
+  const viewingKey = ctx.viewing
+    ? (Array.isArray(ctx.viewing) ? ctx.viewing : [ctx.viewing])
+        .map((item) => `${item.ownerId}\0${item.state ?? ''}`)
+        .join('\n')
+    : '';
   const childKey = [
-    widgetPaintKey(template),
+    widgetPaintKey(paintSource),
     dataKey,
     writesStamp,
     ctx.editing ? '1' : '0',
+    ctx.slotChrome ? '1' : '0',
     (ctx.hoverInstanceKeys ?? []).join(','),
     ctx.locale ?? '',
+    viewingKey,
     propsValueKey,
+    slotValueKey,
     dataWritesValueKey,
     queryValueKey,
   ].join('\0');
   if (!childCache.current || childCache.current.key !== childKey) {
     // 先展开循环，再按每一项求 state()。样式仍用模板，避免某一项的状态写进共用 class。
-    const expanded = nested ? expandLoopTree(template, scope, false, widgetInstanceKey(widget)) : [];
+    const slotExpand = nested
+      ? {
+          defs: nested.slots,
+          args: slotArgValues,
+          content: prefixedSlotContent,
+          outer: {
+            scope: ctx.bindingScope,
+            assignScope: ctx.assignScope,
+            commitModelValue: ctx.commitModelValue,
+            emit: ctx.emit,
+          },
+        }
+      : undefined;
+    const expanded = nested ? expandLoopTree(template, scope, false, widgetInstanceKey(widget), slotExpand) : [];
     const innerWidgets = nested
-      ? resolveWidgetTree(expanded, null, {
+      ? resolveWidgetTree(expanded, ctx.viewing ?? null, {
           appliedStateFor: (child) => resolveRuntimeOwnState(child, ctx.editing ? [] : (ctx.hoverInstanceKeys ?? [])),
           stateLayersSink: ctx.stateLayers,
         })

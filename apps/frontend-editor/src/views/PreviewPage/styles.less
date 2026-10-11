@@ -1076,6 +1076,66 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
   visibility: visible;
 }
 
+/* 进入组件编辑后，页面壳与其它控件全部隐藏，只把编辑主体组件留在屏幕正中间。 */
+.preview-host.is-editing.is-component-editing .lowcode-page,
+.preview-host.is-editing.is-component-editing [data-widget-id] {
+  visibility: hidden;
+}
+
+/* 多窗口红色框等页面 chrome 一并藏掉。 */
+.preview-host.is-editing.is-component-editing .lowcode-window {
+  outline: none;
+}
+
+.preview-host.is-component-editing .lowcode-component.is-component-host,
+.preview-host.is-component-editing .lowcode-component.is-component-host [data-widget-id] {
+  visibility: visible;
+}
+
+/* fixed 相对带 transform 的 .preview-mount（即手机屏幕）定位，组件脱离原布局并居中。 */
+.preview-host.is-component-editing .lowcode-component.is-component-host {
+  position: fixed !important;
+  top: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: 50% !important;
+  margin: 0 !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 10;
+}
+
+/* 编辑态插槽名称：空插槽跟在插头图标下方；有内容时用左上角浮标显示，不挡内容点击。 */
+.preview-host.is-editing .lowcode-slot {
+  position: relative;
+}
+
+.preview-host.is-editing .lowcode-slot > .lowcode-slot-name {
+  z-index: 1;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  font-size: 10px;
+  line-height: 16px;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.preview-host.is-editing .lowcode-slot > .lowcode-slot-name.is-empty {
+  margin-top: 2px;
+}
+
+.preview-host.is-editing .lowcode-slot > .lowcode-slot-name:not(.is-empty) {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 0 6px;
+  background: rgba(255, 255, 255, 0.92);
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 0 0 6px 0;
+}
+
 .preview-host.is-editing .lowcode-page:has(.lowcode-scroll.is-scroll-open),
 .preview-host.is-editing .lowcode-flex:has(.lowcode-scroll.is-scroll-open),
 .preview-host.is-editing .lowcode-scroll:has(.lowcode-scroll.is-scroll-open),

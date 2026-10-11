@@ -16,7 +16,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { hasWidgetEvents, isLoopConfigured, type PageWidget } from '@vanstack/xml';
 import { writeWidgetDrag } from '../../../utils/pageData';
-import { canMoveWidget, findWidget, type WidgetDropPlacement } from '../../../utils/widgetTree';
+import { canMoveWidget, findWidget, type WidgetDropPlacement, type WidgetTreeNode } from '../../../utils/widgetTree';
 import { TreeActionButton } from './TreeActionButton';
 
 /**
@@ -93,6 +93,7 @@ const TreeTitle = memo(function TreeTitle({
   selected,
   readOnly,
   canDragWidgetToData,
+  actionsHidden,
   onSelect,
   onOpenAlias,
   onOpenLoop,
@@ -113,6 +114,7 @@ const TreeTitle = memo(function TreeTitle({
   selected: boolean;
   readOnly: boolean;
   canDragWidgetToData: boolean;
+  actionsHidden?: boolean;
   onSelect: (widgetId: string) => void;
   onOpenAlias: (widgetId: string) => void;
   onOpenLoop: (widgetId: string) => void;
@@ -127,10 +129,9 @@ const TreeTitle = memo(function TreeTitle({
   const titleClasses = ['widget-tree-title', hidden ? 'is-hidden' : '', selected ? 'is-row-selected' : '']
     .filter(Boolean)
     .join(' ');
-  return (
-    <Dropdown
-      trigger={['contextMenu']}
-      menu={{
+  const dropdownMenu = actionsHidden
+    ? undefined
+    : {
         items: [
           {
             key: 'alias',
@@ -138,14 +139,21 @@ const TreeTitle = memo(function TreeTitle({
             disabled: readOnly,
           },
         ],
-        onClick: ({ key }) => {
+        onClick: ({ key }: { key: string }) => {
           if (key === 'alias') {
             onOpenAlias(widgetId);
           }
         },
-      }}
-    >
-      <span className={titleClasses} onContextMenu={() => onSelect(widgetId)}>
+      };
+  const content = (
+      <span
+        className={titleClasses}
+        onContextMenu={() => {
+          if (!actionsHidden) {
+            onSelect(widgetId);
+          }
+        }}
+      >
         <span
           className={
             canDragWidgetToData
@@ -191,27 +199,35 @@ const TreeTitle = memo(function TreeTitle({
             <ThunderboltOutlined />
           </button>
         ) : null}
-        <TreeRowEye
-          className={['widget-tree-actions-inline', hidden ? 'is-hidden' : '', selected ? 'is-row-selected' : '']
-            .filter(Boolean)
-            .join(' ')}
-        >
-          <button
-            type="button"
-            className="widget-tree-visibility"
-            title={hidden ? showTitle : hideTitle}
-            disabled={readOnly}
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              onToggleHidden(widgetId);
-            }}
+        {actionsHidden ? null : (
+          <TreeRowEye
+            className={['widget-tree-actions-inline', hidden ? 'is-hidden' : '', selected ? 'is-row-selected' : '']
+              .filter(Boolean)
+              .join(' ')}
           >
-            {hidden ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-          </button>
-        </TreeRowEye>
+            <button
+              type="button"
+              className="widget-tree-visibility"
+              title={hidden ? showTitle : hideTitle}
+              disabled={readOnly}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleHidden(widgetId);
+              }}
+            >
+              {hidden ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+            </button>
+          </TreeRowEye>
+        )}
       </span>
+  );
+  return dropdownMenu ? (
+    <Dropdown trigger={['contextMenu']} menu={dropdownMenu}>
+      {content}
     </Dropdown>
+  ) : (
+    content
   );
 }, (prev, next) =>
   prev.widgetId === next.widgetId &&
@@ -223,6 +239,7 @@ const TreeTitle = memo(function TreeTitle({
   prev.selected === next.selected &&
   prev.readOnly === next.readOnly &&
   prev.canDragWidgetToData === next.canDragWidgetToData &&
+  prev.actionsHidden === next.actionsHidden &&
   prev.loopTitle === next.loopTitle &&
   prev.eventsTitle === next.eventsTitle &&
   prev.showTitle === next.showTitle &&
@@ -352,15 +369,35 @@ export function WidgetTreePanel({
             // 只读，或标题要拖进数据面板时，关掉树内排序。
             draggable={!readOnly && !canDragWidgetToData ? { icon: false } : false}
             allowDrop={({ dragNode, dropNode, dropPosition }) => {
+              const dragKey = String(dragNode.key);
+              const dropKey = String(dropNode.key);
+              const dragData = dragNode as WidgetTreeNode;
+              const dropData = dropNode as WidgetTreeNode;
+              const dragIsTemplate = dragData.selectable === false || Boolean(dragData.isSlot);
+              const dropIsSlot = Boolean(dropData.isSlot);
+              const dropIsTemplateFolder = dropData.selectable === false && !dropIsSlot;
+              if (dragIsTemplate || dropIsTemplateFolder) {
+                return false;
+              }
+              // 拖到组件实例的插槽节点：交给页面的 slotContent 路由
+              if (dropIsSlot) {
+                return true;
+              }
+              // 插槽内容节点不在页面 widgets 树里，canMoveWidget 认不出来：内容间移动一律放行
+              if (!findWidget(widgets, dropKey) || !findWidget(widgets, dragKey)) {
+                return true;
+              }
               const placement: WidgetDropPlacement =
                 dropPosition === 0 ? 'inside' : dropPosition < 0 ? 'before' : 'after';
-              return canMoveWidget(widgets, String(dragNode.key), String(dropNode.key), placement);
+              return canMoveWidget(widgets, dragKey, dropKey, placement);
             }}
             expandedKeys={expandedKeys}
             selectedKeys={selectedWidgetId ? [selectedWidgetId] : []}
             treeData={treeData}
             titleRender={(node) => {
               const widgetId = String(node.key);
+              const nodeData = node as WidgetTreeNode;
+              const isTemplateNode = nodeData.selectable === false || Boolean(nodeData.isSlot);
               const widget = findWidget(widgets, widgetId);
               const alias = widget?.alias?.trim();
               return (
@@ -374,6 +411,7 @@ export function WidgetTreePanel({
                   selected={selectedWidgetId === widgetId}
                   readOnly={readOnly}
                   canDragWidgetToData={canDragWidgetToData}
+                  actionsHidden={isTemplateNode}
                   onSelect={onSelect}
                   onOpenAlias={onOpenAlias}
                   onOpenLoop={onOpenLoop}

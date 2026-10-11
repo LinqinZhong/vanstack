@@ -1,8 +1,12 @@
 import { compactDrawerStyle, drawerRadiusKeys, drawerRadiusValue, drawerSizeAxis, drawerStyleForPlace } from '../widgets/drawer';
-import { DisconnectOutlined, EditOutlined, LinkOutlined } from '@ant-design/icons';
-import { Button, Checkbox, Empty, Input, Modal, Popover, Select, Tabs, Tooltip, type InputRef } from 'antd';
+import { DatabaseOutlined, DisconnectOutlined, EditOutlined } from '@ant-design/icons';
+import { Button, Checkbox, Empty, Input, Modal, Popover, Segmented, Select, Table, Tabs, Tooltip, type InputRef } from 'antd';
+import type { TableColumnsType } from 'antd';
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { PROP_TYPES, TypeKindFields } from './TypeKindFields';
+import { PropValueEditor } from './PropValueEditor';
 import {
   FLEX_ALIGN_CONTENTS,
   FLEX_ALIGN_ITEMS,
@@ -34,9 +38,12 @@ import {
   DEFAULT_SWIPER_HEIGHT,
   DEFAULT_SWIPER_WIDTH,
   isCopyBinding,
+  isJsIdentifier,
+  defaultPageDataValue,
   propModelName,
   validateDataLiteral,
   type ComponentProp,
+  type ComponentSlot,
   type ComponentPropType,
   sanitizeWidgetStyle,
   type BoxLength,
@@ -92,6 +99,8 @@ type InspectorProp = {
   inherited?: boolean;
   placeholder?: string;
   suffix?: string;
+  /** 布尔属性：用开关渲染，值只能是 `$(true)` / `$(false)`，其余（数据绑定等）显示为绑定值。 */
+  boolean?: boolean;
 };
 
 function ModelBindButton({
@@ -145,7 +154,7 @@ function ModelBindButton({
     <span className="inspector-prop-edit">
       <Popover trigger="click" open={open && !disabled} onOpenChange={setOpen} content={content} destroyOnHidden>
         <Tooltip title={t('lowcode.modelValuePick')}>
-          <Button size="small" type="text" disabled={disabled} icon={<LinkOutlined />} />
+          <Button size="small" type="text" disabled={disabled} icon={<DatabaseOutlined />} />
         </Tooltip>
       </Popover>
     </span>
@@ -648,6 +657,7 @@ function PropertyGrid({
   variables,
   componentProps,
   dev,
+  slotParamsTab,
 }: {
   items: InspectorProp[];
   disabled?: boolean;
@@ -658,6 +668,7 @@ function PropertyGrid({
   variables?: PageVariable[];
   componentProps?: ComponentProp[];
   dev?: { checked: boolean; onChange: (checked: boolean) => void };
+  slotParamsTab?: { widget: Extract<PageWidget, { type: 'slot' }>; slots: ComponentSlot[]; onChange: (next: ComponentSlot[], coalesceKey?: string) => void };
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
@@ -724,7 +735,34 @@ function PropertyGrid({
     >
       <span className="inspector-prop-label">{item.label ?? item.key}</span>
       <div className="inspector-prop-value">
-        {item.picker === 'model' ? (
+        {item.boolean ? (
+          item.value === '$(true)' || item.value === '$(false)' || !item.value ? (
+            <Segmented
+              block
+              size="small"
+              value={item.value === '$(true)' ? 'on' : item.value === '$(false)' ? 'off' : 'default'}
+              disabled={disabled || item.disabled}
+              options={[
+                { label: '默认', value: 'default' },
+                { label: '开', value: 'on' },
+                { label: '关', value: 'off' },
+              ]}
+              onChange={(value) => {
+                if (value === 'on') {
+                  item.onChange('$(true)');
+                } else if (value === 'off') {
+                  item.onChange('$(false)');
+                } else {
+                  item.onChange('');
+                }
+              }}
+            />
+          ) : (
+            <span className="inspector-prop-bound" title={item.value}>
+              {item.value}
+            </span>
+          )
+        ) : item.picker === 'model' ? (
           <Select
             size="small"
             allowClear
@@ -745,6 +783,21 @@ function PropertyGrid({
             suffix={item.suffix}
           />
         )}
+        {item.boolean ? (
+          <Tooltip title={t('lowcode.propEdit')}>
+            <Button
+              size="small"
+              type="text"
+              className="inspector-prop-edit"
+              disabled={disabled || item.disabled}
+              icon={<EditOutlined />}
+              onClick={() => {
+                setEditing(item);
+                setEditorDraft(item.value);
+              }}
+            />
+          </Tooltip>
+        ) : null}
         {item.bind ? (
           <ModelBindButton
             disabled={disabled}
@@ -832,7 +885,7 @@ function PropertyGrid({
         value={query}
         onChange={(event) => setQuery(event.target.value)}
       />
-      {hasBasic || devTab ? (
+      {hasBasic || devTab || slotParamsTab ? (
         <Tabs
           size="small"
           defaultActiveKey="basic"
@@ -852,6 +905,20 @@ function PropertyGrid({
               label: t('lowcode.propTabStyle'),
               children: renderGrid(styleItems),
             },
+            ...(slotParamsTab
+              ? [{
+                  key: 'slotParams',
+                  label: '出参',
+                  children: (
+                    <SlotParamsTab
+                      widget={slotParamsTab.widget}
+                      slots={slotParamsTab.slots}
+                      disabled={disabled}
+                      onChange={slotParamsTab.onChange}
+                    />
+                  ),
+                }]
+              : []),
             ...(devTab ? [devTab] : []),
           ]}
         />
@@ -977,6 +1044,8 @@ export function WidgetPropertyInspector({
   ownKeys,
   variables,
   componentProps,
+  componentSlots,
+  onComponentSlotsChange,
   bindableProps,
 }: {
   widget: PageWidget;
@@ -989,6 +1058,10 @@ export function WidgetPropertyInspector({
   ownKeys?: Set<string>;
   variables?: PageVariable[];
   componentProps?: ComponentProp[];
+  /** 选中 component 控件时，被引用组件声明的插槽。 */
+  componentSlots?: ComponentSlot[];
+  /** 编辑组件时，修改组件文档的 slots 声明。 */
+  onComponentSlotsChange?: (slots: ComponentSlot[], coalesceKey?: string) => void;
   /** 正在编辑组件时，控件可以双向绑定到这些入参。 */
   bindableProps?: ComponentProp[];
 }) {
@@ -1117,10 +1190,11 @@ export function WidgetPropertyInspector({
     }
     for (const prop of componentProps ?? []) {
       const stored = args[prop.name] ?? '';
-      const dataName = prop.bind ? boundDataName(stored, prop.type, variables) : '';
+      const canBind = prop.type === 'bool' || Boolean(prop.bind);
+      const dataName = canBind ? boundDataName(stored, prop.type, variables) : '';
       const propBound = prop.bind ? propModelName(stored) : '';
       const boundName = dataName || (propBound ? `$props.${propBound}` : '');
-      const modelOptions = prop.bind ? modelChoices(prop.type) : [];
+      const modelOptions = canBind ? modelChoices(prop.type) : [];
       items.push({
         key: `arg.${prop.name}`,
         label: prop.name,
@@ -1131,9 +1205,10 @@ export function WidgetPropertyInspector({
         category: 'basic',
         placeholder: prop.value,
         disabled: Boolean(boundName),
+        ...(prop.type === 'bool' ? { boolean: true } : {}),
         copyTools: prop.type === 'str',
         skipTextTools: prop.type !== 'str',
-        ...(prop.bind
+        ...(canBind
           ? {
               bind: {
                 name: boundName,
@@ -1156,6 +1231,59 @@ export function WidgetPropertyInspector({
         },
       });
     }
+    // 被引用组件声明的插槽参数：逐插槽分组编辑，写入 widget.slotArgs。
+    const slotArgs = widget.slotArgs ?? {};
+    function writeSlotArg(slot: string, name: string, value: string | null) {
+      const group = { ...(slotArgs[slot] ?? {}) };
+      if (value) {
+        group[name] = value;
+      } else {
+        delete group[name];
+      }
+      const next = { ...slotArgs };
+      if (Object.keys(group).length > 0) {
+        next[slot] = group;
+      } else {
+        delete next[slot];
+      }
+      onPatch({ slotArgs: Object.keys(next).length > 0 ? next : undefined }, `edit:${widget.id}:slotArg:${slot}:${name}`);
+    }
+    for (const slot of componentSlots ?? []) {
+      for (const param of slot.params ?? []) {
+        const stored = slotArgs[slot.id]?.[param.name] ?? '';
+        items.push({
+          key: `slotArg.${slot.id}.${param.name}`,
+          label: `${slot.desc || slot.id}.${param.name}`,
+          hint: [param.type, param.desc?.trim() ?? '', t('lowcode.slotsTitle')].filter(Boolean).join(' · '),
+          value: stored,
+          category: 'basic',
+          placeholder: param.value,
+          copyTools: param.type === 'str',
+          skipTextTools: param.type !== 'str',
+          onChange: (raw) => {
+            const next = acceptComponentArg(param.type, raw);
+            if (next === false) {
+              return false;
+            }
+            writeSlotArg(slot.id, param.name, next);
+            return true;
+          },
+        });
+      }
+    }
+  }
+
+  if (widget.type === 'slot') {
+    items.push({
+      key: 'desc',
+      value: widget.desc ?? '',
+      category: 'basic',
+      placeholder: '描述',
+      onChange: (raw) => {
+        onPatch({ desc: raw }, `edit:${widget.id}:desc`);
+        return true;
+      },
+    });
   }
 
   if (widget.type === 'image') {
@@ -1166,6 +1294,17 @@ export function WidgetPropertyInspector({
       category: 'basic',
       onChange: (raw) => {
         onPatch({ src: raw }, `edit:${widget.id}:src`);
+        return true;
+      },
+    });
+    items.push({
+      key: 'href',
+      value: widget.href ?? '',
+      category: 'basic',
+      placeholder: 'https://',
+      copyTools: true,
+      onChange: (raw) => {
+        onPatch({ href: raw }, `edit:${widget.id}:href`);
         return true;
       },
     });
@@ -2121,7 +2260,168 @@ export function WidgetPropertyInspector({
             }
           : undefined
       }
+      slotParamsTab={
+        widget.type === 'slot' && componentSlots && onComponentSlotsChange
+          ? { widget, slots: componentSlots, onChange: onComponentSlotsChange }
+          : undefined
+      }
     />
+  );
+}
+
+function SlotParamsTab({
+  widget,
+  slots,
+  disabled,
+  onChange,
+}: {
+  widget: Extract<PageWidget, { type: 'slot' }>;
+  slots: ComponentSlot[];
+  disabled?: boolean;
+  onChange: (next: ComponentSlot[], coalesceKey?: string) => void;
+}) {
+  const { t } = useTranslation();
+  const slotId = widget.slotId || '';
+  const slot = slots.find((s) => s.id === slotId);
+  const params = slot?.params ?? [];
+
+  function update(next: ComponentProp[], coalesceKey?: string) {
+    const existing = slots.find((s) => s.id === slotId);
+    if (existing) {
+      onChange(
+        slots.map((s) => (s.id === slotId ? { ...s, params: next.length > 0 ? next : undefined } : s)),
+        coalesceKey,
+      );
+    } else {
+      // slot 声明不存在时自动创建
+      onChange(
+        [...slots, { id: slotId, params: next.length > 0 ? next : undefined }],
+        coalesceKey,
+      );
+    }
+  }
+
+  function patchParam(index: number, next: ComponentProp) {
+    update(params.map((p, i) => (i === index ? next : p)), `edit:${widget.id}:slotParams:${params[index]?.name ?? ''}`);
+  }
+
+  function addParam() {
+    const used = new Set(params.map((p) => p.name));
+    let n = params.length + 1;
+    let name = `param${n}`;
+    while (used.has(name)) { n++; name = `param${n}`; }
+    update([...params, { type: 'str', name, value: defaultPageDataValue('str') }], `edit:${widget.id}:slotParams:add`);
+  }
+
+  function removeParam(index: number) {
+    update(params.filter((_, i) => i !== index));
+  }
+
+  const columns: TableColumnsType<ComponentProp> = [
+    {
+      title: t('lowcode.propsName'),
+      dataIndex: 'name',
+      width: 120,
+      render: (name: string, _record, index) => (
+        <Input
+          size="small"
+          value={name}
+          disabled={disabled}
+          onBlur={(e) => {
+            const v = e.target.value.trim();
+            if (!v || !isJsIdentifier(v) || params.some((p, i) => i !== index && p.name === v)) {
+              e.target.value = name;
+              return;
+            }
+            patchParam(index, { ...params[index], name: v });
+          }}
+          onPressEnter={(e) => (e.target as HTMLInputElement).blur()}
+        />
+      ),
+    },
+    {
+      title: t('lowcode.dataDesc'),
+      dataIndex: 'desc',
+      width: 120,
+      render: (desc: string | undefined, _record, index) => (
+        <Input
+          size="small"
+          value={desc ?? ''}
+          disabled={disabled}
+          onChange={(e) => patchParam(index, { ...params[index], desc: e.target.value })}
+        />
+      ),
+    },
+    {
+      title: t('lowcode.dataType'),
+      dataIndex: 'type',
+      width: 200,
+      render: (type: ComponentPropType, record, index) => (
+        <TypeKindFields
+          type={type}
+          of={record.of}
+          allow={PROP_TYPES}
+          disabled={disabled}
+          onChange={(next) => {
+            if (next.type === 'widget') {
+              return;
+            }
+            const { of: _of, ...rest } = params[index];
+            patchParam(index, {
+              ...rest,
+              type: next.type,
+              ...(next.of ? { of: next.of } : {}),
+              ...(next.reset ? { value: defaultPageDataValue(next.type) } : {}),
+            });
+          }}
+        />
+      ),
+    },
+    {
+      title: t('lowcode.dataValue'),
+      dataIndex: 'value',
+      render: (value: string, record, index) => (
+        <PropValueEditor
+          type={record.type}
+          value={value}
+          disabled={disabled}
+          onChange={(next) => patchParam(index, { ...params[index], value: next })}
+          onEndCoalesce={() => undefined}
+        />
+      ),
+    },
+    {
+      title: t('lowcode.actions'),
+      width: 48,
+      render: (_v, _record, index) => (
+        <Button
+          size="small"
+          type="text"
+          danger
+          disabled={disabled}
+          icon={<DeleteOutlined />}
+          onClick={() => removeParam(index)}
+        />
+      ),
+    },
+  ];
+
+  return (
+    <div className="component-contract">
+      <div className="page-data-toolbar">
+        <Button size="small" icon={<PlusOutlined />} disabled={disabled} onClick={addParam}>
+          {t('lowcode.slotsAddParam')}
+        </Button>
+      </div>
+      <Table
+        size="small"
+        rowKey="name"
+        pagination={false}
+        columns={columns}
+        dataSource={params}
+        locale={{ emptyText: <span className="component-contract-empty">{t('lowcode.slotsParamsEmpty')}</span> }}
+      />
+    </div>
   );
 }
 

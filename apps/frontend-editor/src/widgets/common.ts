@@ -1,4 +1,5 @@
 import {
+  applyWidgetPresence,
   compactLoop,
   compactStateFn,
   compactWidgetEvents,
@@ -24,6 +25,7 @@ function remapStateDelta(delta: WidgetStateDelta, map: Map<string, string>): Wid
     flex: cloneOptional(delta.flex),
     item: cloneOptional(delta.item),
     swiper: cloneOptional(delta.swiper),
+    ...(delta.presence ? { presence: delta.presence } : {}),
     ...(delta.states?.length ? { states: delta.states.map((item) => remapStateDelta(item, map)) } : {}),
   };
 }
@@ -192,6 +194,12 @@ export function applyCommon<T extends PageWidget>(widget: T, patch: WidgetPatch)
     } else {
       delete next.visibleFn;
     }
+  }
+  if ('presence' in patch) {
+    const applied = applyWidgetPresence(next, patch.presence ?? 'visible');
+    next.existsFn = applied.existsFn;
+    next.displayFn = applied.displayFn;
+    next.visibleFn = applied.visibleFn;
   }
   if ('hoverStateId' in patch) {
     const hoverStateId = patch.hoverStateId?.trim();

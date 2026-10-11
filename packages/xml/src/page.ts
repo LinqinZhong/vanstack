@@ -326,6 +326,7 @@ export type WidgetStateDelta = {
   flex?: FlexContainerStyle;
   item?: FlexItemStyle;
   swiper?: SwiperStyle;
+  presence?: WidgetPresence;
   states?: WidgetStateDelta[];
 };
 
@@ -358,6 +359,9 @@ export type WidgetLoop = {
   index?: string;
 };
 
+export const WIDGET_PRESENCES = ['visible', 'removed', 'hidden', 'occupy'] as const;
+export type WidgetPresence = (typeof WIDGET_PRESENCES)[number];
+
 type WidgetCommon = WidgetStates & {
   loop?: WidgetLoop;
   hidden?: boolean;
@@ -381,7 +385,7 @@ export const DEFAULT_DRAWER_SIZE = 40;
 export const DEFAULT_DRAWER_MASK = 40;
 
 export type PageWidget =
-  | ({ type: 'image'; id: string; src: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
+  | ({ type: 'image'; id: string; src: string; href?: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({ type: 'icon'; id: string; src: string; size?: number | string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({ type: 'text'; id: string; value: string; style?: WidgetStyle; item?: FlexItemStyle } & WidgetCommon)
   | ({
@@ -392,8 +396,23 @@ export type PageWidget =
       name: string;
       /** 页面上传给这个组件实例的入参。键是入参名，值是字面量或 `$data` / `$()` 绑定。 */
       args?: Record<string, string>;
+      /** 页面上传给组件插槽的参数。外层键是插槽 id，内层键是参数名。 */
+      slotArgs?: Record<string, Record<string, string>>;
+      /** 页面覆盖组件插槽的内容。键是插槽 id。 */
+      slotContent?: Record<string, PageWidget[]>;
       /** 编辑画布使用传入的入参，不再用组件测试数据里的入参。 */
       editProps?: boolean;
+      style?: WidgetStyle;
+      item?: FlexItemStyle;
+    } & WidgetCommon)
+  | ({
+      type: 'slot';
+      id: string;
+      /** 引用组件声明的插槽 id。 */
+      slotId: string;
+      /** 插槽描述。 */
+      desc?: string;
+      children: PageWidget[];
       style?: WidgetStyle;
       item?: FlexItemStyle;
     } & WidgetCommon)
@@ -529,7 +548,7 @@ export type PageWidget =
       style?: WidgetStyle;
     } & WidgetCommon);
 
-type WidgetParent = 'page' | 'flex' | 'scroll' | 'swiper' | 'swiper-item' | 'windows' | 'window' | 'drawer' | 'table' | 'tr' | 'th' | 'td';
+type WidgetParent = 'page' | 'flex' | 'scroll' | 'swiper' | 'swiper-item' | 'windows' | 'window' | 'drawer' | 'table' | 'tr' | 'th' | 'td' | 'slot';
 
 function hasFlexItem(
   widget: PageWidget,
@@ -587,6 +606,63 @@ export type ComponentProp = {
   /** 数组的元素类型，或对象引用的命名空间类型名。 */
   of?: string;
 };
+
+/** 组件声明的插槽。插槽内用 `$slot.参数名` / `$()` 读取参数。 */
+export type ComponentSlot = {
+  /** 插槽唯一标识，自动生成。 */
+  id: string;
+  desc?: string;
+  params?: ComponentProp[];
+};
+
+export function compactComponentSlots(slots: ComponentSlot[] | undefined): ComponentSlot[] | undefined {
+  if (!slots?.length) {
+    return undefined;
+  }
+  const next: ComponentSlot[] = [];
+  const seen = new Set<string>();
+  for (const slot of slots) {
+    const id = slot.id?.trim() ?? '';
+    if (!id || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    const desc = slot.desc?.trim();
+    const params = (slot.params ?? [])
+      .map((param) => ({
+        ...param,
+        name: param.name?.trim() ?? '',
+        value: typeof param.value === 'string' ? param.value : String(param.value ?? ''),
+      }))
+      .filter((param) => param.name && isJsIdentifier(param.name) && isComponentPropType(param.type));
+    next.push({
+      id,
+      ...(desc ? { desc } : {}),
+      ...(params.length > 0 ? { params } : {}),
+    });
+  }
+  return next.length > 0 ? next : undefined;
+}
+
+/** 清理组件实例上的插槽参数：插槽名和参数名都必须是合法标识符。 */
+export function compactComponentSlotArgs(
+  input: Record<string, Record<string, string>> | undefined,
+): Record<string, Record<string, string>> | undefined {
+  if (!input) {
+    return undefined;
+  }
+  const next: Record<string, Record<string, string>> = {};
+  for (const [slotId, args] of Object.entries(input)) {
+    if (!slotId || !args || typeof args !== 'object') {
+      continue;
+    }
+    const compact = compactComponentArgs(args);
+    if (compact) {
+      next[slotId] = compact;
+    }
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
 
 /** 调试样本。键是入参、页面 query 或变量名，值的写法和定义里的 value 相同。缺省时用定义值。 */
 export type PageTestData = {
@@ -768,6 +844,38 @@ export function isPresenceConfigured(widget: {
   return Boolean(compactStateFn(widget.existsFn) || compactStateFn(widget.displayFn) || compactStateFn(widget.visibleFn));
 }
 
+const PRESENCE_FALSE_BODY = 'return false';
+
+export function presenceFromWidget(widget: {
+  existsFn?: string;
+  displayFn?: string;
+  visibleFn?: string;
+}): WidgetPresence {
+  if (compactStateFn(widget.existsFn)) return 'removed';
+  if (compactStateFn(widget.displayFn)) return 'hidden';
+  if (compactStateFn(widget.visibleFn)) return 'occupy';
+  return 'visible';
+}
+
+export function applyWidgetPresence<T extends { existsFn?: string; displayFn?: string; visibleFn?: string }>(
+  widget: T,
+  presence: WidgetPresence,
+): T {
+  const next = { ...widget };
+  delete next.existsFn;
+  delete next.displayFn;
+  delete next.visibleFn;
+  if (presence === 'removed') next.existsFn = PRESENCE_FALSE_BODY;
+  else if (presence === 'hidden') next.displayFn = PRESENCE_FALSE_BODY;
+  else if (presence === 'occupy') next.visibleFn = PRESENCE_FALSE_BODY;
+  return next;
+}
+
+function parseWidgetPresence(raw: string | undefined): WidgetPresence | undefined {
+  const value = raw?.trim();
+  return value && (WIDGET_PRESENCES as readonly string[]).includes(value) ? (value as WidgetPresence) : undefined;
+}
+
 function parseHostStateFn(raw: string, ownedIds: string[]): string | undefined {
   const value = raw.trim();
   if (!value) {
@@ -929,6 +1037,8 @@ export type PageXmlDocument = {
   /** 页面 query。预览和运行时用 `$query.参数名` 读取，缺省时用这里的值。 */
   query?: ComponentProp[];
   emits?: ComponentEmit[];
+  /** 组件声明的插槽。仅组件文档使用。 */
+  slots?: ComponentSlot[];
   testData?: PageTestData;
 };
 
@@ -1059,6 +1169,7 @@ const WIDGET_TAGS = [
   'th',
   'tr',
   'td',
+  'slot',
 ] as const;
 
 function parseWidgetEvents(node: OrderedNode): { events?: WidgetEvents } {
@@ -2785,7 +2896,7 @@ function parsePageQuery(nodes: OrderedNode[]): ComponentProp[] | undefined {
   return parseContractProps(nodes, 'query');
 }
 
-function parseContractProps(nodes: OrderedNode[], tag: 'props' | 'query'): ComponentProp[] | undefined {
+function parseContractProps(nodes: OrderedNode[], tag: 'props' | 'query' | 'params'): ComponentProp[] | undefined {
   const root = nodes.find((child) => Object.prototype.hasOwnProperty.call(child, tag));
   if (!root) {
     return undefined;
@@ -2893,6 +3004,7 @@ function splitPageChildren(nodes: OrderedNode[]): {
   props?: ComponentProp[];
   query?: ComponentProp[];
   emits?: ComponentEmit[];
+  slots?: ComponentSlot[];
   testData?: PageTestData;
 } {
   const data = parsePageData(nodes);
@@ -2900,6 +3012,7 @@ function splitPageChildren(nodes: OrderedNode[]): {
   const props = parseComponentProps(nodes);
   const query = parsePageQuery(nodes);
   const emits = parseComponentEmits(nodes);
+  const slots = parseComponentSlots(nodes);
   const testData = compactPageTestData(parseTestData(nodes), props, data, query);
   const widgets = nodes.filter(
     (child) =>
@@ -2909,6 +3022,7 @@ function splitPageChildren(nodes: OrderedNode[]): {
       !Object.prototype.hasOwnProperty.call(child, 'props') &&
       !Object.prototype.hasOwnProperty.call(child, 'query') &&
       !Object.prototype.hasOwnProperty.call(child, 'emits') &&
+      !Object.prototype.hasOwnProperty.call(child, 'slots') &&
       !Object.prototype.hasOwnProperty.call(child, 'testData'),
   );
   return {
@@ -2918,6 +3032,7 @@ function splitPageChildren(nodes: OrderedNode[]): {
     ...(props ? { props } : {}),
     ...(query ? { query } : {}),
     ...(emits ? { emits } : {}),
+    ...(slots ? { slots } : {}),
     ...(testData ? { testData } : {}),
   };
 }
@@ -2938,6 +3053,42 @@ function parseComponentArgs(nodes: OrderedNode[]): Record<string, string> | unde
   return compactComponentArgs(args);
 }
 
+function parseComponentSlotArgs(nodes: OrderedNode[]): Record<string, Record<string, string>> | undefined {
+  const slotArgs: Record<string, Record<string, string>> = {};
+  for (const child of nodes) {
+    if (!Object.prototype.hasOwnProperty.call(child, 'slot-args')) {
+      continue;
+    }
+    const slotId = attr(child, 'id').trim();
+    if (!slotId) {
+      continue;
+    }
+    const args = parseComponentArgs(nodeList(child['slot-args']));
+    if (args) {
+      slotArgs[slotId] = { ...(slotArgs[slotId] ?? {}), ...args };
+    }
+  }
+  return compactComponentSlotArgs(slotArgs);
+}
+
+function parseComponentSlotContent(nodes: OrderedNode[], ids: { n: number }): Record<string, PageWidget[]> | undefined {
+  const content: Record<string, PageWidget[]> = {};
+  for (const child of nodes) {
+    if (!Object.prototype.hasOwnProperty.call(child, 'slot-content')) {
+      continue;
+    }
+    const slotId = attr(child, 'id').trim();
+    if (!slotId || Object.prototype.hasOwnProperty.call(content, slotId)) {
+      continue;
+    }
+    const widgets = parseWidgets(nodeList(child['slot-content']), ids, 'slot');
+    if (widgets.length > 0) {
+      content[slotId] = widgets;
+    }
+  }
+  return Object.keys(content).length > 0 ? content : undefined;
+}
+
 function serializeComponentArgs(args: Record<string, string> | undefined): OrderedNode[] {
   const compact = compactComponentArgs(args);
   if (!compact) {
@@ -2949,6 +3100,75 @@ function serializeComponentArgs(args: Record<string, string> | undefined): Order
   }));
 }
 
+function serializeComponentSlotArgs(input: Record<string, Record<string, string>> | undefined): OrderedNode[] {
+  const compact = compactComponentSlotArgs(input);
+  if (!compact) {
+    return [];
+  }
+  return Object.entries(compact).map(([slotId, args]) => ({
+    'slot-args': serializeComponentArgs(args),
+    ':@': { '@_id': slotId },
+  }));
+}
+
+function serializeComponentSlotContent(
+  input: Record<string, PageWidget[]> | undefined,
+  ids: { n: number },
+): OrderedNode[] {
+  if (!input) {
+    return [];
+  }
+  const nodes: OrderedNode[] = [];
+  for (const [slotId, widgets] of Object.entries(input)) {
+    if (!slotId || !Array.isArray(widgets) || widgets.length === 0) {
+      continue;
+    }
+    nodes.push({
+      'slot-content': serializeWidgets(widgets, ids, 'slot'),
+      ':@': { '@_id': slotId },
+    });
+  }
+  return nodes;
+}
+
+function parseComponentSlots(nodes: OrderedNode[]): ComponentSlot[] | undefined {
+  const root = nodes.find((child) => Object.prototype.hasOwnProperty.call(child, 'slots'));
+  if (!root) {
+    return undefined;
+  }
+  const slots: ComponentSlot[] = [];
+  for (const child of nodeList(root.slots)) {
+    if (!Object.prototype.hasOwnProperty.call(child, 'slot')) {
+      continue;
+    }
+    const id = attr(child, 'id').trim();
+    const desc = attr(child, 'desc').trim();
+    const params = parseContractProps(nodeList(child.slot), 'params') ?? [];
+    slots.push({
+      id,
+      ...(desc ? { desc } : {}),
+      ...(params.length > 0 ? { params } : {}),
+    });
+  }
+  return compactComponentSlots(slots);
+}
+
+function serializeComponentSlots(slots: ComponentSlot[]): OrderedNode {
+  return {
+    slots: slots.map((slot) => {
+      const attrs: Record<string, string> = { '@_id': slot.id };
+      const desc = slot.desc?.trim();
+      if (desc) {
+        attrs['@_desc'] = desc;
+      }
+      return {
+        slot: slot.params?.length ? [serializeContractProps('params', slot.params)] : [],
+        ':@': attrs,
+      };
+    }),
+  };
+}
+
 function serializeComponentProps(props: ComponentProp[]): OrderedNode {
   return serializeContractProps('props', props);
 }
@@ -2957,7 +3177,7 @@ function serializePageQuery(query: ComponentProp[]): OrderedNode {
   return serializeContractProps('query', query);
 }
 
-function serializeContractProps(tag: 'props' | 'query', props: ComponentProp[]): OrderedNode {
+function serializeContractProps(tag: 'props' | 'query' | 'params', props: ComponentProp[]): OrderedNode {
   return {
     [tag]: props.map((prop) => {
       const attrs: Record<string, string> = { '@_n': prop.name };
@@ -3151,6 +3371,7 @@ export type WidgetStateFields = {
   flex?: FlexContainerStyle;
   item?: FlexItemStyle;
   swiper?: SwiperStyle;
+  presence?: WidgetPresence;
 };
 
 export function nestedOwnedStates(widget: PageWidget): WidgetStateDelta[] {
@@ -3252,6 +3473,10 @@ function mergeProps(base?: WidgetContentProps, overlay?: WidgetContentProps): Wi
   return compactWidgetProps(next);
 }
 
+function mergePresence(base: WidgetPresence | undefined, overlay: WidgetPresence | undefined): WidgetPresence | undefined {
+  return overlay ?? base;
+}
+
 function widgetBaseProps(widget: PageWidget): WidgetContentProps | undefined {
   return compactWidgetProps({
     ...('value' in widget && widget.type !== 'checkbox' && widget.type !== 'switch' ? { value: widget.value } : {}),
@@ -3281,6 +3506,7 @@ function widgetFieldBase(widget: PageWidget): WidgetStateFields {
     flex: widget.type === 'flex' ? compactFlexContainer(widget.flex) : undefined,
     item: hasFlexItem(widget) ? compactFlexItem(widget.item) : undefined,
     swiper: widget.type === 'swiper' ? compactSwiper(widget.swiper) : undefined,
+    presence: presenceFromWidget(widget),
   };
 }
 
@@ -3290,6 +3516,7 @@ export function resolveWidgetStateStack(widget: PageWidget, layers: WidgetStateL
   let flex = widget.type === 'flex' ? compactFlexContainer(widget.flex) : undefined;
   let item = hasFlexItem(widget) ? compactFlexItem(widget.item) : undefined;
   let swiper = widget.type === 'swiper' ? compactSwiper(widget.swiper) : undefined;
+  let presence: WidgetPresence | undefined = undefined;
   let activeOverride: WidgetStateDelta | undefined;
   for (const layer of layers) {
     let delta: WidgetStateDelta | undefined;
@@ -3304,27 +3531,30 @@ export function resolveWidgetStateStack(widget: PageWidget, layers: WidgetStateL
     flex = widget.type === 'flex' ? mergeFlex(flex, delta?.flex) : undefined;
     item = hasFlexItem(widget) ? mergeItem(item, delta?.item) : undefined;
     swiper = widget.type === 'swiper' ? mergeSwiper(swiper, delta?.swiper) : undefined;
+    presence = mergePresence(presence, delta?.presence);
   }
-  return { props, style, flex, item, swiper };
+  return { props, style, flex, item, swiper, presence };
 }
 
 export function diffWidgetState(
   widget: PageWidget,
   next: WidgetStateFields,
   base?: WidgetStateFields,
-): WidgetStateDelta | Pick<WidgetStateDelta, 'props' | 'style' | 'flex' | 'item' | 'swiper'> {
+): WidgetStateDelta | Pick<WidgetStateDelta, 'props' | 'style' | 'flex' | 'item' | 'swiper' | 'presence'> {
   const origin = base ?? widgetFieldBase(widget);
   const props = diffRecord(origin.props, next.props, compactWidgetProps);
   const style = diffRecord(origin.style, next.style, compactWidgetStyle);
   const flex = widget.type === 'flex' ? diffRecord(origin.flex, next.flex, compactFlexContainer) : undefined;
   const item = hasFlexItem(widget) ? diffRecord(origin.item, next.item, compactFlexItem) : undefined;
   const swiper = widget.type === 'swiper' ? diffRecord(origin.swiper, next.swiper, compactSwiper) : undefined;
+  const presence = next.presence !== undefined && next.presence !== origin.presence ? next.presence : undefined;
   return {
     ...(props ? { props } : {}),
     ...(style ? { style } : {}),
     ...(flex ? { flex } : {}),
     ...(item ? { item } : {}),
     ...(swiper ? { swiper } : {}),
+    ...(presence ? { presence } : {}),
   };
 }
 
@@ -3410,6 +3640,9 @@ function withResolvedFields(
     } else {
       delete next.swiper;
     }
+  }
+  if (fields.presence) {
+    next = applyWidgetPresence(next, fields.presence);
   }
   const duration = compactTransition(transition);
   if (duration) {
@@ -3549,6 +3782,7 @@ function parseStateDelta(node: OrderedNode): WidgetStateDelta | undefined {
   const flex = parseFlex(node);
   const item = parseItem(node);
   const swiper = parseSwiper(node);
+  const presence = parseWidgetPresence(attr(node, 'presence'));
   const transition = tag === '_' ? compactTransition(parseNonNegativeInteger(attr(node, 'transition'))) : undefined;
   const nested: WidgetStateDelta[] = [];
   const seen = new Set<string>();
@@ -3574,6 +3808,7 @@ function parseStateDelta(node: OrderedNode): WidgetStateDelta | undefined {
     ...(flex ? { flex } : {}),
     ...(item ? { item } : {}),
     ...(swiper ? { swiper } : {}),
+    ...(presence ? { presence } : {}),
     ...(nested.length > 0 ? { states: nested } : {}),
   };
 }
@@ -3639,6 +3874,7 @@ function compactDeltaForWrite(widget: PageWidget, delta: WidgetStateDelta, base?
     flex: widget.type === 'flex' ? compactFlexContainer({ ...origin.flex, ...delta.flex }) : undefined,
     item: hasFlexItem(widget) ? compactFlexItem({ ...origin.item, ...delta.item }) : undefined,
     swiper: widget.type === 'swiper' ? compactSwiper({ ...origin.swiper, ...delta.swiper }) : undefined,
+    presence: mergePresence(origin.presence, delta.presence),
   };
   return {
     id: delta.id,
@@ -3665,6 +3901,7 @@ function serializeDeltaNode(
     ...(widget.type === 'flex' ? flexAttrs(compact.flex) : {}),
     ...(asItem && hasFlexItem(widget) ? itemAttrs(compact.item) : {}),
     ...(widget.type === 'swiper' ? swiperAttrs(compact.swiper) : {}),
+    ...(compact.presence ? { '@_presence': compact.presence } : {}),
   };
   const nestedBase: WidgetStateFields = {
     props: compactWidgetProps({ ...((base ?? widgetFieldBase(widget)).props ?? {}), ...(compact.props ?? {}) }),
@@ -3677,6 +3914,7 @@ function serializeDeltaNode(
       widget.type === 'swiper'
         ? compactSwiper({ ...((base ?? widgetFieldBase(widget)).swiper ?? {}), ...(compact.swiper ?? {}) })
         : undefined,
+    presence: mergePresence((base ?? widgetFieldBase(widget)).presence, compact.presence),
   };
   const nested =
     tag === '__'
@@ -3741,7 +3979,9 @@ function serializeStateChildren(widget: PageWidget, ids: { n: number }, parent: 
                 ? 'th'
                 : widget.type === 'td'
                   ? 'td'
-                  : parent;
+                  : widget.type === 'slot'
+                    ? 'slot'
+                    : parent;
   const childSource = widget.type === 'table' ? orderTableChildren(widget.children) : undefined;
   const children =
     widget.type === 'flex' ||
@@ -3754,6 +3994,7 @@ function serializeStateChildren(widget: PageWidget, ids: { n: number }, parent: 
     widget.type === 'table' ||
     widget.type === 'tr' ||
     widget.type === 'th' ||
+    widget.type === 'slot' ||
     widget.type === 'td'
       ? serializeWidgets(childSource ?? widget.children, ids, childParent)
       : [];
@@ -3833,10 +4074,12 @@ function parseWidgets(
       const style = parseStyle(child);
       const item = asItem ? parseItem(child) : undefined;
       const extra = widgetStateSpread(child, nodeList(child.image), ancestorIds);
+      const href = attr(child, 'href').trim();
       widgets.push({
         type: 'image',
         id: attr(child, 'id') || `n${ids.n}`,
         src: attr(child, 'src'),
+        ...(href ? { href } : {}),
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
@@ -3886,6 +4129,8 @@ function parseWidgets(
       const componentNodes = nodeList(child.component);
       const extra = widgetStateSpread(child, componentNodes, ancestorIds);
       const args = parseComponentArgs(componentNodes);
+      const slotArgs = parseComponentSlotArgs(componentNodes);
+      const slotContent = parseComponentSlotContent(componentNodes, ids);
       const name = attr(child, 'name').trim();
       widgets.push({
         type: 'component',
@@ -3894,6 +4139,8 @@ function parseWidgets(
         componentKey: attr(child, 'component-key').trim(),
         name,
         ...(args ? { args } : {}),
+        ...(slotArgs ? { slotArgs } : {}),
+        ...(slotContent ? { slotContent } : {}),
         ...(isTrue(attr(child, 'edit-props')) ? { editProps: true } : {}),
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
@@ -4030,6 +4277,35 @@ function parseWidgets(
         type: 'button',
         id: attr(child, 'id') || `n${ids.n}`,
         text: attr(child, 'text'),
+        ...(style ? { style } : {}),
+        ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHost(child),
+        ...parseWidgetAlias(child),
+        ...parseWidgetEvents(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
+    if (allowContent && Object.prototype.hasOwnProperty.call(child, 'slot')) {
+      ids.n += 1;
+      const style = parseStyle(child);
+      const item = asItem ? parseItem(child) : undefined;
+      const extra = widgetStateSpread(child, nodeList(child.slot), ancestorIds);
+      const nextIds = [...ancestorIds, ...extraDeclaredIds(extra)];
+      const rawSlotId = attr(child, 'slot-id').trim();
+      const slotId = rawSlotId === 'undefined' || rawSlotId === 'null' ? '' : rawSlotId;
+      const desc = attr(child, 'desc').trim();
+      widgets.push({
+        type: 'slot',
+        id: attr(child, 'id') || `n${ids.n}`,
+        slotId,
+        ...(desc ? { desc } : {}),
+        children: parseWidgets(extra.rest, ids, 'slot', nextIds),
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
         ...parseWidgetLoop(child),
@@ -4387,7 +4663,11 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
     if (widget.type === 'image') {
       return {
         image: inner,
-        ':@': widgetHostAttrs(widget, id, style, { '@_src': widget.src, ...item }),
+        ':@': widgetHostAttrs(widget, id, style, {
+          '@_src': widget.src,
+          ...(widget.href?.trim() ? { '@_href': widget.href.trim() } : {}),
+          ...item,
+        }),
       };
     }
     if (widget.type === 'icon') {
@@ -4408,7 +4688,12 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
     }
     if (widget.type === 'component') {
       return {
-        component: [...serializeComponentArgs(widget.args), ...inner],
+        component: [
+          ...serializeComponentArgs(widget.args),
+          ...serializeComponentSlotArgs(widget.slotArgs),
+          ...serializeComponentSlotContent(widget.slotContent, ids),
+          ...inner,
+        ],
         ':@': widgetHostAttrs(widget, id, style, {
           '@_component-id': widget.componentId,
           '@_component-key': widget.componentKey,
@@ -4416,6 +4701,12 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
           ...(widget.editProps ? { '@_edit-props': 'true' } : {}),
           ...item,
         }),
+      };
+    }
+    if (widget.type === 'slot') {
+      return {
+        slot: inner,
+        ':@': widgetHostAttrs(widget, id, style, { ...(widget.slotId ? { '@_slot-id': widget.slotId } : {}), ...(widget.desc ? { '@_desc': widget.desc } : {}), ...item }),
       };
     }
     if (widget.type === 'button') {
@@ -4571,7 +4862,7 @@ export function parsePageXml(xml: string): PageXmlDocument {
   const pageNode = findPageRoot(pageParser.parse(xml));
   const style = parsePageStyle(pageNode);
   const events = parsePageEvents(pageNode);
-  const { widgets, data, methods, props, query, emits, testData } = splitPageChildren(nodeList(pageNode.page));
+  const { widgets, data, methods, props, query, emits, slots, testData } = splitPageChildren(nodeList(pageNode.page));
   return {
     widgets: parseWidgets(widgets, { n: 0 }, 'page'),
     ...(style ? { style } : {}),
@@ -4581,6 +4872,7 @@ export function parsePageXml(xml: string): PageXmlDocument {
     ...(props ? { props } : {}),
     ...(query ? { query } : {}),
     ...(emits ? { emits } : {}),
+    ...(slots ? { slots } : {}),
     ...(testData ? { testData } : {}),
   };
 }
@@ -4610,6 +4902,13 @@ function collectWidgetEventIds(widgets: PageWidget[], ids: Set<string>) {
     collectEventIds(widget.events, ids);
     if ('children' in widget && widget.children) {
       collectWidgetEventIds(widget.children, ids);
+    }
+    if (widget.type === 'component' && widget.slotContent) {
+      for (const group of Object.values(widget.slotContent)) {
+        if (Array.isArray(group)) {
+          collectWidgetEventIds(group, ids);
+        }
+      }
     }
   }
 }
@@ -4649,6 +4948,7 @@ export function normalizePageDocument(input: unknown): PageXmlDocument {
       ...(page.props && page.props.length > 0 ? { props: page.props } : {}),
       ...(page.query && page.query.length > 0 ? { query: page.query } : {}),
       ...(page.emits && page.emits.length > 0 ? { emits: page.emits } : {}),
+      ...(page.slots && page.slots.length > 0 ? { slots: page.slots } : {}),
       ...(page.testData ? { testData: page.testData } : {}),
     }),
   );
@@ -4661,6 +4961,7 @@ export function serializePageXml(page: PageXmlDocument): string {
     ...(page.props && page.props.length > 0 ? [serializeComponentProps(page.props)] : []),
     ...(page.query && page.query.length > 0 ? [serializePageQuery(page.query)] : []),
     ...(page.emits && page.emits.length > 0 ? [serializeComponentEmits(page.emits)] : []),
+    ...(page.slots && page.slots.length > 0 ? [serializeComponentSlots(page.slots)] : []),
     ...(page.data && page.data.length > 0 ? [serializePageData(page.data)] : []),
     ...(testData ? [testData] : []),
     ...(page.methods && page.methods.length > 0 ? [serializePageMethods(page.methods)] : []),

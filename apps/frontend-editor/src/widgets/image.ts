@@ -21,6 +21,7 @@ export const imageHelper = {
       type: 'image',
       id: ctx.nextId(),
       src: widget.src,
+      ...(widget.href ? { href: widget.href } : {}),
       ...cloneShared(widget, ctx.stateIdMap),
       ...cloneItemField(widget),
     };
@@ -29,6 +30,14 @@ export const imageHelper = {
     const next = applyCommon(widget, patch);
     if (patch.src != null) {
       next.src = patch.src;
+    }
+    if ('href' in patch) {
+      const href = patch.href?.trim();
+      if (href) {
+        next.href = href;
+      } else {
+        delete next.href;
+      }
     }
     return next;
   },

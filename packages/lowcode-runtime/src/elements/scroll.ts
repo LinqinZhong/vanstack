@@ -7,10 +7,12 @@ import { widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../
 function ScrollPort({
   overflowX,
   overflowY,
+  alwaysShow,
   children,
 }: {
   overflowX: 'auto' | 'hidden';
   overflowY: 'auto' | 'hidden';
+  alwaysShow?: boolean;
   children?: ReactNode;
 }) {
   const viewRef = useRef<HTMLDivElement>(null);
@@ -23,8 +25,8 @@ function ScrollPort({
     if (!view || !yThumb || !xThumb) {
       return undefined;
     }
-    return bindOverlayScrollbar(view, yThumb, xThumb);
-  }, []);
+    return bindOverlayScrollbar(view, yThumb, xThumb, Boolean(alwaysShow));
+  }, [alwaysShow]);
   return createElement(
     'div',
     { className: 'lowcode-scroll-port' },
@@ -97,6 +99,7 @@ export function renderScroll(
       {
         overflowX: widget.scrollX === false ? 'hidden' : 'auto',
         overflowY: widget.scrollY === false ? 'hidden' : 'auto',
+        alwaysShow: ctx.editing,
       },
       widget.children.map((child) => ctx.render(child)),
     ),

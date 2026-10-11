@@ -37,14 +37,19 @@ function syncScrollThumbs(view: HTMLElement, yThumb: HTMLElement, xThumb: HTMLEl
   paintThumb(xThumb, x, 'x', active);
 }
 
-/** 藏起原生滚动条后，用叠在内容上的滑块代替。只在滚动过程中显示。 */
-export function bindOverlayScrollbar(view: HTMLElement, yThumb: HTMLElement, xThumb: HTMLElement) {
+/** 藏起原生滚动条后，用叠在内容上的滑块代替。默认只在滚动过程中显示；alwaysVisible 时（如编辑态）始终显示。 */
+export function bindOverlayScrollbar(view: HTMLElement, yThumb: HTMLElement, xThumb: HTMLElement, alwaysVisible = false) {
   let hideTimer = 0;
   const show = () => {
     syncScrollThumbs(view, yThumb, xThumb, true);
     window.clearTimeout(hideTimer);
-    hideTimer = window.setTimeout(() => syncScrollThumbs(view, yThumb, xThumb, false), THUMB_HIDE_MS);
+    if (!alwaysVisible) {
+      hideTimer = window.setTimeout(() => syncScrollThumbs(view, yThumb, xThumb, false), THUMB_HIDE_MS);
+    }
   };
+  if (alwaysVisible) {
+    show();
+  }
   view.addEventListener('scroll', show, { passive: true });
   return () => {
     view.removeEventListener('scroll', show);

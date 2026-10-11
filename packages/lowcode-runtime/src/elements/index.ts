@@ -1,5 +1,5 @@
 import { cloneElement, type ReactElement } from 'react';
-import { readPresenceFlag, type PageWidget } from '@vanstack/xml';
+import { isPresenceFalseBody, readPresenceFlag, type PageWidget } from '@vanstack/xml';
 import { widgetRuntimeBindings, withDomEvents } from '../events';
 import { renderButton } from './button';
 import { renderComponent } from './component';
@@ -13,13 +13,17 @@ import { renderImage } from './image';
 import { renderSwiper } from './swiper';
 import { renderSwiperItem } from './swiper-item';
 import { renderDrawer } from './drawer';
+import { renderSlot } from './slot';
 import { renderWindow, renderWindows } from './windows';
 import { renderTable, renderTd, renderTh, renderTr } from './table';
 import { renderText } from './text';
 import type { WidgetRenderContext } from '../widget-render';
 
 export function widgetElement(widget: PageWidget, ctx: WidgetRenderContext): ReactElement | null {
-  if (ctx.evaluateBindings && !readPresenceFlag(widget.existsFn, ctx.bindingScope)) {
+  const existsOn = ctx.evaluateBindings
+    ? readPresenceFlag(widget.existsFn, ctx.bindingScope)
+    : !isPresenceFalseBody(widget.existsFn);
+  if (!existsOn) {
     return null;
   }
   const node = renderWidget(widget, ctx);
@@ -89,5 +93,7 @@ function renderWidget(widget: PageWidget, ctx: WidgetRenderContext): ReactElemen
       return renderTr(widget, ctx);
     case 'td':
       return renderTd(widget, ctx);
+    case 'slot':
+      return renderSlot(widget, ctx);
   }
 }

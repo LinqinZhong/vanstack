@@ -11,10 +11,12 @@ import {
   type ComponentEmit,
   type ComponentProp,
   type ComponentPropType,
+  type ComponentSlot,
   type MethodParamType,
   type PageMethodParam,
 } from '@vanstack/xml';
 import { PROP_TYPES, SCALAR_TYPES, TypeKindFields, type NamespaceCatalogEntry } from './TypeKindFields';
+import { PropValueEditor } from './PropValueEditor';
 
 type PropsPanelProps = {
   props: ComponentProp[];
@@ -31,7 +33,272 @@ type EmitsPanelProps = {
   onChange: (next: ComponentEmit[]) => void;
 };
 
-function nextPropName(props: ComponentProp[], prefix: string) {
+type SlotsPanelProps = {
+  slots: ComponentSlot[];
+  namespaces?: NamespaceCatalogEntry[];
+  disabled?: boolean;
+  onChange: (next: ComponentSlot[], coalesceKey?: string) => void;
+  onEndCoalesce: () => void;
+};
+
+export function ComponentSlotsPanel({ slots, namespaces = [], disabled, onChange, onEndCoalesce }: SlotsPanelProps) {
+  const { t } = useTranslation();
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [draft, setDraft] = useState<ComponentProp[]>([]);
+
+  function openParams(index: number) {
+    const slot = slots[index];
+    if (!slot) {
+      return;
+    }
+    setDraft((slot.params ?? []).map((param) => ({ ...param })));
+    setEditingIndex(index);
+  }
+
+  function saveParams() {
+    if (editingIndex == null) {
+      return;
+    }
+    const params: ComponentProp[] = [];
+    const names = new Set<string>();
+    for (const row of draft) {
+      const name = row.name.trim();
+      if (!name || !isJsIdentifier(name) || names.has(name)) {
+        message.error(t('lowcode.dataInvalidName'));
+        return;
+      }
+      names.add(name);
+      params.push({ ...row, name });
+    }
+    onChange(
+      slots.map((item, index) => (index === editingIndex ? { ...item, ...(params.length > 0 ? { params } : { params: undefined }) } : item)),
+    );
+    setEditingIndex(null);
+  }
+
+  function patchDraft(index: number, next: ComponentProp) {
+    setDraft((current) => current.map((item, i) => (i === index ? next : item)));
+  }
+
+  const paramColumns: TableColumnsType<ComponentProp> = [
+    {
+      title: t('lowcode.propsName'),
+      dataIndex: 'name',
+      width: 120,
+      render: (name: string, _record, index) => (
+        <Input
+          size="small"
+          value={name}
+          disabled={disabled}
+          onChange={(event) => patchDraft(index, { ...draft[index], name: event.target.value })}
+        />
+      ),
+    },
+    {
+      title: t('lowcode.dataDesc'),
+      dataIndex: 'desc',
+      width: 120,
+      render: (desc: string | undefined, _record, index) => (
+        <Input
+          size="small"
+          value={desc ?? ''}
+          disabled={disabled}
+          onChange={(event) => patchDraft(index, { ...draft[index], desc: event.target.value })}
+        />
+      ),
+    },
+    {
+      title: t('lowcode.dataType'),
+      dataIndex: 'type',
+      width: 200,
+      render: (type: ComponentPropType, record, index) => (
+        <TypeKindFields
+          type={type}
+          of={record.of}
+          allow={PROP_TYPES}
+          namespaces={namespaces}
+          disabled={disabled}
+          onChange={(next) => {
+            if (next.type === 'widget') {
+              return;
+            }
+            const { of: _of, ...rest } = record;
+            patchDraft(index, {
+              ...rest,
+              type: next.type,
+              ...(next.of ? { of: next.of } : {}),
+              ...(next.reset ? { value: defaultPageDataValue(next.type) } : {}),
+            });
+          }}
+        />
+      ),
+    },
+    {
+      title: t('lowcode.dataValue'),
+      dataIndex: 'value',
+      width: 160,
+      render: (value: string, record, index) => (
+        <PropValueEditor
+          type={record.type}
+          value={value}
+          disabled={disabled}
+          onChange={(next) => patchDraft(index, { ...record, value: next })}
+        />
+      ),
+    },
+    {
+      title: t('lowcode.actions'),
+      width: 48,
+      render: (_value, _record, index) => (
+        <Button
+          size="small"
+          type="text"
+          danger
+          disabled={disabled}
+          icon={<DeleteOutlined />}
+          onClick={() => setDraft((current) => current.filter((_, i) => i !== index))}
+        />
+      ),
+    },
+  ];
+
+  const columns: TableColumnsType<ComponentSlot> = [
+    {
+      title: 'ID',
+      dataIndex: 'id',
+      width: 120,
+      render: (id: string) => (
+        <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#999' }}>{id}</span>
+      ),
+    },
+    {
+      title: t('lowcode.dataDesc'),
+      dataIndex: 'desc',
+      render: (desc: string | undefined, record, index) => (
+        <Input
+          size="small"
+          disabled={disabled}
+          value={desc ?? ''}
+          onChange={(event) => {
+            const raw = event.target.value;
+            onChange(
+              slots.map((item, i) => {
+                if (i !== index) {
+                  return item;
+                }
+                const { desc: _ignored, ...rest } = item;
+                return raw.trim() ? { ...rest, desc: raw } : rest;
+              }),
+              `slots:${record.id}:desc`,
+            );
+          }}
+          onBlur={onEndCoalesce}
+        />
+      ),
+    },
+    {
+      title: t('lowcode.slotsParams'),
+      dataIndex: 'params',
+      width: 240,
+      ellipsis: true,
+      render: (params: ComponentProp[] | undefined) =>
+        (params ?? []).map((param) => `${param.name}: ${param.type}`).join(', ') || '—',
+    },
+    {
+      title: t('lowcode.actions'),
+      width: 88,
+      render: (_value, _record, index) => (
+        <div className="page-method-actions">
+          <Button
+            size="small"
+            type="text"
+            icon={<EditOutlined />}
+            disabled={disabled}
+            aria-label={t('lowcode.slotsEditParams')}
+            onClick={() => openParams(index)}
+          />
+          <Button
+            size="small"
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            disabled={disabled}
+            aria-label={t('lowcode.delete')}
+            onClick={() => onChange(slots.filter((_, i) => i !== index))}
+          />
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <section className="component-contract">
+      <div className="page-data-toolbar">
+        <span className="component-contract-title">{t('lowcode.slotsTitle')}</span>
+        <span className="component-contract-hint">{t('lowcode.slotsHint')}</span>
+        <Button
+          size="small"
+          icon={<PlusOutlined />}
+          disabled={disabled}
+          onClick={() => onChange([...slots, { id: generateSlotId() }])}
+        >
+          {t('lowcode.slotsAdd')}
+        </Button>
+      </div>
+      <div className="page-data-table-wrap">
+        <Table
+          size="small"
+          rowKey="id"
+          pagination={false}
+          columns={columns}
+          dataSource={slots}
+          locale={{ emptyText: <span className="component-contract-empty">{t('lowcode.slotsEmpty')}</span> }}
+        />
+      </div>
+      <Modal
+        title={t('lowcode.slotsEditParams')}
+        open={editingIndex != null}
+        onCancel={() => setEditingIndex(null)}
+        onOk={saveParams}
+        destroyOnHidden
+        width={640}
+      >
+        <Table
+          size="small"
+          rowKey={(_, index) => String(index)}
+          pagination={false}
+          columns={paramColumns}
+          dataSource={draft}
+          locale={{ emptyText: <span className="component-contract-empty">{t('lowcode.slotsParamsEmpty')}</span> }}
+        />
+        <Button
+          size="small"
+          icon={<PlusOutlined />}
+          style={{ marginTop: 8 }}
+          onClick={() =>
+            setDraft((current) => [
+              ...current,
+              { type: 'str', name: nextPropName(current, 'param'), value: defaultPageDataValue('str') },
+            ])
+          }
+        >
+          {t('lowcode.slotsAddParam')}
+        </Button>
+      </Modal>
+    </section>
+  );
+}
+
+function generateSlotId(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let id = 's';
+  for (let i = 0; i < 10; i++) {
+    id += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return id;
+}
+
+function nextPropName<T extends { name: string }>(props: T[], prefix: string) {
   const used = new Set(props.map((item) => item.name));
   let index = props.length + 1;
   let name = `${prefix}${index}`;

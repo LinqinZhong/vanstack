@@ -9,6 +9,7 @@ import {
   pickPageLocale,
   resolveWidgetTree,
   type BindingScope,
+  type ComponentProp,
   type PageI18n,
   type PageVariable,
   type PageWidget,
@@ -51,6 +52,8 @@ export type LowcodePageProps = {
   components?: Record<string, PageXmlDocument>;
   centerContent?: boolean;
   useComponentTestData?: boolean;
+  /** 组件编辑态：仅此时渲染组件实例内的插槽 chrome。 */
+  slotChrome?: boolean;
   icons?: Readonly<Record<string, string>>;
   onCommit?: () => void;
 };
@@ -64,7 +67,13 @@ function pageDataKey(data: PageVariable[] | undefined) {
     .join('\n');
 }
 
-export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel, onModelValue, onQueryValue, loadWidgetEvent, pageId, query, components, centerContent, useComponentTestData, icons, onCommit }: LowcodePageProps): ReactElement {
+function pagePropsKey(props: ComponentProp[] | undefined) {
+  return (props ?? [])
+    .map((prop) => `${prop.name}\0${prop.type}\0${prop.value}`)
+    .join('\n');
+}
+
+export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel, onModelValue, onQueryValue, loadWidgetEvent, pageId, query, components, centerContent, useComponentTestData, slotChrome, icons, onCommit }: LowcodePageProps): ReactElement {
   installPageIcons(icons);
   installPageI18n(catalog, locale || pickPageLocale(catalog));
   const pageQuery = query ?? EMPTY_QUERY;
@@ -256,13 +265,14 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
   const paintKey = widgetPaintKey(page.widgets);
   const { widgets, stateLayers } = useMemo(() => {
     const sink = new WeakMap<object, WidgetStateLayer[]>();
-    const expanded = expandLoopTree(page.widgets, { data: dataScope, props: propsScope, query: liveQuery, aliases: {} }, editing);
+    const slotExpand = page.slots?.length ? { defs: page.slots } : undefined;
+    const expanded = expandLoopTree(page.widgets, { data: dataScope, props: propsScope, query: liveQuery, aliases: {} }, editing, '', slotExpand);
     const resolved = resolveWidgetTree(expanded, editing ? viewing : null, {
       appliedStateFor: editing ? undefined : (widget) => resolveRuntimeOwnState(widget, hoverInstanceKeys),
       stateLayersSink: sink,
     });
     return { widgets: resolved, stateLayers: sink };
-  }, [paintKey, viewing, dataScope, propsScope, liveQuery, editing, hoverInstanceKeys]);
+  }, [paintKey, page.slots, viewing, dataScope, propsScope, liveQuery, editing, hoverInstanceKeys]);
   const drawerBoardIndexes = new Map<string, number>();
   {
     let index = 0;
@@ -407,6 +417,8 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       components,
       componentStack,
       useComponentTestData: Boolean(useComponentTestData),
+      slotChrome: Boolean(slotChrome),
+      viewing,
       icons,
       drawerBoardIndex: drawerBoardIndexes.get(widget.id),
       drawerBoardColumn: editRail.column,
@@ -472,6 +484,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     tableLayout ? '1' : '0',
     currentLocale ?? '',
     dataKey,
+    pagePropsKey(page.props),
     hoverInstanceKeys.join(','),
     openDrawerIds.join(','),
     `${editRail.tail}:${editRail.column}`,

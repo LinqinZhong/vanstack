@@ -5,6 +5,7 @@ import { checkboxHelper } from './checkbox';
 import { switchHelper } from './switch';
 import { flexHelper } from './flex';
 import { scrollHelper } from './scroll';
+import { slotHelper } from './slot';
 import { iconHelper } from './icon';
 import { inputHelper } from './input';
 import { imageHelper } from './image';
@@ -42,9 +43,10 @@ export const widgetHelpers = {
   th: tableHeaderHelper,
   tr: tableRowHelper,
   td: tableCellHelper,
+  slot: slotHelper,
 } satisfies { [K in PageWidget['type']]: WidgetHelperInterface<Extract<PageWidget, { type: K }>> };
 
-export const ADDABLE_WIDGET_TYPES = ['text', 'input', 'checkbox', 'switch', 'button', 'flex', 'scroll', 'swiper', 'windows', 'window', 'drawer', 'table', 'swiper-item', 'image', 'icon'] as const satisfies readonly PageWidget['type'][];
+export const ADDABLE_WIDGET_TYPES = ['text', 'input', 'checkbox', 'switch', 'button', 'flex', 'scroll', 'swiper', 'windows', 'window', 'drawer', 'table', 'swiper-item', 'image', 'icon', 'slot'] as const satisfies readonly PageWidget['type'][];
 
 export function acceptsChild(accepts: WidgetAccepts, childType: PageWidget['type']): boolean {
   if (childType === 'drawer' || accepts === 'none') {

@@ -1,4 +1,5 @@
 import {
+  buildPropsRecord,
   compactLoop,
   evaluateBindingExpression,
   isLoopConfigured,
@@ -7,8 +8,11 @@ import {
   setWidgetRuntimeMeta,
   getWidgetRuntimeMeta,
   type BindingScope,
+  type ComponentSlot,
   type PageWidget,
+  type ScopeAssign,
   type WidgetLoop,
+  type WidgetSlotOverrideMeta,
 } from '@vanstack/xml';
 
 export type WidgetInstanceMeta = {
@@ -22,6 +26,34 @@ export function widgetInstanceMeta(widget: PageWidget): WidgetInstanceMeta | und
 
 export function widgetInstanceKey(widget: PageWidget): string {
   return getWidgetRuntimeMeta(widget)?.key ?? widget.id;
+}
+
+/** 组件实例向外层页面提供的插槽上下文。 */
+export type SlotExpandContext = {
+  /** 组件声明的插槽，用来取参数默认值。 */
+  defs?: ComponentSlot[];
+  /** 外层传入的插槽参数（已求值）。 */
+  args?: Record<string, Record<string, unknown>>;
+  /** 外层覆盖的插槽内容（已加前缀）。 */
+  content?: Record<string, PageWidget[]>;
+  /** 覆盖内容渲染时使用的外层上下文。 */
+  outer?: {
+    scope: BindingScope;
+    assignScope?: ScopeAssign;
+    commitModelValue?: (name: string, value: string, done?: boolean) => void;
+    emit?: (name: string, ...args: unknown[]) => void;
+  };
+};
+
+export type SlotOverrideMeta = WidgetSlotOverrideMeta;
+
+/**
+ * 插槽覆盖内容挂在控件的 runtime meta 上（而不是独立 WeakMap）：
+ * resolveWidgetNode 会克隆每个控件并调用 copyWidgetRuntimeMeta 复制 meta，
+ * 独立 WeakMap 的映射在克隆后会丢失，导致插槽内容永远渲染不出来。
+ */
+export function slotOverrideMeta(widget: object): SlotOverrideMeta | undefined {
+  return getWidgetRuntimeMeta(widget)?.slotOverride;
 }
 
 function readPath(root: unknown, path: string): unknown {
@@ -73,12 +105,41 @@ function joinInstanceKey(prefix: string, widgetId: string, unique?: string): str
   return unique == null ? base : `${base}-${unique}`;
 }
 
-function materialize(widget: PageWidget, scope: BindingScope, key: string, editing: boolean): PageWidget {
+function materialize(
+  widget: PageWidget,
+  scope: BindingScope,
+  key: string,
+  editing: boolean,
+  slotCtx?: SlotExpandContext,
+): PageWidget {
   const next = { ...widget };
-  if ('children' in next && Array.isArray(next.children)) {
-    next.children = expandLoopTree(next.children, scope, editing, key);
+  let finalScope = scope;
+  let slotOverride: WidgetSlotOverrideMeta | undefined;
+  if (next.type === 'slot' && slotCtx) {
+    const def = slotCtx.defs?.find((item) => item.id === next.slotId);
+    const defaults = buildPropsRecord(def?.params, scope.query);
+    const overrides = slotCtx.args?.[next.slotId];
+    const params: Record<string, unknown> = { ...defaults, ...(overrides ?? {}) };
+    finalScope = { ...scope, slot: params };
+    const content = slotCtx.content?.[next.slotId];
+    if (content && content.length > 0 && slotCtx.outer) {
+      slotOverride = {
+        content,
+        scope: { ...slotCtx.outer.scope, slot: params },
+        outer: slotCtx.outer,
+      };
+    }
+    if (slotCtx.outer) {
+      // 组件被引用实例化时，插槽始终可见：忽略定义时的存在/显示/可见条件。
+      delete next.existsFn;
+      delete next.displayFn;
+      delete next.visibleFn;
+    }
   }
-  setWidgetRuntimeMeta(next, { scope, key });
+  if ('children' in next && Array.isArray(next.children)) {
+    next.children = expandLoopTree(next.children, finalScope, editing, key, slotCtx);
+  }
+  setWidgetRuntimeMeta(next, { scope: finalScope, key, ...(slotOverride ? { slotOverride } : {}) });
   return next;
 }
 
@@ -99,6 +160,7 @@ export function expandLoopTree(
   scope: BindingScope,
   editing: boolean,
   keyPrefix = '',
+  slotCtx?: SlotExpandContext,
 ): PageWidget[] {
   const result: PageWidget[] = [];
   for (const widget of widgets) {
@@ -106,7 +168,7 @@ export function expandLoopTree(
     if (loop) {
       const items = resolveLoopItems(loop, scope);
       if (items.length === 0 && editing) {
-        result.push(materialize(widget, scope, joinInstanceKey(keyPrefix, widget.id), editing));
+        result.push(materialize(widget, scope, joinInstanceKey(keyPrefix, widget.id), editing, slotCtx));
         continue;
       }
       items.forEach((item, index) => {
@@ -116,6 +178,7 @@ export function expandLoopTree(
           data: scope.data,
           props: scope.props,
           query: scope.query,
+          slot: scope.slot,
           aliases: {
             ...scope.aliases,
             [loopItemName(loop)]: item,
@@ -124,11 +187,11 @@ export function expandLoopTree(
             $index: index,
           },
         };
-        result.push(materialize(widget, nextScope, joinInstanceKey(keyPrefix, widget.id, token), editing));
+        result.push(materialize(widget, nextScope, joinInstanceKey(keyPrefix, widget.id, token), editing, slotCtx));
       });
       continue;
     }
-    result.push(materialize(widget, scope, joinInstanceKey(keyPrefix, widget.id), editing));
+    result.push(materialize(widget, scope, joinInstanceKey(keyPrefix, widget.id), editing, slotCtx));
   }
   return result;
 }

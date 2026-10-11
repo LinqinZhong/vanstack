@@ -9,6 +9,7 @@ import {
   type BoxLength,
   type FlexContainerStyle,
   type FlexItemStyle,
+  isPresenceFalseBody,
   readPresenceFlag,
   type PageStyle,
   type PageWidget,
@@ -138,15 +139,15 @@ export function presenceCss(
   widget: { displayFn?: string; visibleFn?: string },
   options?: WidgetCssOptions,
 ): CSSProperties | undefined {
-  if (!options?.evaluateBindings) {
-    return undefined;
-  }
-  const scope = options.bindingScope ?? { data: Object.create(null) as Record<string, unknown> };
+  const evaluate = Boolean(options?.evaluateBindings);
+  const scope = options?.bindingScope ?? { data: Object.create(null) as Record<string, unknown> };
   const css: CSSProperties = {};
-  if (!readPresenceFlag(widget.displayFn, scope)) {
+  const displayOn = evaluate ? readPresenceFlag(widget.displayFn, scope) : !isPresenceFalseBody(widget.displayFn);
+  if (!displayOn) {
     css.display = 'none';
   }
-  if (!readPresenceFlag(widget.visibleFn, scope)) {
+  const visibleOn = evaluate ? readPresenceFlag(widget.visibleFn, scope) : !isPresenceFalseBody(widget.visibleFn);
+  if (!visibleOn) {
     css.visibility = 'hidden';
   }
   return Object.keys(css).length > 0 ? css : undefined;
@@ -838,6 +839,7 @@ export function pageCssText(widgets: PageWidget[]): string {
     '.lowcode-table-slot { display: flex; align-items: center; }',
     '.lowcode-dynamic-copy { cursor: help; }',
     '.lowcode-dynamic-copy-tip { position: fixed; z-index: 80; max-width: 360px; padding: 6px 8px; border-radius: 6px; background: rgba(21, 28, 34, 0.96); color: #fff; font: 12px/1.45 "Segoe UI", sans-serif; white-space: pre-wrap; word-break: break-all; pointer-events: none; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28); }',
+    '.lowcode-slot { box-sizing: border-box; max-width: 100%; }',
     '.lowcode-table-slot > :where(.lowcode-icon, .lowcode-text, .lowcode-image, .lowcode-button, .lowcode-input, .lowcode-checkbox, .lowcode-switch) { vertical-align: middle; }',
     '.lowcode-switch { display: inline-flex; align-items: center; box-sizing: border-box; width: calc(var(--switch-h, 26px) * 46 / 26); height: var(--switch-h, 26px); margin: 0 0.25em; padding: calc(var(--switch-h, 26px) * 3 / 26); border: none; border-radius: 999px; background: #d9d9d9; vertical-align: middle; cursor: pointer; line-height: 0; transition: background 0.2s ease; }',
     '.lowcode-switch.is-on { background: var(--switch-active, #1677ff); }',

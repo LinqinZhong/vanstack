@@ -1,6 +1,6 @@
 import { ConfigProvider, Modal, message } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { ComponentProp, PageI18n, PageStyle, PageVariable, PageWidget } from '@vanstack/xml';
+import type { ComponentProp, ComponentSlot, PageI18n, PageStyle, PageVariable, PageWidget } from '@vanstack/xml';
 import { EditorHelpModal } from '../../../components/EditorHelpModal';
 import { PagePropertyInspector, WidgetPropertyInspector } from '../../../components/InspectorPropertyGrid';
 import { inspectorTheme } from '../../../components/inspectorTheme';
@@ -25,6 +25,8 @@ type EditorInspectorProps = {
   pageI18n: PageI18n | undefined;
   variables: PageVariable[];
   componentProps?: ComponentProp[];
+  componentSlots?: ComponentSlot[];
+  onComponentSlotsChange?: (slots: ComponentSlot[], coalesceKey?: string) => void;
   bindableProps?: ComponentProp[];
   projectId: string;
   ownKeys: Set<string> | null | undefined;
@@ -47,6 +49,8 @@ export function EditorInspector({
   pageI18n,
   variables,
   componentProps,
+  componentSlots,
+  onComponentSlotsChange,
   bindableProps,
   projectId,
   ownKeys,
@@ -98,6 +102,8 @@ export function EditorInspector({
               projectId={projectId}
               variables={variables}
               componentProps={componentProps}
+              componentSlots={componentSlots}
+              onComponentSlotsChange={onComponentSlotsChange}
               bindableProps={bindableProps}
               ownKeys={ownKeys ?? undefined}
               onPatch={(patch, coalesceKey) => onPatch(widget.id, patch, coalesceKey)}

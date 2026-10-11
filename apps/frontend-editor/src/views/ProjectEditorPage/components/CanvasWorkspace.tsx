@@ -17,9 +17,10 @@ import {
   type TableBubbleModel,
 } from '../../../components/WidgetStyleBubble';
 import { WidgetStateList } from '../../../components/WidgetStateList';
+import { ComponentSlotList, type ComponentSlotListItem } from '../../../components/ComponentSlotList';
 import { setSpacingDragCursor } from '../../../utils/spacingGuides';
 import { patchTableCellStyles, type TableRange } from '../../../utils/tableEdit';
-import { collectTreeStateIds, type WidgetPatch } from '../../../utils/widgetTree';
+import { collectTreeStateIds, findWidget, updateWidgetById, type WidgetPatch } from '../../../utils/widgetTree';
 import {
   createWidgetState,
   deleteWidgetState,
@@ -459,6 +460,11 @@ type CanvasWorkspaceProps = {
   tableEditId: string | null;
   scrollEditId: string | null;
   swiperEditId: string | null;
+  componentEditId: string | null;
+  componentEditSelectionKind: 'slot' | 'content' | null;
+  componentEditSlotId: string | null;
+  componentEditSlots: ComponentSlotListItem[];
+  onSelectSlot: (key: string) => void;
   sendPreview: () => void;
   showStyleChrome: boolean;
   selectedWidget: PageWidget | null;
@@ -546,6 +552,11 @@ export function CanvasWorkspace({
   tableEditId,
   scrollEditId,
   swiperEditId,
+  componentEditId,
+  componentEditSelectionKind,
+  componentEditSlotId,
+  componentEditSlots,
+  onSelectSlot,
   sendPreview,
   showStyleChrome,
   selectedWidget,
@@ -801,7 +812,7 @@ export function CanvasWorkspace({
             </div>
             <div
               ref={phoneFrameRef}
-              className={['phone-page-frame', !previewing && tableEditId ? 'is-table-editing' : '', !previewing && scrollEditId ? 'is-scroll-editing' : '', !previewing && swiperEditId ? 'is-swiper-editing' : '']
+              className={['phone-page-frame', !previewing && tableEditId ? 'is-table-editing' : '', !previewing && scrollEditId ? 'is-scroll-editing' : '', !previewing && swiperEditId ? 'is-swiper-editing' : '', !previewing && componentEditId ? 'is-component-editing' : '']
                 .filter(Boolean)
                 .join(' ')}
             />
@@ -909,7 +920,7 @@ export function CanvasWorkspace({
                     onPresenceChange={
                       bubbleWidget.type === 'drawer'
                         ? undefined
-                        : (presence) => updateWidget(bubbleWidget.id, presence, `presence:${bubbleWidget.id}`)
+                        : (presence) => updateWidget(bubbleWidget.id, { presence }, `presence:${bubbleWidget.id}`)
                     }
                     onFlexChange={
                       bubbleWidget.type === 'flex'
@@ -953,23 +964,33 @@ export function CanvasWorkspace({
               </div>
             ) : null}
           </div>
-          {showStyleChrome && selectedWidget && !readOnly ? (
-            <WidgetStateList
-              items={visibleStates}
+          {showStyleChrome &&
+          ((selectedWidget || componentEditId) && !readOnly || (componentEditId && componentEditSlots.length > 0)) ? (
+            <div className="canvas-float-panels">
+              {(selectedWidget || componentEditId) && !readOnly ? (
+                <WidgetStateList
+                  items={visibleStates}
               viewingOwnerId={viewingOwnerId}
               viewingState={viewingState}
               usedIds={collectTreeStateIds(widgets)}
+              readOnly={Boolean(componentEditId) && componentEditSelectionKind !== 'content'}
               onSelect={(row) => {
+                const isContent = componentEditSelectionKind === 'content' && componentEditId && componentEditSlotId;
+                const contentOwnerKey = isContent
+                  ? `${componentEditId}__slot-${componentEditSlotId}__${selectedWidget?.id ?? ''}`
+                  : selectedWidget?.id ?? null;
                 // 点到继承来的状态：记下拥有者正在看它，当前控件回到基础外观。
                 if (!row.owned && row.id && !row.scopeId) {
                   const inheritedId = row.id;
                   setViewingOwnerId(row.ownerId);
                   setViewingState(inheritedId);
-                  setViewingByOwner((prev) => ({
-                    ...prev,
-                    [row.ownerId]: inheritedId,
-                    [selectedWidget.id]: null,
-                  }));
+                  setViewingByOwner((prev) => {
+                    const next: ViewingByOwner = { ...prev, [row.ownerId]: inheritedId };
+                    if (contentOwnerKey) {
+                      next[contentOwnerKey] = null;
+                    }
+                    return next;
+                  });
                   return;
                 }
                 // 带作用域的状态要同时记住外层 scope 和这一层正在看的 id。
@@ -1001,8 +1022,43 @@ export function CanvasWorkspace({
                 });
               }}
               onCreate={(id, name, from, transition) => {
+                if (!selectedWidget) {
+                  return;
+                }
                 const scopeId = from.scopeId ?? (!from.owned ? from.id : null);
                 const scopeOwnerId = from.scopeOwnerId ?? (!from.owned ? from.ownerId : undefined);
+                if (componentEditSelectionKind === 'content' && componentEditId && componentEditSlotId) {
+                  const componentWidget = findWidget(widgets, componentEditId);
+                  if (componentWidget?.type === 'component') {
+                    const contentWidgets = componentWidget.slotContent?.[componentEditSlotId] ?? [];
+                    const created = createWidgetState(
+                      contentWidgets,
+                      selectedWidget.id,
+                      id,
+                      name,
+                      from.id,
+                      from.owned && !from.scopeId,
+                      transition,
+                      scopeId,
+                    );
+                    const nextComponent = {
+                      ...componentWidget,
+                      slotContent: { ...componentWidget.slotContent, [componentEditSlotId]: created },
+                    };
+                    commitWidgets(updateWidgetById(widgets, componentWidget.id, () => nextComponent), selectedWidgetId);
+                    const prefixedOwnerId = `${componentEditId}__slot-${componentEditSlotId}__${selectedWidget.id}`;
+                    setViewingOwnerId(prefixedOwnerId);
+                    setViewingState(id);
+                    setViewingByOwner((prev) => {
+                      const next: ViewingByOwner = { ...prev, [prefixedOwnerId]: id };
+                      if (scopeId && scopeOwnerId) {
+                        next[scopeOwnerId] = scopeId;
+                      }
+                      return next;
+                    });
+                    return;
+                  }
+                }
                 const created = createWidgetState(
                   widgets,
                   selectedWidget.id,
@@ -1025,6 +1081,29 @@ export function CanvasWorkspace({
                 });
               }}
               onEdit={(from, name, transition) => {
+                if (!selectedWidget) {
+                  return;
+                }
+                if (componentEditSelectionKind === 'content' && componentEditId && componentEditSlotId) {
+                  const componentWidget = findWidget(widgets, componentEditId);
+                  if (componentWidget?.type === 'component') {
+                    const contentWidgets = componentWidget.slotContent?.[componentEditSlotId] ?? [];
+                    let next: PageWidget[];
+                    if (from.id == null) {
+                      next = updateHostTransition(contentWidgets, selectedWidget.id, transition);
+                    } else if (!name) {
+                      return;
+                    } else {
+                      next = updateWidgetState(contentWidgets, selectedWidget.id, from.id, name, transition, from.scopeId);
+                    }
+                    const nextComponent = {
+                      ...componentWidget,
+                      slotContent: { ...componentWidget.slotContent, [componentEditSlotId]: next },
+                    };
+                    commitWidgets(updateWidgetById(widgets, componentWidget.id, () => nextComponent), selectedWidgetId);
+                    return;
+                  }
+                }
                 if (from.id == null) {
                   commitWidgets(updateHostTransition(widgets, selectedWidget.id, transition), selectedWidgetId);
                   return;
@@ -1038,8 +1117,35 @@ export function CanvasWorkspace({
                 );
               }}
               onDelete={(row) => {
+                if (!selectedWidget) {
+                  return;
+                }
                 if (!row.id) {
                   return;
+                }
+                if (componentEditSelectionKind === 'content' && componentEditId && componentEditSlotId) {
+                  const componentWidget = findWidget(widgets, componentEditId);
+                  if (componentWidget?.type === 'component') {
+                    const contentWidgets = componentWidget.slotContent?.[componentEditSlotId] ?? [];
+                    const next = deleteWidgetState(contentWidgets, selectedWidget.id, row.id, row.scopeId);
+                    const nextComponent = {
+                      ...componentWidget,
+                      slotContent: { ...componentWidget.slotContent, [componentEditSlotId]: next },
+                    };
+                    commitWidgets(updateWidgetById(widgets, componentWidget.id, () => nextComponent), selectedWidgetId);
+                    const prefixedOwnerId = `${componentEditId}__slot-${componentEditSlotId}__${selectedWidget.id}`;
+                    if (viewingOwnerId === prefixedOwnerId && viewingState === row.id) {
+                      setViewingOwnerId(row.scopeOwnerId ?? prefixedOwnerId);
+                      setViewingState(row.scopeId ?? null);
+                    }
+                    setViewingByOwner((prev) => {
+                      if (prev[prefixedOwnerId] !== row.id) {
+                        return prev;
+                      }
+                      return { ...prev, [prefixedOwnerId]: null };
+                    });
+                    return;
+                  }
                 }
                 commitWidgets(deleteWidgetState(widgets, selectedWidget.id, row.id, row.scopeId), selectedWidgetId);
                 if (viewingOwnerId === selectedWidget.id && viewingState === row.id) {
@@ -1054,6 +1160,11 @@ export function CanvasWorkspace({
                 });
               }}
             />
+          ) : null}
+          {showStyleChrome && componentEditId && componentEditSlots.length > 0 ? (
+            <ComponentSlotList items={componentEditSlots} selectedKey={selectedWidgetId} onSelect={onSelectSlot} />
+          ) : null}
+            </div>
           ) : null}
           <div className="canvas-toolbar">
             <Button size="small" icon={<ZoomOutOutlined />} onClick={() => zoomBy(1 / ZOOM_STEP)} />

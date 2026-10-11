@@ -4,6 +4,7 @@ import {
   ownedStateIds,
   resolveWidgetStateStack,
   compactWidgetProps,
+  applyWidgetPresence,
   type PageWidget,
   type WidgetContentProps,
   type WidgetStateDelta,
@@ -131,6 +132,106 @@ export function collectVisibleStates(
   return flattenStateTree(collectStateTree(widgets, id));
 }
 
+/** 组件编辑态：把组件根控件上定义的状态映射到「组件实例」作为宿主，供状态栏查看/切换。 */
+export function collectComponentRootStates(
+  ownerId: string,
+  root: PageWidget | null | undefined,
+): VisibleWidgetState[] {
+  if (!root) {
+    return [];
+  }
+  return [
+    { id: null, name: null, owned: true, ownerId, transition: root.transition },
+    ...(root.states ?? []).map((state) => ({
+      id: state.id,
+      name: state.name ?? state.id,
+      owned: true,
+      ownerId,
+      transition: state.transition,
+    })),
+  ];
+}
+
+/**
+ * 组件编辑态：收集某个组件内部控件（插槽/插槽内容）的状态树，并把宿主/作用域 id
+ * 加上运行时前缀（`{instanceId}__` 或 `{instanceId}__slot-{slotId}__`），
+ * 使其与 runtime 中 prefixed widget id 一致，从而能让 status 查看/切换正确级联。
+ * 状态自身的 id / scopeId 不加前缀。
+ */
+export function collectPrefixedStateTree(
+  widgets: PageWidget[],
+  id: string | null | undefined,
+  prefix: string,
+): VisibleWidgetState[] {
+  function mapNode(node: VisibleWidgetState): VisibleWidgetState {
+    return {
+      ...node,
+      ownerId: `${prefix}${node.ownerId}`,
+      ...(node.scopeOwnerId ? { scopeOwnerId: `${prefix}${node.scopeOwnerId}` } : {}),
+      ...(node.children?.length ? { children: node.children.map(mapNode) } : {}),
+    };
+  }
+  return collectStateTree(widgets, id).map(mapNode);
+}
+
+/**
+ * 组件编辑态：收集插槽内容控件的状态树，并把插槽控件上定义的状态作为继承态纳入，
+ * 使插槽内容可以查看/切换/覆盖插槽的状态。宿主 id 加运行时前缀。
+ */
+export function collectSlotContentStateTree(
+  contentWidgets: PageWidget[],
+  contentWidgetId: string | null | undefined,
+  contentPrefix: string,
+  slotWidget: PageWidget,
+  slotPrefix: string,
+): VisibleWidgetState[] {
+  function mapNode(node: VisibleWidgetState): VisibleWidgetState {
+    return {
+      ...node,
+      ownerId: `${contentPrefix}${node.ownerId}`,
+      ...(node.scopeOwnerId ? { scopeOwnerId: `${contentPrefix}${node.scopeOwnerId}` } : {}),
+      ...(node.children?.length ? { children: node.children.map(mapNode) } : {}),
+    };
+  }
+  const contentTree = collectStateTree(contentWidgets, contentWidgetId).map(mapNode);
+  const selected = findWidget(contentWidgets, contentWidgetId);
+  if (!selected) {
+    return contentTree;
+  }
+  const prefixedSlotOwnerId = `${slotPrefix}${slotWidget.id}`;
+  const prefixedContentOwnerId = `${contentPrefix}${selected.id}`;
+  const slotInherited: VisibleWidgetState[] = ancestorOwnedStates(slotWidget).map((state) => {
+    const override = selected.stateOverrides?.find((item) => item.id === state.id);
+    return {
+      id: state.id,
+      name: state.name,
+      owned: false,
+      ownerId: prefixedSlotOwnerId,
+      transition: state.transition,
+      children: [
+        {
+          id: null,
+          name: null,
+          owned: true,
+          ownerId: prefixedContentOwnerId,
+          scopeId: state.id,
+          scopeOwnerId: prefixedSlotOwnerId,
+        },
+        ...(override?.states ?? []).map((nested) => ({
+          id: nested.id,
+          name: nested.name ?? nested.id,
+          owned: true,
+          ownerId: prefixedContentOwnerId,
+          transition: nested.transition,
+          scopeId: state.id,
+          scopeOwnerId: prefixedSlotOwnerId,
+        })),
+      ],
+    };
+  });
+  return [...contentTree, ...slotInherited];
+}
+
 export type ViewingByOwner = Record<string, string | null>;
 
 export function viewingListFromMap(map: ViewingByOwner): Array<{ ownerId: string; state: string | null }> {
@@ -184,6 +285,7 @@ export function stateLayersForWidget(
   widgets: PageWidget[],
   widgetId: string,
   viewing: ViewingByOwner,
+  ownerKey?: string,
 ): WidgetStateLayer[] {
   const selected = findWidget(widgets, widgetId);
   if (!selected) {
@@ -191,7 +293,8 @@ export function stateLayersForWidget(
   }
   const layers: WidgetStateLayer[] = [];
   for (const widget of ancestorChain(widgets, widgetId)) {
-    const stateId = ownerActiveId(widget, viewing);
+    const key = ownerKey ? `${ownerKey}${widget.id}` : widget.id;
+    const stateId = viewing[key] ?? null;
     if (!stateId) {
       continue;
     }
@@ -324,7 +427,7 @@ export function widgetWithStateLayers(widget: PageWidget, layers: WidgetStateLay
       delete next.swiper;
     }
   }
-  return next;
+  return fields.presence ? applyWidgetPresence(next, fields.presence) : next;
 }
 
 export function widgetWithViewing(
@@ -372,7 +475,7 @@ export function widgetWithStateLayerDelta(widget: PageWidget, layers: WidgetStat
       delete next.swiper;
     }
   }
-  return next;
+  return delta.presence ? applyWidgetPresence(next, delta.presence) : next;
 }
 
 export function stateOwnKeys(widget: PageWidget, layers: WidgetStateLayer[]): Set<string> | undefined {
@@ -388,6 +491,7 @@ export function stateOwnKeys(widget: PageWidget, layers: WidgetStateLayer[]): Se
   if (widget.type === 'flex') for (const key of Object.keys(delta.flex ?? {})) keys.add(key);
   if (widget.type !== 'swiper-item' && widget.type !== 'window' && widget.type !== 'th' && widget.type !== 'tr' && widget.type !== 'td') for (const key of Object.keys(delta.item ?? {})) keys.add(key);
   if (widget.type === 'swiper') for (const key of Object.keys(delta.swiper ?? {})) keys.add(key);
+  if (delta.presence) keys.add('presence');
   return keys;
 }
 
@@ -421,6 +525,7 @@ function cloneDelta(delta: WidgetStateDelta): WidgetStateDelta {
     ...(delta.flex ? { flex: { ...delta.flex } } : {}),
     ...(delta.item ? { item: { ...delta.item } } : {}),
     ...(delta.swiper ? { swiper: { ...delta.swiper } } : {}),
+    ...(delta.presence ? { presence: delta.presence } : {}),
     ...(delta.states?.length ? { states: delta.states.map((item) => cloneDelta(item)) } : {}),
   };
 }
@@ -564,6 +669,7 @@ function upsertNestedState(
     !nextParent.flex &&
     !nextParent.item &&
     !nextParent.swiper &&
+    !nextParent.presence &&
     !nextParent.states?.length &&
     !nextParent.appliedState;
   if (empty) {
@@ -708,7 +814,7 @@ export function setAppliedState(
         delete parent.appliedState;
       }
       const empty =
-        !parent.props && !parent.style && !parent.flex && !parent.item && !parent.swiper && !parent.states?.length && !parent.appliedState;
+          !parent.props && !parent.style && !parent.flex && !parent.item && !parent.swiper && !parent.presence && !parent.states?.length && !parent.appliedState;
       if (empty) {
         return writeOverrideList(
           widget,
@@ -752,7 +858,7 @@ function writeDelta(
   const list = [...(widget[key] ?? [])];
   const index = list.findIndex((item) => item.id === stateId);
   const prev = index >= 0 ? list[index] : undefined;
-  const empty = !delta.props && !delta.style && !delta.flex && !delta.item && !delta.swiper;
+  const empty = !delta.props && !delta.style && !delta.flex && !delta.item && !delta.swiper && !delta.presence;
   if (role === 'descendant' && empty && !prev?.states?.length && !prev?.appliedState) {
     if (index < 0) {
       return widget;
@@ -865,14 +971,8 @@ export function patchResolvedWidget(
   if ('hoverStateId' in patch) {
     baseContent.hoverStateId = patch.hoverStateId;
   }
-  if ('existsFn' in patch) {
-    baseContent.existsFn = patch.existsFn;
-  }
-  if ('displayFn' in patch) {
-    baseContent.displayFn = patch.displayFn;
-  }
-  if ('visibleFn' in patch) {
-    baseContent.visibleFn = patch.visibleFn;
+  if ('presence' in patch && patch.presence != null && layers.length === 0) {
+    baseContent.presence = patch.presence;
   }
   const contentPatch: WidgetPatch =
     widget.type === 'checkbox' || widget.type === 'switch'
@@ -885,6 +985,7 @@ export function patchResolvedWidget(
     contentPatch.size != null ||
     'current' in contentPatch;
   const hasVisual = 'style' in patch || 'flex' in patch || 'item' in patch || 'swiper' in patch;
+  const hasPresence = 'presence' in patch && patch.presence != null;
   if ('freezeHeader' in patch) {
     baseContent.freezeHeader = patch.freezeHeader;
   }
@@ -985,7 +1086,7 @@ export function patchResolvedWidget(
   }
 
   let next = Object.keys(baseContent).length > 0 ? patchWidget(widget, baseContent) : widget;
-  if (!hasPropPatch && !hasVisual) {
+  if (!hasPropPatch && !hasVisual && !hasPresence) {
     return next;
   }
   const resolved = resolveWidgetStateStack(next, layers);
@@ -996,6 +1097,7 @@ export function patchResolvedWidget(
     flex: 'flex' in patch ? patch.flex : resolved.flex,
     item: 'item' in patch ? patch.item : resolved.item,
     swiper: 'swiper' in patch ? patch.swiper : resolved.swiper,
+    presence: hasPresence ? patch.presence : resolved.presence,
   };
   const layered = writeDelta(
     next,
@@ -1074,6 +1176,7 @@ export function patchWidgetInState(
   const hasPropPatch =
     patch.value != null || patch.text != null || patch.src != null || patch.size != null;
   const hasVisual = 'style' in patch || 'flex' in patch || 'item' in patch || 'swiper' in patch;
+  const hasPresence = 'presence' in patch && patch.presence != null;
 
   if (!stateId) {
     const allPatch: WidgetPatch = {
@@ -1084,9 +1187,7 @@ export function patchWidgetInState(
       ...('loop' in patch ? { loop: patch.loop } : {}),
       ...('events' in patch ? { events: patch.events } : {}),
       ...('stateFn' in patch ? { stateFn: patch.stateFn } : {}),
-      ...('existsFn' in patch ? { existsFn: patch.existsFn } : {}),
-      ...('displayFn' in patch ? { displayFn: patch.displayFn } : {}),
-      ...('visibleFn' in patch ? { visibleFn: patch.visibleFn } : {}),
+      ...('presence' in patch ? { presence: patch.presence } : {}),
       ...('style' in patch ? { style: patch.style } : {}),
       ...('flex' in patch ? { flex: patch.flex } : {}),
       ...('item' in patch ? { item: patch.item } : {}),
@@ -1108,17 +1209,8 @@ export function patchWidgetInState(
   if ('stateFn' in patch) {
     baseContent.stateFn = patch.stateFn;
   }
-  if ('existsFn' in patch) {
-    baseContent.existsFn = patch.existsFn;
-  }
-  if ('displayFn' in patch) {
-    baseContent.displayFn = patch.displayFn;
-  }
-  if ('visibleFn' in patch) {
-    baseContent.visibleFn = patch.visibleFn;
-  }
   let next = Object.keys(baseContent).length > 0 ? patchWidget(widget, baseContent) : widget;
-  if (!hasPropPatch && !hasVisual) {
+  if (!hasPropPatch && !hasVisual && !hasPresence) {
     return next;
   }
   const layers: WidgetStateLayer[] = nestedIn
@@ -1134,6 +1226,7 @@ export function patchWidgetInState(
     flex: 'flex' in patch ? patch.flex : resolved.flex,
     item: 'item' in patch ? patch.item : resolved.item,
     swiper: 'swiper' in patch ? patch.swiper : resolved.swiper,
+    presence: hasPresence ? patch.presence : resolved.presence,
   };
   const baseStack = layers.slice(0, -1);
   const base = baseStack.length > 0 ? resolveWidgetStateStack(next, baseStack) : undefined;

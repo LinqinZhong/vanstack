@@ -37,6 +37,9 @@ export type LowcodePreviewMessage = {
   tableEditing?: boolean;
   scrollEditing?: boolean;
   swiperEditing?: boolean;
+  componentEditing?: boolean;
+  /** 正在编辑的组件实例 id（组件编辑态，供画布侧定位居中主体与退出按钮）。 */
+  componentEditId?: string | null;
   settle?: number;
   /** 组件画布：内容在屏幕区域内居中，父页不再画屏幕框。 */
   centerContent?: boolean;
@@ -84,6 +87,12 @@ export type LowcodeScrollModeMessage = {
 export type LowcodeSwiperModeMessage = {
   source: typeof LOWCODE_MESSAGE_SOURCE;
   type: 'swiper-mode';
+  action: 'enter' | 'exit';
+};
+
+export type LowcodeComponentModeMessage = {
+  source: typeof LOWCODE_MESSAGE_SOURCE;
+  type: 'component-mode';
   action: 'enter' | 'exit';
 };
 
@@ -279,6 +288,7 @@ export type LowcodeMessage =
   | LowcodeTableModeMessage
   | LowcodeScrollModeMessage
   | LowcodeSwiperModeMessage
+  | LowcodeComponentModeMessage
   | LowcodeTableCommandMessage
   | LowcodeTableFreezeMessage
   | LowcodeTableResizeMessage
@@ -309,6 +319,7 @@ const MESSAGE_TYPES = new Set([
   'table-mode',
   'scroll-mode',
   'swiper-mode',
+  'component-mode',
   'table-command',
   'table-freeze',
   'table-resize',

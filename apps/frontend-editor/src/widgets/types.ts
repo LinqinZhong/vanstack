@@ -10,6 +10,7 @@ import type {
   InputType,
   WidgetEvents,
   WidgetLoop,
+  WidgetPresence,
   WidgetStyle,
 } from '@vanstack/xml';
 
@@ -22,6 +23,10 @@ export type WidgetPatch = {
   checked?: boolean | string;
   selected?: string;
   src?: string;
+  href?: string;
+  name?: string;
+  slotId?: string;
+  desc?: string;
   size?: number | string;
   activeColor?: string;
   hidden?: boolean;
@@ -29,12 +34,14 @@ export type WidgetPatch = {
   loop?: WidgetLoop | undefined;
   events?: WidgetEvents | undefined;
   args?: Record<string, string> | undefined;
+  slotArgs?: Record<string, Record<string, string>> | undefined;
   editProps?: boolean;
   stateFn?: string | undefined;
   hoverStateId?: string | undefined;
   existsFn?: string | undefined;
   displayFn?: string | undefined;
   visibleFn?: string | undefined;
+  presence?: WidgetPresence | undefined;
   style?: WidgetStyle | undefined;
   flex?: FlexContainerStyle | undefined;
   swiper?: SwiperStyle | undefined;

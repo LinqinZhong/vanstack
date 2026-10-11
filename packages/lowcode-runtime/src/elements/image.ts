@@ -55,6 +55,8 @@ export function renderImage(
   widget: Extract<PageWidget, { type: 'image' }>,
   ctx: WidgetRenderContext,
 ): ReactElement {
+  const href = !ctx.editing && widget.href?.trim() ? resolveWidgetCopy(widget.href, ctx).trim() : '';
+  const face = createElement(ImageFace, { src: resolveWidgetCopy(widget.src, ctx) });
   return createElement(
     'span',
     {
@@ -73,6 +75,8 @@ export function renderImage(
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,
     },
-    createElement(ImageFace, { src: resolveWidgetCopy(widget.src, ctx) }),
+    href
+      ? createElement('a', { href, target: '_blank', rel: 'noreferrer', style: { display: 'contents' } }, face)
+      : face,
   );
 }

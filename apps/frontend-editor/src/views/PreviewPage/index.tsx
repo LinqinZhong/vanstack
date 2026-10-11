@@ -11,9 +11,9 @@ import { previewVisualScale, setSpacingActiveEdge, setSpacingDragCursor, setSpac
 import type { BoxDragKind, SpacingEdge } from '../../utils/spacingDrag';
 import { isBoxDragKind, isSpacingNudgeKey, isSpacingValueKey, SPACING_EDGES } from '../../utils/spacingDrag';
 import { pointerAngleDeg, type RotateAxis } from '../../utils/rotateDrag';
-import { applyEditorChromeScale, applyLiveWidgetCss, applyViewport, applyWidgetState, clearLiveInlineStyles, FOCUS_DBLCLICK_MS, focusModifier, paintPreviewCamera, paintWidgetChrome, parentWidgetId, postCanvasPointer, postToParent, postWidgetHover, setSelectFaded } from './helpers';
+import { applyEditorChromeScale, applyLiveWidgetCss, applyViewport, applyWidgetState, clearLiveInlineStyles, FOCUS_DBLCLICK_MS, focusModifier, paintPreviewCamera, paintWidgetChrome, parentWidgetId, postCanvasPointer, postToParent, postWidgetHover, resolveWidgetNode, setSelectFaded, toRawWidgetId } from './helpers';
 import { applyLiveTableTrack, readTableTrackPair, syncTableChrome, syncTableReveal, type TableChromeLabels } from './tableChrome';
-import { leafOpenEditor, paintScrollModeButton, paintSwiperModeButton, syncScrollReveal, syncSwiperReveal, type ScrollChromeLabels, type SwiperChromeLabels } from './scrollChrome';
+import { leafOpenEditor, paintComponentModeButton, paintScrollModeButton, paintSwiperModeButton, syncComponentReveal, syncScrollReveal, syncSwiperReveal, type ComponentChromeLabels, type ScrollChromeLabels, type SwiperChromeLabels } from './scrollChrome';
 
 export function PreviewPage() {
   const { t } = useTranslation();
@@ -54,6 +54,8 @@ export function PreviewPage() {
   const tableEditingRef = useRef(false);
   const scrollEditingRef = useRef(false);
   const swiperEditingRef = useRef(false);
+  const componentEditingRef = useRef(false);
+  const componentEditIdRef = useRef<string | null>(null);
   const centerContentRef = useRef(false);
   const useComponentTestDataRef = useRef(false);
   const chromeLabelsRef = useRef<TableChromeLabels>({
@@ -94,12 +96,43 @@ export function PreviewPage() {
     editSwiper: t('lowcode.swiperEdit'),
     exitSwiper: t('lowcode.tableExitEdit'),
   };
+  const componentLabelsRef = useRef<ComponentChromeLabels>({ editComponent: '', exitComponent: '' });
+  componentLabelsRef.current = {
+    editComponent: t('lowcode.componentEdit'),
+    exitComponent: t('lowcode.tableExitEdit'),
+  };
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(true);
   const [hostTableEditing, setHostTableEditing] = useState(false);
   const [hostScrollEditing, setHostScrollEditing] = useState(false);
   const [hostSwiperEditing, setHostSwiperEditing] = useState(false);
+  const [hostComponentEditing, setHostComponentEditing] = useState(false);
   const editLeafIdRef = useRef<string | null | undefined>(undefined);
+
+  /** componentEditTargetOk：组件编辑态下仅插槽及插槽内容节点允许悬停/选中。 */
+  function componentEditTargetOk(target: EventTarget | null): boolean {
+    if (!componentEditingRef.current) {
+      return true;
+    }
+    if (!(target instanceof Element)) {
+      return false;
+    }
+    const host = target.closest<HTMLElement>('.lowcode-component.is-component-host');
+    if (!host) {
+      return false;
+    }
+    if (host === target) {
+      return false;
+    }
+    // 不依赖 id 格式：只放行位于插槽元素内（含插槽自身及其内容）的节点；
+    // 模板非插槽节点与本体一律排除。
+    return Boolean(target.closest<HTMLElement>('[data-widget-type="slot"]'));
+  }
+
+  /** hoverSafeTarget：所有画布 chrome 重绘入口统一走白名单，避免缩放等重绘把非插槽节点画成 hover 框。 */
+  function hoverSafeTarget(target: EventTarget | null): EventTarget | null {
+    return componentEditTargetOk(target) ? target : null;
+  }
 
   /** readSelectedLayoutSize：当前选中控件的布局宽高（布局坐标）。 */
   function readSelectedLayoutSize() {
@@ -142,6 +175,7 @@ export function PreviewPage() {
     syncTableReveal(hostRef.current, mountRef.current, editingRef.current, tableEditingRef.current);
     syncScrollReveal(hostRef.current, mountRef.current, editingRef.current, scrollEditingRef.current);
     syncSwiperReveal(hostRef.current, mountRef.current, editingRef.current, swiperEditingRef.current);
+    syncComponentReveal(hostRef.current, mountRef.current, editingRef.current, componentEditingRef.current, componentEditIdRef.current);
     paintScrollModeButton(
       hostRef.current,
       mountRef.current,
@@ -157,6 +191,15 @@ export function PreviewPage() {
       editingRef.current,
       swiperEditingRef.current,
       swiperLabelsRef.current,
+    );
+    paintComponentModeButton(
+      hostRef.current,
+      mountRef.current,
+      viewScaleRef.current,
+      editingRef.current,
+      componentEditingRef.current,
+      componentLabelsRef.current,
+      componentEditIdRef.current,
     );
     syncTableChrome(
       hostRef.current,
@@ -298,7 +341,7 @@ export function PreviewPage() {
           paintWidgetChrome(
             hostRef.current,
             mountRef.current,
-            chromeTargetRef.current,
+            hoverSafeTarget(chromeTargetRef.current),
             viewScaleRef.current,
             editingRef.current,
             spacingDragRef.current,
@@ -339,6 +382,8 @@ export function PreviewPage() {
         tableEditing,
         scrollEditing,
         swiperEditing,
+        componentEditing,
+        componentEditId,
         settle,
         components,
         centerContent,
@@ -366,6 +411,10 @@ export function PreviewPage() {
       const nextCenterContent = Boolean(centerContent);
       const nextUseComponentTestData = Boolean(useComponentTestData);
       const nextPreviewEpoch = typeof previewEpoch === 'number' ? previewEpoch : 0;
+      const nextTableEditing = nextEditing && Boolean(tableEditing);
+      const nextScrollEditing = nextEditing && Boolean(scrollEditing);
+      const nextSwiperEditing = nextEditing && Boolean(swiperEditing);
+      const nextComponentEditing = nextEditing && Boolean(componentEditing);
       const shouldRender =
         nextDocumentKey !== documentKeyRef.current ||
         nextComponentsKey !== componentsKeyRef.current ||
@@ -382,17 +431,18 @@ export function PreviewPage() {
         nextIconsKey !== iconsKeyRef.current ||
         nextPageId !== pageIdRef.current ||
         nextQueryKey !== queryKeyRef.current ||
-        nextPreviewEpoch !== previewEpochRef.current;
+        nextPreviewEpoch !== previewEpochRef.current ||
+        nextComponentEditing !== componentEditingRef.current;
       editingRef.current = nextEditing;
-      const nextTableEditing = nextEditing && Boolean(tableEditing);
       tableEditingRef.current = nextTableEditing;
       setHostTableEditing(nextTableEditing);
-      const nextScrollEditing = nextEditing && Boolean(scrollEditing);
       scrollEditingRef.current = nextScrollEditing;
       setHostScrollEditing(nextScrollEditing);
-      const nextSwiperEditing = nextEditing && Boolean(swiperEditing);
       swiperEditingRef.current = nextSwiperEditing;
       setHostSwiperEditing(nextSwiperEditing);
+      componentEditingRef.current = nextComponentEditing;
+      setHostComponentEditing(nextComponentEditing);
+      componentEditIdRef.current = nextComponentEditing ? componentEditId ?? null : null;
       tableChromeRef.current = nextEditing ? (tableChrome ?? null) : null;
       tableLayoutRef.current = nextTableLayout;
       localeRef.current = nextLocale;
@@ -466,7 +516,7 @@ export function PreviewPage() {
         paintWidgetChrome(
           hostRef.current,
           mountRef.current,
-          chromeTargetRef.current,
+          hoverSafeTarget(chromeTargetRef.current),
           viewScaleRef.current,
           nextEditing,
           spacingDragRef.current,
@@ -519,6 +569,12 @@ export function PreviewPage() {
           components,
           centerContent: nextCenterContent,
           useComponentTestData: nextUseComponentTestData,
+          // 仅纯组件编辑态或组件定义编辑器显示插槽占位 chrome；滚动/表格/轮播编辑态不显示。
+          slotChrome:
+            (componentEditingRef.current || centerContentRef.current) &&
+            !scrollEditingRef.current &&
+            !tableEditingRef.current &&
+            !swiperEditingRef.current,
           icons: nextIcons,
           previewEpoch: nextPreviewEpoch,
           onCommit: paintChrome,
@@ -636,6 +692,14 @@ export function PreviewPage() {
 
     /** reportHover：去重后上报悬停控件矩形。 */
     function reportHover(target: EventTarget | null) {
+      // 组件编辑态：只允许插槽与插槽内容参与悬停/选中，其余节点一律抑制。
+      if (!componentEditTargetOk(target)) {
+        if (lastHoverKey !== 'null') {
+          lastHoverKey = 'null';
+          postWidgetHover(null);
+        }
+        return;
+      }
       const selected =
         spacingDragRef.current && spacingEdgeFromTarget(target)
           ? mountRef.current?.querySelector<HTMLElement>('.is-widget-selected')
@@ -670,12 +734,14 @@ export function PreviewPage() {
       hoverFrame = window.requestAnimationFrame(() => {
         hoverFrame = 0;
         const hit = canvasHit(target);
+        // 组件编辑态：非插槽节点不参与悬停绘制与上报。
+        const hoverTarget = componentEditTargetOk(hit ?? target) ? hit : null;
         chromeTargetRef.current = hit ?? target;
-        reportHover(hit ?? target);
+        reportHover(hoverTarget);
         paintWidgetChrome(
           hostRef.current,
           mountRef.current,
-          hit ?? target,
+          hoverTarget,
           viewScaleRef.current,
           editingRef.current,
           spacingDragRef.current,
@@ -722,11 +788,19 @@ export function PreviewPage() {
       if (!parentId) {
         return innermostId;
       }
+      if (componentEditingRef.current) {
+        // 组件编辑态：只允许在插槽与插槽内容之间上钻，超出白名单即钳制，绝不回到本体或其它节点。
+        const parent = resolveWidgetNode(mountRef.current, parentId);
+        if (!parent || !componentEditTargetOk(parent)) {
+          return innermostId;
+        }
+        return parentId;
+      }
       if (!tableEditingRef.current && !scrollEditingRef.current && !swiperEditingRef.current) {
         return parentId;
       }
-      const from = mountRef.current?.querySelector<HTMLElement>(`[data-widget-id="${CSS.escape(fromId)}"]`);
-      const parent = mountRef.current?.querySelector<HTMLElement>(`[data-widget-id="${CSS.escape(parentId)}"]`);
+      const from = resolveWidgetNode(mountRef.current, fromId);
+      const parent = resolveWidgetNode(mountRef.current, parentId);
       if (
         (from?.dataset.widgetType === 'tr' || from?.dataset.widgetType === 'th') &&
         parent?.dataset.widgetType === 'table'
@@ -752,31 +826,39 @@ export function PreviewPage() {
         return null;
       }
       let hit = node;
-      if (!tableEditingRef.current) {
-        const table = node.closest('.lowcode-table');
-        if (table instanceof HTMLElement) {
-          hit = table;
+      // 组件编辑态下不做任何向上折叠（表格/滚动/轮播）。组件实例往往嵌套在滚动容器里，
+      // 若仍按页面态折叠，点击插槽/插槽内容会被折叠到外层滚动容器，随后被
+      // componentEditTargetOk 白名单拒绝，导致插槽无法选中。
+      if (!componentEditingRef.current) {
+        if (!tableEditingRef.current) {
+          const table = node.closest('.lowcode-table');
+          if (table instanceof HTMLElement) {
+            hit = table;
+          }
         }
-      }
-      if (!swiperEditingRef.current) {
-        const swiper = hit.closest('.lowcode-swiper');
-        if (swiper instanceof HTMLElement) {
-          hit = swiper;
+        if (!swiperEditingRef.current) {
+          const swiper = hit.closest('.lowcode-swiper');
+          if (swiper instanceof HTMLElement) {
+            hit = swiper;
+          }
         }
-      }
-      if (!scrollEditingRef.current) {
-        const scroll = hit.closest('.lowcode-scroll');
-        if (scroll instanceof HTMLElement) {
-          hit = scroll;
+        if (!scrollEditingRef.current) {
+          const scroll = hit.closest('.lowcode-scroll');
+          if (scroll instanceof HTMLElement) {
+            hit = scroll;
+          }
         }
       }
       let host: HTMLElement | null = null;
-      let current: Element | null = hit;
-      while (current) {
-        if (current instanceof HTMLElement && current.dataset.widgetType === 'component') {
-          host = current;
+      if (!componentEditingRef.current) {
+        // 页面态点击组件实例时折叠到最外层组件外壳；组件编辑态下直接选中内部控件。
+        let current: Element | null = hit;
+        while (current) {
+          if (current instanceof HTMLElement && current.dataset.widgetType === 'component') {
+            host = current;
+          }
+          current = current.parentElement;
         }
-        current = current.parentElement;
       }
       return host ?? hit;
     }
@@ -786,9 +868,7 @@ export function PreviewPage() {
       lastPostedSelectRef.current = widgetId;
       postToParent({ type: 'select', widgetId });
       if (widgetId) {
-        const widget = mountRef.current?.querySelector<HTMLElement>(
-          `[data-widget-id="${CSS.escape(widgetId)}"]`,
-        );
+        const widget = resolveWidgetNode(mountRef.current, widgetId);
         if (widget) {
           lastHoverKey = '';
           chromeTargetRef.current = widget;
@@ -869,8 +949,9 @@ export function PreviewPage() {
       const field = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement ? event.target : null;
       if (field && !field.readOnly && field.dataset.modelName) {
         const hit = canvasHit(event.target);
-        if (hit?.dataset.widgetId) {
-          postSelect(hit.dataset.widgetId);
+        const hitFieldId = toRawWidgetId(hit?.dataset.widgetId);
+        if (hitFieldId) {
+          postSelect(hitFieldId);
         }
         return;
       }
@@ -888,6 +969,14 @@ export function PreviewPage() {
         event.preventDefault();
         event.stopPropagation();
         postToParent({ type: 'scroll-mode', action: scrollMode });
+        return;
+      }
+      const componentModeNode = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-component-mode]') : null;
+      const componentMode = componentModeNode?.dataset.componentMode;
+      if (componentMode === 'enter' || componentMode === 'exit') {
+        event.preventDefault();
+        event.stopPropagation();
+        postToParent({ type: 'component-mode', action: componentMode });
         return;
       }
       const modeNode = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-table-mode]') : null;
@@ -942,7 +1031,7 @@ export function PreviewPage() {
       }
       selectClickAtRef.current = event.timeStamp;
       const hit = canvasHit(event.target);
-      const hitId = hit?.dataset.widgetId ?? null;
+      const hitId = toRawWidgetId(hit?.dataset.widgetId);
       const overlayOpen = Boolean(spacingDragRef.current);
       const onOverlayHandle = Boolean(
         spacingEdgeFromTarget(event.target) || rotateAxisFromTarget(event.target),
@@ -968,6 +1057,12 @@ export function PreviewPage() {
         return;
       }
       if (swiperEditingRef.current && hit?.dataset.widgetType === 'swiper') {
+        return;
+      }
+      // 组件编辑态：只允许插槽及插槽内容进入选区（白名单），本体与其它节点一律不选。
+      if (componentEditingRef.current && !componentEditTargetOk(hit)) {
+        clearClimbTimer();
+        climbAnchorIdRef.current = null;
         return;
       }
       if (hitId !== climbAnchorIdRef.current) {
@@ -999,7 +1094,7 @@ export function PreviewPage() {
       }
       clearClimbTimer();
       const widget = canvasHit(event.target);
-      const widgetId = widget?.dataset.widgetId ?? null;
+      const widgetId = toRawWidgetId(widget?.dataset.widgetId);
       if (!widgetId || !widget) {
         return;
       }
@@ -1015,15 +1110,15 @@ export function PreviewPage() {
       });
     }
 
-    /** 滚轮落在还能滚动的滚动容器上时，交给容器，不缩放画布。 */
-    function wheelTargetsScroll(event: WheelEvent) {
+    /** 返回滚轮命中的、还能滚动的滚动容器视图；否则返回 null。 */
+    function wheelScrollView(event: WheelEvent): HTMLElement | null {
       const node = event.target;
       if (!(node instanceof Element)) {
-        return false;
+        return null;
       }
       const view = node.closest('.lowcode-scroll-view, .lowcode-page-scroll');
       if (!(view instanceof HTMLElement) || view.closest('.lowcode-scroll')?.classList.contains('is-scroll-open')) {
-        return false;
+        return null;
       }
       const style = window.getComputedStyle(view);
       const canAxis = (overflow: string, delta: number, pos: number, scrollSize: number, clientSize: number) => {
@@ -1035,12 +1130,24 @@ export function PreviewPage() {
       return (
         canAxis(style.overflowY, event.deltaY, view.scrollTop, view.scrollHeight, view.clientHeight) ||
         canAxis(style.overflowX, event.deltaX, view.scrollLeft, view.scrollWidth, view.clientWidth)
-      );
+      )
+        ? view
+        : null;
     }
 
-    /** onWheel：滚轮缩放，回传父页。编辑时表格不滚动；滚动容器仍可滚动。预览里页面自己滚，不改画布缩放。 */
+    /** onWheel：按住 Ctrl/Cmd 时禁用画布缩放，命中滚动容器则滚动容器；否则普通滚轮缩放画布。预览态页面自己滚，不改画布缩放。 */
     function onWheel(event: WheelEvent) {
-      if (!editingRef.current || wheelTargetsScroll(event)) {
+      if (!editingRef.current) {
+        return;
+      }
+      if (event.ctrlKey || event.metaKey) {
+        // Ctrl/Cmd + 滚轮：拦截浏览器缩放；命中滚动容器则滚动容器，否则吞掉事件，不做任何缩放。
+        event.preventDefault();
+        const view = wheelScrollView(event);
+        if (view) {
+          view.scrollTop += event.deltaY;
+          view.scrollLeft += event.deltaX;
+        }
         return;
       }
       event.preventDefault();
@@ -1564,6 +1671,7 @@ export function PreviewPage() {
           hostTableEditing ? 'is-table-editing' : '',
           hostScrollEditing ? 'is-scroll-editing' : '',
           hostSwiperEditing ? 'is-swiper-editing' : '',
+          hostComponentEditing ? 'is-component-editing' : '',
           hostRef.current?.classList.contains('is-select-faded') ? 'is-select-faded' : '',
         ]
           .filter(Boolean)

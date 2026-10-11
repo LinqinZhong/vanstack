@@ -9,7 +9,6 @@ import {
   DragOutlined,
   EditOutlined,
   ExpandOutlined,
-  EyeOutlined,
   HighlightOutlined,
   ItalicOutlined,
   PictureOutlined,
@@ -21,7 +20,7 @@ import {
   StrikethroughOutlined,
   UnderlineOutlined,
 } from '@ant-design/icons';
-import { Button, ColorPicker, ConfigProvider, Input, InputNumber, Modal, Select, Switch, theme, Tooltip } from 'antd';
+import { Button, ColorPicker, ConfigProvider, Dropdown, Input, InputNumber, Modal, Select, Switch, theme, Tooltip } from 'antd';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -48,7 +47,6 @@ import {
   isCopyBinding,
   hasWidgetEvents,
   isLoopConfigured,
-  isPresenceConfigured,
   isStateFnConfigured,
   widgetEventSpecs,
   sanitizeWidgetStyle,
@@ -80,7 +78,13 @@ import { StyleBoxEdges, pxFromLength } from './StyleBoxEdges';
 import { AngleField, SizeField, fontFamilyOptions } from './WidgetStyleFields';
 import { WidgetEventPanel } from './WidgetEventPanel';
 import { WidgetLoopPanel } from './WidgetLoopPanel';
-import { WidgetPresenceModal, type WidgetPresenceDraft } from './WidgetPresenceModal';
+import {
+  PresenceEyeIcon,
+  WIDGET_PRESENCE_LABEL_KEYS,
+  WIDGET_PRESENCES,
+  presenceFromWidget,
+  type WidgetPresence,
+} from './WidgetPresence';
 import { WidgetStateFnModal } from './WidgetStateFnModal';
 import { compactDrawerStyle, drawerRadiusKeys, drawerRadiusValue, drawerSizeAxis } from '../widgets/drawer';
 import { modifierShortcutLabel } from '../utils/widgetShortcuts';
@@ -119,6 +123,10 @@ export type TableBubbleModel = {
 
 export function isBoxGroupAllowed(type: PageWidget['type'], group: BoxGroup) {
   if (type === 'drawer' && (group === 'margin' || group === 'rotate' || group === 'loop')) {
+    return false;
+  }
+  if (type === 'slot' && (group === 'radius' || group === 'border' || group === 'rotate')) {
+    // 插槽只是内容挂载点：不提供圆角/边框/旋转样式（颜色按钮也已单独隐藏）。
     return false;
   }
   if (group === 'loop' || group === 'events') {
@@ -483,7 +491,7 @@ export function WidgetStyleBubble({
   onPlaceChange?: (place: DrawerPlace) => void;
   onEventsChange?: (events: PageWidget['events']) => void;
   onStateFnChange?: (stateFn: string | undefined, hoverStateId?: string) => void;
-  onPresenceChange?: (next: WidgetPresenceDraft) => void;
+  onPresenceChange?: (next: WidgetPresence) => void;
   onOpenInspector: () => void;
   onScrollChange?: (axis: 'scrollX' | 'scrollY', enabled: boolean) => void;
   i18nCatalog?: PageI18n;
@@ -543,10 +551,12 @@ export function WidgetStyleBubble({
         : '';
   const contentKey = widget.type === 'button' || widget.type === 'checkbox' ? 'text' : 'value';
   const contentInherited = Boolean(ownKeys && !ownKeys.has(contentKey) && content);
+  const presenceInheritedClass = Boolean(ownKeys && !ownKeys.has('presence') && presenceFromWidget(widget) !== 'visible')
+    ? 'widget-style-inherited'
+    : undefined;
   const [textShadow, setTextShadow] = useState(() => parseCssShadow(display.textShadow));
   const [openPopup, setOpenPopup] = useState<string | null>(null);
   const [stateFnOpen, setStateFnOpen] = useState(false);
-  const [presenceOpen, setPresenceOpen] = useState(false);
 
   const onToolbarPopupChangeRef = useRef(onToolbarPopupChange);
   onToolbarPopupChangeRef.current = onToolbarPopupChange;
@@ -834,7 +844,7 @@ export function WidgetStyleBubble({
               </Tooltip>
             </>
           ) : null}
-          {widget.type !== 'tr' ? (
+          {widget.type !== 'tr' && widget.type !== 'slot' ? (
             <ColorIconPicker
               title={t('lowcode.styleBackground')}
               kind="fill"
@@ -923,14 +933,32 @@ export function WidgetStyleBubble({
             </Tooltip>
           ) : null}
           {widget.type !== 'drawer' && onPresenceChange ? (
-            <Tooltip title={t('lowcode.presenceTitle')}>
+            <Dropdown
+              trigger={['click']}
+              disabled={disabled}
+              menu={{
+                items: WIDGET_PRESENCES.map((value) => ({
+                  key: value,
+                  label: t(`lowcode.${WIDGET_PRESENCE_LABEL_KEYS[value]}`),
+                })),
+                selectable: true,
+                selectedKeys: [presenceFromWidget(widget)],
+                onClick: ({ key }) => {
+                  if (key === presenceFromWidget(widget)) {
+                    return;
+                  }
+                  onPresenceChange(key as WidgetPresence);
+                },
+              }}
+            >
               <Button
                 size="small"
-                type={isPresenceConfigured(widget) ? 'primary' : 'text'}
-                icon={<EyeOutlined />}
-                onClick={() => setPresenceOpen(true)}
+                title={t('lowcode.presenceTitle')}
+                type={presenceFromWidget(widget) === 'visible' ? 'text' : 'primary'}
+                className={presenceInheritedClass}
+                icon={<PresenceEyeIcon presence={presenceFromWidget(widget)} />}
               />
-            </Tooltip>
+            </Dropdown>
           ) : null}
           {onStateFnChange ? (
             <Tooltip title={t('lowcode.styleState')}>
@@ -1519,20 +1547,6 @@ export function WidgetStyleBubble({
               />
             ) : null}
           </div>
-        ) : null}
-        {onPresenceChange ? (
-          <WidgetPresenceModal
-            open={presenceOpen}
-            widget={widget}
-            variables={variables ?? []}
-            props={componentProps}
-            disabled={disabled}
-            onCancel={() => setPresenceOpen(false)}
-            onChange={(next) => {
-              onPresenceChange(next);
-              setPresenceOpen(false);
-            }}
-          />
         ) : null}
         {onStateFnChange ? (
           <WidgetStateFnModal

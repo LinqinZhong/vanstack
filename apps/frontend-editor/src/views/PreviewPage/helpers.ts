@@ -3,6 +3,45 @@ import { syncWidgetChrome } from '../../utils/spacingGuides';
 import type { BoxDragKind, SpacingEdge } from '../../utils/spacingDrag';
 import type { RotateAxis } from '../../utils/rotateDrag';
 
+/**
+ * 组件实例插槽内容的运行时节点会被加前缀：`组件id__slot-插槽id__真实id`，
+ * 编辑器（控件树/选中/数据）只认控件自身的真实 id，这里在画布边界做双向桥接。
+ * 注意：模板虚拟节点是 `组件id__模板id`，不含 `slot-` 段，不会被剥离。
+ */
+const SLOT_CONTENT_ID_RE = /^.+?__slot-[A-Za-z0-9]+__(.+)$/;
+
+/** 把运行时带前缀的插槽内容节点 id 还原成真实控件 id；其他 id 原样返回。 */
+export function toRawWidgetId(id: string | null | undefined): string | null {
+  if (!id) {
+    return null;
+  }
+  const matched = SLOT_CONTENT_ID_RE.exec(id);
+  return matched ? matched[1] : id;
+}
+
+/** 判断运行时节点 id 与编辑器使用的真实 id 是否指向同一控件。 */
+export function widgetIdEquals(domId: string | null | undefined, rawId: string | null | undefined): boolean {
+  if (!domId || !rawId) {
+    return false;
+  }
+  return domId === rawId || toRawWidgetId(domId) === rawId;
+}
+
+/** 按真实 id 查找画布节点；插槽内容节点带前缀时用 `__真实id` 后缀兜底。 */
+export function resolveWidgetNode(
+  root: ParentNode | null | undefined,
+  widgetId: string | null | undefined,
+): HTMLElement | null {
+  if (!root || !widgetId) {
+    return null;
+  }
+  const exact = root.querySelector<HTMLElement>(`[data-widget-id="${CSS.escape(widgetId)}"]`);
+  if (exact) {
+    return exact;
+  }
+  return root.querySelector<HTMLElement>(`[data-widget-id$="__${CSS.escape(widgetId)}"]`);
+}
+
 /** paintPreviewCamera：按平移/缩放把预览相机画到正确位置。 */
 export function paintPreviewCamera(
   camera: HTMLElement | null,
@@ -157,7 +196,7 @@ export function clearLiveInlineStyles(root: HTMLElement | null) {
 
 /** applyLiveWidgetCss：父页推送的即时样式写到 DOM，拖拽过程中不必整页重渲。 */
 export function applyLiveWidgetCss(root: HTMLElement | null, widgetId: string, css: Record<string, string>) {
-  const node = root?.querySelector<HTMLElement>(`[data-widget-id="${CSS.escape(widgetId)}"]`);
+  const node = resolveWidgetNode(root, widgetId);
   if (!node) {
     return false;
   }
@@ -272,7 +311,7 @@ export function applyWidgetState(
     return;
   }
   for (const node of root.querySelectorAll<HTMLElement>('[data-widget-id]')) {
-    const selected = node.dataset.widgetId === selectedId;
+    const selected = widgetIdEquals(node.dataset.widgetId, selectedId);
     node.classList.toggle('is-widget-selected', selected);
     node.classList.toggle('is-spacing-drag', Boolean(spacingDrag) && selected);
   }
@@ -302,22 +341,22 @@ export function paintWidgetChrome(
   syncWidgetChrome(host, hover, selected, zoom);
 }
 
-/** widgetIdFromTarget：从事件目标向上找到控件 id。 */
+/** widgetIdFromTarget：从事件目标向上找到控件 id（插槽内容还原为真实 id）。 */
 export function widgetIdFromTarget(target: EventTarget | null) {
   if (!(target instanceof Element)) {
     return null;
   }
   const widget = target.closest('[data-widget-id]');
-  return widget instanceof HTMLElement ? (widget.dataset.widgetId ?? null) : null;
+  return widget instanceof HTMLElement ? toRawWidgetId(widget.dataset.widgetId) : null;
 }
 
 export const FOCUS_DBLCLICK_MS = 300;
 
 /** parentWidgetId：取控件在树中的父控件 id。 */
 export function parentWidgetId(root: HTMLElement | null, id: string) {
-  const node = root?.querySelector(`[data-widget-id="${CSS.escape(id)}"]`);
+  const node = resolveWidgetNode(root, id);
   const parent = node?.parentElement?.closest('[data-widget-id]');
-  return parent instanceof HTMLElement ? (parent.dataset.widgetId ?? null) : null;
+  return parent instanceof HTMLElement ? toRawWidgetId(parent.dataset.widgetId) : null;
 }
 
 /** focusModifier：Ctrl/Cmd，用于选中上钻与双击聚焦。 */

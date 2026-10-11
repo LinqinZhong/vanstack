@@ -5,6 +5,8 @@ export type BindingScope = {
   props?: Record<string, unknown>;
   query?: Record<string, unknown>;
   aliases?: Record<string, unknown>;
+  /** 组件插槽参数。插槽内容里用 `$slot.参数名` 读取。 */
+  slot?: Record<string, unknown>;
 };
 
 const EXPR_BINDING = /^\s*\$\(([\s\S]*)\)\s*$/;
@@ -39,7 +41,7 @@ export function bindingToString(value: unknown): string {
   }
 }
 
-const BINDING_PARAMS = new Set(['data', '$data', 'props', '$props', 'query', '$query']);
+const BINDING_PARAMS = new Set(['data', '$data', 'props', '$props', 'query', '$query', 'slot', '$slot']);
 
 export function evaluateBindingExpression(expr: string, scope: BindingScope): unknown {
   const aliases = scope.aliases ?? {};
@@ -47,15 +49,19 @@ export function evaluateBindingExpression(expr: string, scope: BindingScope): un
   const values = names.map((name) => aliases[name]);
   const props = scope.props ?? {};
   const query = scope.query ?? {};
-  return new Function('data', '$data', 'props', '$props', 'query', '$query', ...names, `"use strict"; return (${expr});`)(
-    scope.data,
-    scope.data,
-    props,
-    props,
-    query,
-    query,
-    ...values,
-  );
+  const slot = scope.slot ?? {};
+  return new Function(
+    'data',
+    '$data',
+    'props',
+    '$props',
+    'query',
+    '$query',
+    'slot',
+    '$slot',
+    ...names,
+    `"use strict"; return (${expr});`,
+  )(scope.data, scope.data, props, props, query, query, slot, slot, ...values);
 }
 
 function aliasValue(scope: BindingScope, dollarName: string, plainName: string): unknown {
@@ -73,6 +79,7 @@ export function evaluateStateFunction(body: string, scope: BindingScope): unknow
     '$index',
     '$props',
     '$query',
+    '$slot',
     `"use strict";\n${body}`,
   )(
     scope.data,
@@ -80,6 +87,7 @@ export function evaluateStateFunction(body: string, scope: BindingScope): unknow
     aliasValue(scope, '$index', 'index'),
     scope.props ?? {},
     scope.query ?? {},
+    scope.slot ?? {},
   );
 }
 
@@ -95,6 +103,11 @@ export function readPresenceFlag(body: string | undefined, scope: BindingScope):
   } catch {
     return true;
   }
+}
+
+/** 是否来自「存在与显示」下拉选择的固定隐藏体（removed/hidden/occupy）。编辑态可安全地据此隐藏，无需真实求值。 */
+export function isPresenceFalseBody(body: string | undefined): boolean {
+  return body?.trim() === 'return false';
 }
 
 export function resolveStateFnId(widget: PageWidget, scope?: BindingScope): string | null {
@@ -159,8 +172,15 @@ export function resolveCopyValue(raw: string, scope: BindingScope): unknown {
   const head = pathMatch[1];
   const parts = pathMatch[2] ? pathMatch[2].slice(1).split('.').filter(Boolean) : [];
   try {
-    if (head === 'data' || head === 'props' || head === 'query') {
-      const root = head === 'props' ? (scope.props ?? {}) : head === 'query' ? (scope.query ?? {}) : scope.data;
+    if (head === 'data' || head === 'props' || head === 'query' || head === 'slot') {
+      const root =
+        head === 'props'
+          ? (scope.props ?? {})
+          : head === 'query'
+            ? (scope.query ?? {})
+            : head === 'slot'
+              ? (scope.slot ?? {})
+              : scope.data;
       if (parts.length === 0) {
         return root;
       }

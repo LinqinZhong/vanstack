@@ -1,5 +1,5 @@
 import type { TreeDataNode } from 'antd';
-import type { PageWidget, WidgetStateDelta } from '@vanstack/xml';
+import type { ComponentSlot, PageWidget, WidgetStateDelta } from '@vanstack/xml';
 import { acceptsChild, cloneWidgetByType, widgetHelpers } from '../widgets';
 import { createSwiperItem } from '../widgets/swiper-item';
 import { createWindow } from '../widgets/window';
@@ -56,6 +56,13 @@ export function collectTreeStateIds(widgets: PageWidget[]): Set<string> {
     if ('children' in widget) {
       for (const child of widget.children) {
         visitWidget(child);
+      }
+    }
+    if (widget.type === 'component' && widget.slotContent) {
+      for (const group of Object.values(widget.slotContent)) {
+        for (const child of group) {
+          visitWidget(child);
+        }
       }
     }
   };
@@ -652,4 +659,337 @@ export function toWidgetTreeData(
     title: labelOf(widget),
     children: hasChildren(widget) ? toWidgetTreeData(widget.children, labelOf) : undefined,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// 组件插槽：声明修复、组件实例 slotContent 的读写、编辑组件时的虚拟控件树
+// ---------------------------------------------------------------------------
+
+const SLOT_ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
+const SLOT_ID_BODY_LENGTH = 10;
+
+export function generateSlotId(): string {
+  let body = '';
+  const cryptoObj = globalThis.crypto;
+  if (cryptoObj?.getRandomValues) {
+    const bytes = new Uint8Array(SLOT_ID_BODY_LENGTH);
+    cryptoObj.getRandomValues(bytes);
+    for (const byte of bytes) {
+      body += SLOT_ID_ALPHABET[byte % SLOT_ID_ALPHABET.length];
+    }
+  } else {
+    for (let i = 0; i < SLOT_ID_BODY_LENGTH; i += 1) {
+      body += SLOT_ID_ALPHABET[Math.floor(Math.random() * SLOT_ID_ALPHABET.length)];
+    }
+  }
+  return `s${body}`;
+}
+
+/** 收集组件模板内的全部插槽控件。 */
+export function collectTemplateSlots(widgets: PageWidget[]): Array<Extract<PageWidget, { type: 'slot' }>> {
+  const result: Array<Extract<PageWidget, { type: 'slot' }>> = [];
+  const walk = (list: PageWidget[]) => {
+    for (const widget of list) {
+      if (widget.type === 'slot') {
+        result.push(widget);
+      }
+      if (hasChildren(widget)) {
+        walk(widget.children);
+      }
+    }
+  };
+  walk(widgets);
+  return result;
+}
+
+/**
+ * 组件文档加载时修复插槽：给未绑定 slotId 的插槽控件生成声明，保证每个插槽都能被页面使用方定位。
+ */
+export function healComponentSlots(
+  widgets: PageWidget[],
+  slots: ComponentSlot[],
+): { widgets: PageWidget[]; slots: ComponentSlot[] } {
+  const declared = new Map(slots.map((slot) => [slot.id, slot]));
+  let nextSlots = slots;
+  let changed = false;
+
+  const walk = (list: PageWidget[], parent?: PageWidget): PageWidget[] =>
+    list.map((widget) => {
+      let next = widget;
+      if (widget.type === 'slot') {
+        const slotId = widget.slotId && widget.slotId !== 'undefined' ? widget.slotId : '';
+        if (!slotId) {
+          const newId = generateSlotId();
+          declared.set(newId, { id: newId, ...(widget.desc ? { desc: widget.desc } : {}) });
+          nextSlots = [...nextSlots, declared.get(newId)!];
+          next = { ...widget, slotId: newId };
+          changed = true;
+        } else if (!declared.has(slotId)) {
+          // 已有合法 slotId 但缺少声明：保留原 id 并补声明，避免重新生成导致页面 slotContent 断链。
+          declared.set(slotId, { id: slotId, ...(widget.desc ? { desc: widget.desc } : {}) });
+          nextSlots = [...nextSlots, declared.get(slotId)!];
+          changed = true;
+        } else {
+          // 双向同步插槽描述：契约面板编辑声明 desc、属性面板编辑控件 desc，两者需保持一致，
+          // 否则控件树（读控件 desc）与运行时插槽名称（读控件 desc）会拿不到描述。
+          const declaration = declared.get(slotId)!;
+          const widgetDesc = widget.desc?.trim();
+          const declDesc = declaration.desc?.trim();
+          if (declDesc && !widgetDesc) {
+            next = { ...widget, desc: declDesc };
+            changed = true;
+          } else if (widgetDesc && !declDesc) {
+            declared.set(slotId, { ...declaration, desc: widgetDesc });
+            nextSlots = nextSlots.map((item) => (item.id === slotId ? declared.get(slotId)! : item));
+            changed = true;
+          }
+        }
+        // 位置稳定：行向 space-between 容器里的“末尾插槽”用 auto 外边距钉在主轴末端，
+        // 避免前置控件被 existsFn 等条件移除后，插槽从右侧滑到左侧（文档与页面表现不一致）。
+        if (parent?.type === 'flex' && hasChildren(parent) && parent.children[parent.children.length - 1] === widget) {
+          const direction = parent.flex?.flexDirection || 'row';
+          if (parent.flex?.justifyContent === 'space-between' && (direction === 'row' || direction === 'row-reverse')) {
+            const marginKey: 'marginLeft' | 'marginRight' = direction === 'row-reverse' ? 'marginRight' : 'marginLeft';
+            if (!next.style?.[marginKey]) {
+              next = { ...next, style: { ...next.style, [marginKey]: { mode: 'auto' } } } as PageWidget;
+              changed = true;
+            }
+          }
+        }
+      }
+      if (hasChildren(next)) {
+        const children = walk(next.children, next);
+        if (children !== next.children) {
+          next = { ...next, children } as PageWidget;
+          changed = true;
+        }
+      }
+      return next;
+    });
+
+  const nextWidgets = walk(widgets);
+  return changed ? { widgets: nextWidgets, slots: nextSlots } : { widgets, slots };
+}
+
+// -- 组件实例 slotContent 的 -------------------------------------------------
+
+type ComponentWidget = Extract<PageWidget, { type: 'component' }>;
+type SlotWidget = Extract<PageWidget, { type: 'slot' }>;
+
+export type SlotContentLocation = {
+  slotId: string;
+  index: number;
+  widgets: PageWidget[];
+  widget: PageWidget;
+};
+
+/** 在组件实例的 slotContent 中按控件 id 查找。 */
+export function findInSlotContent(component: ComponentWidget, widgetId: string): SlotContentLocation | null {
+  const entries = Object.entries(component.slotContent ?? {});
+  for (const [slotId, widgets] of entries) {
+    const index = widgets.findIndex((item) => item.id === widgetId || containsWidget(item, widgetId));
+    if (index >= 0) {
+      return { slotId, index, widgets, widget: widgets[index] };
+    }
+  }
+  return null;
+}
+
+function containsWidget(root: PageWidget, id: string): boolean {
+  if (root.id === id) {
+    return true;
+  }
+  return hasChildren(root) ? root.children.some((child) => containsWidget(child, id)) : false;
+}
+
+function mapContentGroups(
+  component: ComponentWidget,
+  mapper: (slotId: string, widgets: PageWidget[]) => PageWidget[],
+): ComponentWidget {
+  const current = component.slotContent ?? {};
+  const next: Record<string, PageWidget[]> = {};
+  for (const [slotId, widgets] of Object.entries(current)) {
+    const mapped = mapper(slotId, widgets);
+    if (mapped.length > 0) {
+      next[slotId] = mapped;
+    }
+  }
+  return { ...component, ...(Object.keys(next).length > 0 ? { slotContent: next } : {}) };
+}
+
+/** 向某个插槽追加（或在指定控件之后插入）控件。 */
+export function insertSlotContentWidget(
+  component: ComponentWidget,
+  slotId: string,
+  widget: PageWidget,
+  afterId?: string | null,
+): ComponentWidget {
+  const current = component.slotContent ?? {};
+  const group = [...(current[slotId] ?? [])];
+  if (afterId) {
+    const index = group.findIndex((item) => item.id === afterId);
+    if (index >= 0) {
+      group.splice(index + 1, 0, widget);
+    } else {
+      group.push(widget);
+    }
+  } else {
+    group.push(widget);
+  }
+  return { ...component, slotContent: { ...current, [slotId]: group } };
+}
+
+/** 向某个插槽的指定下标插入控件。 */
+export function insertSlotContentWidgetAt(
+  component: ComponentWidget,
+  slotId: string,
+  widget: PageWidget,
+  index: number,
+): ComponentWidget {
+  const current = component.slotContent ?? {};
+  const group = [...(current[slotId] ?? [])];
+  const bounded = Math.max(0, Math.min(index, group.length));
+  group.splice(bounded, 0, widget);
+  return { ...component, slotContent: { ...current, [slotId]: group } };
+}
+
+/** 删除插槽内容控件（及其子树）。 */
+export function removeSlotContentWidget(component: ComponentWidget, widgetId: string): ComponentWidget | null {
+  if (!findInSlotContent(component, widgetId)) {
+    return null;
+  }
+  return mapContentGroups(component, (_slotId, widgets) => {
+    const index = widgets.findIndex((item) => item.id === widgetId);
+    if (index < 0) {
+      return widgets;
+    }
+    return widgets.filter((_, i) => i !== index);
+  });
+}
+
+/** 更新插槽内容控件（含其子树内的控件）。 */
+export function updateSlotContentWidget(
+  component: ComponentWidget,
+  widgetId: string,
+  updater: (widget: PageWidget) => PageWidget,
+): ComponentWidget | null {
+  if (!findInSlotContent(component, widgetId)) {
+    return null;
+  }
+  const apply = (list: PageWidget[]): PageWidget[] =>
+    list.map((widget) => {
+      if (widget.id === widgetId) {
+        return updater(widget);
+      }
+      if (hasChildren(widget) && widget.children.some((child) => containsWidget(child, widgetId))) {
+        return { ...widget, children: apply(widget.children) } as PageWidget;
+      }
+      return widget;
+    });
+  return mapContentGroups(component, (_slotId, widgets) => apply(widgets));
+}
+
+// -- 编辑组件时的虚拟控件树 ---------------------------------------------------
+
+export type WidgetTreeNode = TreeDataNode & { isSlot?: boolean };
+
+export const COMPONENT_INNER_SEPARATOR = '__';
+
+export function virtualInnerId(componentId: string, innerWidgetId: string): string {
+  return `${componentId}${COMPONENT_INNER_SEPARATOR}${innerWidgetId}`;
+}
+
+export function parseVirtualInnerId(componentId: string, key: string): string | null {
+  const prefix = `${componentId}${COMPONENT_INNER_SEPARATOR}`;
+  return key.startsWith(prefix) ? key.slice(prefix.length) : null;
+}
+
+function findTemplateNode(widgets: PageWidget[], innerId: string): PageWidget | null {
+  for (const widget of widgets) {
+    if (widget.id === innerId) {
+      return widget;
+    }
+    if (hasChildren(widget)) {
+      const nested = findTemplateNode(widget.children, innerId);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+  return null;
+}
+
+function contentTreeData(
+  widgets: PageWidget[],
+  labelOf: (widget: PageWidget) => string,
+): WidgetTreeNode[] {
+  return widgets.map((widget) => ({
+    key: widget.id,
+    title: labelOf(widget),
+    children: hasChildren(widget) ? contentTreeData(widget.children, labelOf) : undefined,
+  }));
+}
+
+/**
+ * 组件编辑态只直接展示模板里的插槽节点（拍平嵌套层级，隐藏弹性盒/图标/文本等内部结构），
+ * 插槽节点下挂该实例 slotContent 的真实控件。插槽名称取插槽控件自身的 desc，缺省时回退到声明 desc。
+ */
+function virtualSlotsTreeData(
+  template: PageWidget[],
+  componentId: string,
+  slotContent: Record<string, PageWidget[]>,
+  slotDescMap: Map<string, string>,
+  labelOf: (widget: PageWidget) => string,
+): WidgetTreeNode[] {
+  return collectTemplateSlots(template).map((widget) => {
+    let title = labelOf(widget);
+    if (!widget.desc?.trim()) {
+      const declarationDesc = slotDescMap.get(widget.slotId)?.trim();
+      if (declarationDesc) {
+        title = `${title} · ${declarationDesc}`;
+      }
+    }
+    return {
+      key: virtualInnerId(componentId, widget.id),
+      title,
+      selectable: true,
+      isSlot: true,
+      children: contentTreeData(slotContent[widget.slotId] ?? [], labelOf),
+    };
+  });
+}
+
+/**
+ * 编辑组件实例时，把控件树中该组件节点的子节点替换为拍平的插槽虚拟节点，
+ * 插槽节点下挂该实例 slotContent 的真实控件。
+ */
+export function withComponentVirtualTree(
+  treeData: WidgetTreeNode[],
+  componentId: string,
+  template: PageWidget[],
+  slotContent: Record<string, PageWidget[]>,
+  slots: ComponentSlot[],
+  labelOf: (widget: PageWidget) => string,
+): WidgetTreeNode[] {
+  const slotDescMap = new Map(slots.map((slot) => [slot.id, slot.desc ?? '']));
+  return treeData.map((node) => {
+    if (node.key === componentId) {
+      return {
+        ...node,
+        children: virtualSlotsTreeData(template, componentId, slotContent, slotDescMap, labelOf),
+      };
+    }
+    if (node.children) {
+      return {
+        ...node,
+        children: withComponentVirtualTree(node.children, componentId, template, slotContent, slots, labelOf),
+      };
+    }
+    return node;
+  });
+}
+
+export function findTemplateSlot(template: PageWidget[], innerId: string): SlotWidget | null {
+  const node = findTemplateNode(template, innerId);
+  return node && node.type === 'slot' ? node : null;
 }

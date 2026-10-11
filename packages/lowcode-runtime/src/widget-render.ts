@@ -20,6 +20,11 @@ export type WidgetHoverHandlers = {
   onMouseLeave: () => void;
 };
 
+export type WidgetViewing =
+  | Array<{ ownerId: string; state: string | null }>
+  | { ownerId: string; state: string | null }
+  | null;
+
 export type WidgetRenderContext = {
   editing: boolean;
   tableLayout?: boolean;
@@ -56,6 +61,10 @@ export type WidgetRenderContext = {
   componentStack?: string[];
   /** 编辑其它组件时，内部实例使用组件自己的测试数据。 */
   useComponentTestData?: boolean;
+  /** 是否正处于组件编辑态：仅此时渲染插槽名称/占位 chrome。 */
+  slotChrome?: boolean;
+  /** 状态查看/切换（含组件内部 prefixed 宿主）。组件/slot 内部求值会透传它。 */
+  viewing?: WidgetViewing;
   /** 图标路径 `分组.名称` 到文件地址。 */
   icons?: Readonly<Record<string, string>>;
   /** 编辑态根上的抽屉序号。缺省表示这个抽屉不在页面根上。 */

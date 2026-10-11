@@ -1,4 +1,4 @@
-import { compactComponentArgs, type PageWidget } from '@vanstack/xml';
+import { compactComponentArgs, compactComponentSlotArgs, type PageWidget } from '@vanstack/xml';
 import { applyCommon, cloneItemField, cloneShared } from './common';
 import type { WidgetHelperInterface } from './types';
 
@@ -25,6 +25,16 @@ export const componentHelper = {
       componentKey: widget.componentKey,
       name: widget.name,
       ...(widget.args ? { args: { ...widget.args } } : {}),
+      ...(widget.slotArgs
+        ? { slotArgs: Object.fromEntries(Object.entries(widget.slotArgs).map(([key, value]) => [key, { ...value }])) }
+        : {}),
+      ...(widget.slotContent
+        ? {
+            slotContent: Object.fromEntries(
+              Object.entries(widget.slotContent).map(([key, widgets]) => [key, widgets.map((item) => ctx.cloneChild(item))]),
+            ),
+          }
+        : {}),
       ...(widget.editProps ? { editProps: true } : {}),
       ...cloneShared(widget, ctx.stateIdMap),
       ...cloneItemField(widget),
@@ -38,6 +48,14 @@ export const componentHelper = {
         next.args = args;
       } else {
         delete next.args;
+      }
+    }
+    if ('slotArgs' in patch) {
+      const slotArgs = compactComponentSlotArgs(patch.slotArgs);
+      if (slotArgs) {
+        next.slotArgs = slotArgs;
+      } else {
+        delete next.slotArgs;
       }
     }
     if ('editProps' in patch) {

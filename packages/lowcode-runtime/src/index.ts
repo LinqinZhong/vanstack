@@ -31,6 +31,8 @@ export type RenderPageXmlOptions = {
   components?: Record<string, PageXmlDocument>;
   centerContent?: boolean;
   useComponentTestData?: boolean;
+  /** 组件编辑态：仅此时渲染组件实例内的插槽 chrome。 */
+  slotChrome?: boolean;
   icons?: Readonly<Record<string, string>>;
   /** 变化时整页重挂，清掉预览里改过的数据和控件状态。 */
   previewEpoch?: number;
@@ -96,6 +98,7 @@ export function renderPage(
       components: options?.components,
       centerContent: options?.centerContent,
       useComponentTestData: options?.useComponentTestData,
+      slotChrome: options?.slotChrome,
       icons: options?.icons,
       onCommit: options?.onCommit,
     });

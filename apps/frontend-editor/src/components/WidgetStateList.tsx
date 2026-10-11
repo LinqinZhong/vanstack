@@ -9,6 +9,7 @@ type WidgetStateListProps = {
   viewingOwnerId: string | null;
   viewingState: string | null;
   usedIds: ReadonlySet<string>;
+  readOnly?: boolean;
   onSelect: (row: VisibleWidgetState) => void;
   onCreate: (id: string, name: string, from: VisibleWidgetState, transition?: number) => void;
   onEdit: (from: VisibleWidgetState, name: string | null, transition?: number) => void;
@@ -38,6 +39,7 @@ export function WidgetStateList({
   viewingOwnerId,
   viewingState,
   usedIds,
+  readOnly,
   onSelect,
   onCreate,
   onEdit,
@@ -132,7 +134,7 @@ export function WidgetStateList({
 
   function renderNode(row: VisibleWidgetState, depth: number) {
     const viewingThis = isViewingRow(row, viewingOwnerId, viewingState);
-    const menuItems = menuFor(row);
+    const menuItems = readOnly ? [] : menuFor(row);
     const branch = Boolean(row.children?.length);
     const expanded = branch && !collapsed[rowKey(row)];
     const rowBody = (
@@ -213,20 +215,22 @@ export function WidgetStateList({
     >
       <div className="canvas-state-list-title">{t('lowcode.states')}</div>
       <ul className="canvas-state-list-items">{items.map((row) => renderNode(row, 0))}</ul>
-      <Button
-        size="small"
-        type="text"
-        icon={<PlusOutlined />}
-        className="canvas-state-list-add"
-        onClick={() => {
-          const rootInitial = items.find((row) => row.owned && row.id == null && !row.scopeId) ?? items[0];
-          if (rootInitial) {
-            openCreate(rootInitial);
-          }
-        }}
-      >
-        {t('lowcode.stateAdd')}
-      </Button>
+      {!readOnly ? (
+        <Button
+          size="small"
+          type="text"
+          icon={<PlusOutlined />}
+          className="canvas-state-list-add"
+          onClick={() => {
+            const rootInitial = items.find((row) => row.owned && row.id == null && !row.scopeId) ?? items[0];
+            if (rootInitial) {
+              openCreate(rootInitial);
+            }
+          }}
+        >
+          {t('lowcode.stateAdd')}
+        </Button>
+      ) : null}
       <Modal
         open={createOpen}
         title={t('lowcode.stateCreateTitle')}

@@ -18,6 +18,7 @@ export const WIDGET_KINDS = [
   'tr',
   'td',
   'component',
+  'slot',
 ] as const;
 
 export type WidgetKind = (typeof WIDGET_KINDS)[number];

@@ -6,6 +6,7 @@ import {
   type BoxLength,
   type ComponentEmit,
   type ComponentProp,
+  type ComponentSlot,
   type PageMethod,
   type PageStyle,
   type PageTestData,
@@ -35,6 +36,7 @@ export type HistoryEntry = {
   pageEvents?: WidgetEvents;
   pageMethods: PageMethod[];
   componentProps: ComponentProp[];
+  componentSlots: ComponentSlot[];
   pageQuery: ComponentProp[];
   componentEmits: ComponentEmit[];
   testData?: PageTestData;

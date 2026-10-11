@@ -39,7 +39,15 @@ export function renderSlot(
     return null;
   }
   const isEmpty = showChrome && !hasContent;
-  const slotName = showChrome ? widget.desc?.trim() : '';
+  // 占位符语义：插槽不是容器，只是占位符。组件定义里给插槽设置的尺寸只有一个作用——
+  // 标示占位符的大小（仅组件编辑态的空插槽使用）。插槽被添加元素后占位符即被内容
+  // 直接替换：插槽盒子 display:contents 完全消失，子元素直接成为插槽父级的子项参与
+  // 布局（flex item / 普通流），元素大小只由元素自身决定，与插槽定义无关。
+  // 插槽 DOM 仍保留 data-state / class 等结构属性：状态 CSS 用后代选择器级联，
+  // display:contents 不影响后代匹配；visibility 可经它继承，display:none 仍移除整棵子树。
+  const ownStyleCss = isEmpty ? dynamicStyleCss(widget.style, options) : undefined;
+  const itemCss = isEmpty ? flexItemCss(widget.item, options) : undefined;
+  const slotName = showChrome && isEmpty ? widget.desc?.trim() : '';
   const plugIcon = showChrome && isEmpty
     ? createElement('svg', { key: 'slot-plug', width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'rgba(0,0,0,0.35)', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
         createElement('path', { d: 'M9 2v6' }),
@@ -48,17 +56,18 @@ export function renderSlot(
         createElement('path', { d: 'M12 17v5' }),
       )
     : null;
-  // 空插槽：名称跟在插头图标下方；有内容：名称做成左上角浮标，不挡内容点击。
+  // 名称标签只服务于空占位符（跟在插头图标下方）；插槽被内容替换后不再渲染，
+  // 否则 display:contents 下它会变成插槽父级的一个布局子项。
   const nameTag = slotName
     ? createElement(
         'span',
-        { key: 'slot-name', className: isEmpty ? 'lowcode-slot-name is-empty' : 'lowcode-slot-name' },
+        { key: 'slot-name', className: 'lowcode-slot-name is-empty' },
         slotName,
       )
     : null;
   const body: Array<ReactElement | null> = isEmpty
     ? ([plugIcon, nameTag].filter(Boolean) as ReactElement[])
-    : [...children, ...(nameTag ? [nameTag] : [])];
+    : children;
   return createElement(
     'div',
     {
@@ -68,24 +77,32 @@ export function renderSlot(
       'data-widget-type': 'slot',
       'data-slot-id': widget.slotId,
       'data-state': widgetStateAttr(widget, ctx),
-      style: mergeCss(
-        {
-          display: 'flex',
-          flexDirection: 'column',
-          boxSizing: 'border-box',
-          maxWidth: '100%',
-          ...(isEmpty ? { alignItems: 'center', justifyContent: 'center' } : {}),
-        },
-        dynamicStyleCss(widget.style, options),
-        flexItemCss(widget.item, options),
-        widget.item?.flexShrink == null ? { flexShrink: 0 } : undefined,
-        widget.style?.height == null ? { minHeight: 'min-content' } : undefined,
-        hiddenCss(widget.hidden, ctx.editing),
-        presenceCss(widget, options),
-        // 空插槽仅显示插头图标（16px），尺寸过小无法点选；仅在组件编辑态（此时才 isEmpty）出现。
-        // 给最小可点击尺寸，参照 component.ts 空组件 minHeight: '72px' 的模式。
-        isEmpty ? { background: 'rgba(0, 0, 0, 0.06)', minHeight: '72px', minWidth: '72px' } : undefined,
-      ),
+      style: isEmpty
+        ? mergeCss(
+            {
+              display: 'flex',
+              flexDirection: 'column',
+              boxSizing: 'border-box',
+              maxWidth: '100%',
+              alignItems: 'center',
+              justifyContent: 'center',
+            },
+            ownStyleCss,
+            itemCss,
+            widget.item?.flexShrink == null ? { flexShrink: 0 } : undefined,
+            widget.style?.height == null ? { minHeight: 'min-content' } : undefined,
+            hiddenCss(widget.hidden, ctx.editing),
+            presenceCss(widget, options),
+            // 空插槽仅显示插头图标（16px），尺寸过小无法点选；仅在组件编辑态（此时才 isEmpty）出现。
+            // 给最小可点击尺寸，参照 component.ts 空组件 minHeight: '72px' 的模式。
+            { background: 'rgba(0, 0, 0, 0.06)', minHeight: '72px', minWidth: '72px' },
+          )
+        : mergeCss(
+            // 占位符已被内容替换：插槽不生成盒子，只做状态/隐藏语义的透传节点。
+            { display: 'contents' },
+            hiddenCss(widget.hidden, ctx.editing),
+            presenceCss(widget, options),
+          ),
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,
     },

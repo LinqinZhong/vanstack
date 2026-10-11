@@ -1430,7 +1430,8 @@ export function ProjectEditorPage() {
   }, [canvasSettling, mode, settleArm]);
 
   useEffect(() => {
-    // 组件编辑态下，选中插槽/插槽内容时默认回到该控件的默认状态。
+    // 组件编辑态下，选中插槽/插槽内容时：该宿主首次选中则处于默认状态，
+    // 已有的查看状态（如插槽的 a 状态）必须保留——选中其子元素时插槽仍处于 a。
     if (componentEditId) {
       const virtual = resolveVirtualSelection(selectedWidgetId);
       let ownerId: string | null = null;
@@ -1442,9 +1443,15 @@ export function ProjectEditorPage() {
         ownerId = componentEditId;
       }
       if (ownerId !== null) {
+        const prev = viewingByOwnerRef.current;
+        const stateId = Object.prototype.hasOwnProperty.call(prev, ownerId) ? prev[ownerId] : null;
         setViewingOwnerId(ownerId);
-        setViewingState(null);
-        setViewingByOwner((prev) => ({ ...prev, [ownerId]: null }));
+        setViewingState(stateId);
+        if (!Object.prototype.hasOwnProperty.call(prev, ownerId)) {
+          setViewingByOwner((current) =>
+            Object.prototype.hasOwnProperty.call(current, ownerId) ? current : { ...current, [ownerId]: null },
+          );
+        }
       }
       return;
     }

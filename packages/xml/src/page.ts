@@ -3614,7 +3614,6 @@ function withResolvedFields(
 ): PageWidget {
   let next = applyResolvedProps(widget, fields.props) as PageWidget;
   next = { ...next };
-  copyWidgetRuntimeMeta(widget, next);
   if (fields.style) {
     next.style = fields.style;
   } else {
@@ -3648,6 +3647,10 @@ function withResolvedFields(
   if (duration) {
     next.style = { ...(next.style ?? {}), transition: duration };
   }
+  // 放到最后：applyWidgetPresence（以及未来新增的克隆分支）会重建对象，
+  // 提前复制的 runtime meta（如 slotOverride）会随之丢失，导致插槽内容在
+  // 带 presence 的状态下渲染不出来。
+  copyWidgetRuntimeMeta(widget, next);
   return next;
 }
 

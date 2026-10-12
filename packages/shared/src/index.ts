@@ -237,6 +237,13 @@ export interface UpdateProjectIconGroupInput {
   name: string;
 }
 
+export interface ProjectFontFileDto {
+  name: string;
+  key: string;
+  url: string;
+  size: number;
+}
+
 export interface WidgetEventScriptDto {
   id: string;
   source: string;

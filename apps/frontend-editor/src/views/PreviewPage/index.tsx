@@ -15,6 +15,28 @@ import { applyEditorChromeScale, applyLiveWidgetCss, applyViewport, applyWidgetS
 import { applyLiveTableTrack, readTableTrackPair, syncTableChrome, syncTableReveal, type TableChromeLabels } from './tableChrome';
 import { leafOpenEditor, paintComponentModeButton, paintScrollModeButton, paintSwiperModeButton, syncComponentReveal, syncScrollReveal, syncSwiperReveal, type ComponentChromeLabels, type ScrollChromeLabels, type SwiperChromeLabels } from './scrollChrome';
 
+const FONT_FACES_ID = 'vanstack-preview-fonts';
+
+function applyFontFaces(fonts: Record<string, string>) {
+  let el = document.getElementById(FONT_FACES_ID) as HTMLStyleElement | null;
+  const families = Object.keys(fonts);
+  if (families.length === 0) {
+    if (el) {
+      el.remove();
+    }
+    return;
+  }
+  if (!el) {
+    el = document.createElement('style');
+    el.id = FONT_FACES_ID;
+    document.head.appendChild(el);
+  }
+  el.textContent = families
+    .filter((family) => fonts[family])
+    .map((family) => `@font-face { font-family: '${family}'; src: url('${fonts[family]}'); font-display: swap; }`)
+    .join('\n');
+}
+
 export function PreviewPage() {
   const { t } = useTranslation();
   const mountRef = useRef<HTMLDivElement>(null);
@@ -30,6 +52,7 @@ export function PreviewPage() {
   const viewingStatesRef = useRef('');
   const projectIdRef = useRef<string | null>(null);
   const iconsKeyRef = useRef('{}');
+  const fontsKeyRef = useRef('{}');
   const pageIdRef = useRef<string | null>(null);
   const queryKeyRef = useRef('{}');
   const previewEpochRef = useRef(0);
@@ -371,6 +394,7 @@ export function PreviewPage() {
         catalog,
         projectId,
         icons,
+        fonts,
         pageId,
         query,
         viewingOwnerId,
@@ -401,6 +425,12 @@ export function PreviewPage() {
       const nextProjectId = projectId || null;
       const nextIcons = icons && typeof icons === 'object' ? icons : {};
       const nextIconsKey = JSON.stringify(nextIcons);
+      const nextFonts = fonts && typeof fonts === 'object' ? fonts : {};
+      const nextFontsKey = JSON.stringify(nextFonts);
+      if (nextFontsKey !== fontsKeyRef.current) {
+        fontsKeyRef.current = nextFontsKey;
+        applyFontFaces(nextFonts);
+      }
       const nextPageId = pageId || null;
       const nextQuery =
         query && typeof query === 'object' && !Array.isArray(query) ? query : {};
@@ -415,6 +445,7 @@ export function PreviewPage() {
       const nextScrollEditing = nextEditing && Boolean(scrollEditing);
       const nextSwiperEditing = nextEditing && Boolean(swiperEditing);
       const nextComponentEditing = nextEditing && Boolean(componentEditing);
+      const nextComponentEditId = nextComponentEditing ? componentEditId ?? null : null;
       const shouldRender =
         nextDocumentKey !== documentKeyRef.current ||
         nextComponentsKey !== componentsKeyRef.current ||
@@ -432,7 +463,8 @@ export function PreviewPage() {
         nextPageId !== pageIdRef.current ||
         nextQueryKey !== queryKeyRef.current ||
         nextPreviewEpoch !== previewEpochRef.current ||
-        nextComponentEditing !== componentEditingRef.current;
+        nextComponentEditing !== componentEditingRef.current ||
+        nextComponentEditId !== componentEditIdRef.current;
       editingRef.current = nextEditing;
       tableEditingRef.current = nextTableEditing;
       setHostTableEditing(nextTableEditing);
@@ -575,6 +607,9 @@ export function PreviewPage() {
             !scrollEditingRef.current &&
             !tableEditingRef.current &&
             !swiperEditingRef.current,
+          // 组件编辑态（非组件定义编辑器）：实例内部树与数据解耦，显示只由状态栏选择驱动。
+          componentEditing: componentEditingRef.current,
+          componentEditId: componentEditIdRef.current,
           icons: nextIcons,
           previewEpoch: nextPreviewEpoch,
           onCommit: paintChrome,

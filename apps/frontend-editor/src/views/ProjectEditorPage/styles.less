@@ -701,6 +701,39 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   padding-top: 6px;
 }
 
+.state-fn-langs-item .ant-form-item-label {
+  align-self: flex-start;
+}
+
+.state-fn-langs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.state-fn-langs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.state-fn-langs-name {
+  flex: none;
+  width: 72px;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.state-fn-langs-row .ant-select {
+  flex: 1;
+  min-width: 0;
+}
+
 .state-fn-id-list-label {
   display: block;
   margin-bottom: 6px;
@@ -1836,6 +1869,8 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   padding: 8px;
   border-radius: 8px;
   background: #f5f5f5;
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
 }
 
 .widget-event-panel {
@@ -1928,6 +1963,18 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 .widget-style-bubble-panel .style-size-panel {
   display: grid;
   gap: 6px;
+}
+
+.widget-style-bubble-panel .style-bg-row {
+  display: grid;
+  grid-template-columns: 4.6em minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.widget-style-bubble-panel .style-bg-row .ant-input-number,
+.widget-style-bubble-panel .style-bg-row .ant-select {
+  width: 100%;
 }
 
 .widget-style-bubble-panel .scroll-axis-row {
@@ -2705,6 +2752,28 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 .asset-library-item-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.font-library-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.font-library-thumb {
+  font-size: 40px;
+  font-weight: 600;
+  color: #3dba9a;
+  letter-spacing: 0.02em;
+}
+
+.font-preview-modal .font-preview-stage {
+  margin-top: 16px;
+  padding: 20px;
+  min-height: 160px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #fafafa;
+  line-height: 1.8;
+  font-size: 18px;
 }
 
 .language-library-panel {

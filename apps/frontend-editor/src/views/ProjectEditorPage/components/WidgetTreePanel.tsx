@@ -32,6 +32,7 @@ type WidgetTreePanelProps = {
   canDragWidgetToData: boolean;
   expandedKeys: string[];
   selectedWidgetId: string | null;
+  highlightKeys?: string[];
   treeHostRef: RefObject<HTMLDivElement | null>;
   modifier: string;
   canUndo: boolean;
@@ -47,6 +48,7 @@ type WidgetTreePanelProps = {
   onDelete: () => void;
   onAdd: () => void;
   onOpenAlias: (widgetId: string) => void;
+  onOpenSlotName: (widgetId: string) => void;
   onOpenLoop: (widgetId: string) => void;
   onOpenEvents: (widgetId: string) => void;
   onToggleHidden: (widgetId: string) => void;
@@ -104,6 +106,9 @@ const TreeTitle = memo(function TreeTitle({
   showTitle,
   hideTitle,
   aliasMenuLabel,
+  slotNameMenuLabel,
+  isSlot,
+  onOpenSlotName,
 }: {
   widgetId: string;
   label: string;
@@ -125,6 +130,9 @@ const TreeTitle = memo(function TreeTitle({
   showTitle: string;
   hideTitle: string;
   aliasMenuLabel: string;
+  slotNameMenuLabel: string;
+  isSlot: boolean;
+  onOpenSlotName: (widgetId: string) => void;
 }) {
   const titleClasses = ['widget-tree-title', hidden ? 'is-hidden' : '', selected ? 'is-row-selected' : '']
     .filter(Boolean)
@@ -135,13 +143,17 @@ const TreeTitle = memo(function TreeTitle({
         items: [
           {
             key: 'alias',
-            label: aliasMenuLabel,
+            label: isSlot ? slotNameMenuLabel : aliasMenuLabel,
             disabled: readOnly,
           },
         ],
         onClick: ({ key }: { key: string }) => {
           if (key === 'alias') {
-            onOpenAlias(widgetId);
+            if (isSlot) {
+              onOpenSlotName(widgetId);
+            } else {
+              onOpenAlias(widgetId);
+            }
           }
         },
       };
@@ -244,7 +256,9 @@ const TreeTitle = memo(function TreeTitle({
   prev.eventsTitle === next.eventsTitle &&
   prev.showTitle === next.showTitle &&
   prev.hideTitle === next.hideTitle &&
-  prev.aliasMenuLabel === next.aliasMenuLabel,
+  prev.isSlot === next.isSlot &&
+  prev.aliasMenuLabel === next.aliasMenuLabel &&
+  prev.slotNameMenuLabel === next.slotNameMenuLabel,
 );
 
 function treeDropPlacement(dropToGap: boolean, nodePos: string, dropPosition: number): WidgetDropPlacement {
@@ -262,6 +276,7 @@ export function WidgetTreePanel({
   canDragWidgetToData,
   expandedKeys,
   selectedWidgetId,
+  highlightKeys,
   treeHostRef,
   modifier,
   canUndo,
@@ -277,6 +292,7 @@ export function WidgetTreePanel({
   onDelete,
   onAdd,
   onOpenAlias,
+  onOpenSlotName,
   onOpenLoop,
   onOpenEvents,
   onToggleHidden,
@@ -392,7 +408,9 @@ export function WidgetTreePanel({
               return canMoveWidget(widgets, dragKey, dropKey, placement);
             }}
             expandedKeys={expandedKeys}
-            selectedKeys={selectedWidgetId ? [selectedWidgetId] : []}
+            selectedKeys={Array.from(
+              new Set([...(selectedWidgetId ? [selectedWidgetId] : []), ...(highlightKeys ?? [])]),
+            )}
             treeData={treeData}
             titleRender={(node) => {
               const widgetId = String(node.key);
@@ -400,6 +418,7 @@ export function WidgetTreePanel({
               const isTemplateNode = nodeData.selectable === false || Boolean(nodeData.isSlot);
               const widget = findWidget(widgets, widgetId);
               const alias = widget?.alias?.trim();
+              const isSlot = widget?.type === 'slot';
               return (
                 <TreeTitle
                   widgetId={widgetId}
@@ -408,12 +427,14 @@ export function WidgetTreePanel({
                   hidden={Boolean(widget?.hidden)}
                   looped={isLoopConfigured(widget?.loop)}
                   hasEvents={hasWidgetEvents(widget?.events)}
-                  selected={selectedWidgetId === widgetId}
+                  selected={selectedWidgetId === widgetId || (highlightKeys ?? []).includes(widgetId)}
                   readOnly={readOnly}
                   canDragWidgetToData={canDragWidgetToData}
                   actionsHidden={isTemplateNode}
                   onSelect={onSelect}
                   onOpenAlias={onOpenAlias}
+                  onOpenSlotName={onOpenSlotName}
+                  isSlot={isSlot}
                   onOpenLoop={onOpenLoop}
                   onOpenEvents={onOpenEvents}
                   onToggleHidden={onToggleHidden}
@@ -422,6 +443,7 @@ export function WidgetTreePanel({
                   showTitle={t('lowcode.showWidget')}
                   hideTitle={t('lowcode.hideWidget')}
                   aliasMenuLabel={t('lowcode.setAlias')}
+                  slotNameMenuLabel={t('lowcode.setSlotName')}
                 />
               );
             }}

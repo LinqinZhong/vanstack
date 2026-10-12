@@ -685,6 +685,18 @@ export function generateSlotId(): string {
   return `s${body}`;
 }
 
+/** 生成默认插槽名称：取已有名称里最大的“插槽N”数字后缀 +1，允许重名。 */
+export function nextSlotName(existingNames: string[]): string {
+  let max = 0;
+  for (const name of existingNames) {
+    const match = /^插槽(\d+)$/.exec(name);
+    if (match) {
+      max = Math.max(max, Number(match[1]));
+    }
+  }
+  return `插槽${max + 1}`;
+}
+
 /** 收集组件模板内的全部插槽控件。 */
 export function collectTemplateSlots(widgets: PageWidget[]): Array<Extract<PageWidget, { type: 'slot' }>> {
   const result: Array<Extract<PageWidget, { type: 'slot' }>> = [];
@@ -713,6 +725,19 @@ export function healComponentSlots(
   let nextSlots = slots;
   let changed = false;
 
+  const ensureName = () =>
+    nextSlotName(
+      Array.from(declared.values())
+        .map((slot) => slot.name?.trim())
+        .filter(Boolean) as string[],
+    );
+
+  // 旧数据里插槽 name 可能等于类型名"插槽"（无序号占位），视为未命名，需重新自动命名。
+  const usableSlotName = (name?: string) => {
+    const trimmed = name?.trim();
+    return trimmed && !/^插槽$/.test(trimmed) ? trimmed : '';
+  };
+
   const walk = (list: PageWidget[], parent?: PageWidget): PageWidget[] =>
     list.map((widget) => {
       let next = widget;
@@ -720,27 +745,36 @@ export function healComponentSlots(
         const slotId = widget.slotId && widget.slotId !== 'undefined' ? widget.slotId : '';
         if (!slotId) {
           const newId = generateSlotId();
-          declared.set(newId, { id: newId, ...(widget.desc ? { desc: widget.desc } : {}) });
+          const name = usableSlotName(widget.name) || ensureName();
+          declared.set(newId, { id: newId, ...(name ? { name } : {}) });
           nextSlots = [...nextSlots, declared.get(newId)!];
-          next = { ...widget, slotId: newId };
+          next = { ...widget, slotId: newId, ...(name ? { name } : {}) };
           changed = true;
         } else if (!declared.has(slotId)) {
           // 已有合法 slotId 但缺少声明：保留原 id 并补声明，避免重新生成导致页面 slotContent 断链。
-          declared.set(slotId, { id: slotId, ...(widget.desc ? { desc: widget.desc } : {}) });
+          const name = usableSlotName(widget.name) || ensureName();
+          declared.set(slotId, { id: slotId, ...(name ? { name } : {}) });
           nextSlots = [...nextSlots, declared.get(slotId)!];
           changed = true;
         } else {
-          // 双向同步插槽描述：契约面板编辑声明 desc、属性面板编辑控件 desc，两者需保持一致，
-          // 否则控件树（读控件 desc）与运行时插槽名称（读控件 desc）会拿不到描述。
+          // 双向同步插槽名称：契约面板编辑声明 name、属性面板编辑控件 name，两者需保持一致，
+          // 否则控件树（读控件 name）与运行时插槽名称（读控件 name）会拿不到名称。
           const declaration = declared.get(slotId)!;
-          const widgetDesc = widget.desc?.trim();
-          const declDesc = declaration.desc?.trim();
-          if (declDesc && !widgetDesc) {
-            next = { ...widget, desc: declDesc };
+          const widgetName = usableSlotName(widget.name);
+          const declName = usableSlotName(declaration.name);
+          if (declName && !widgetName) {
+            next = { ...widget, name: declName };
             changed = true;
-          } else if (widgetDesc && !declDesc) {
-            declared.set(slotId, { ...declaration, desc: widgetDesc });
+          } else if (widgetName && !declName) {
+            declared.set(slotId, { ...declaration, name: widgetName });
             nextSlots = nextSlots.map((item) => (item.id === slotId ? declared.get(slotId)! : item));
+            changed = true;
+          } else if (!widgetName && !declName) {
+            // 两侧都缺失、或都是"插槽"这类无序号占位名：重新自动命名，保证控件树/插槽栏/运行时都能拿到名称。
+            const name = ensureName();
+            declared.set(slotId, { ...declaration, name });
+            nextSlots = nextSlots.map((item) => (item.id === slotId ? declared.get(slotId)! : item));
+            next = { ...widget, name };
             changed = true;
           }
         }
@@ -932,21 +966,21 @@ function contentTreeData(
 
 /**
  * 组件编辑态只直接展示模板里的插槽节点（拍平嵌套层级，隐藏弹性盒/图标/文本等内部结构），
- * 插槽节点下挂该实例 slotContent 的真实控件。插槽名称取插槽控件自身的 desc，缺省时回退到声明 desc。
+ * 插槽节点下挂该实例 slotContent 的真实控件。插槽名称取插槽控件自身的 name，缺省时回退到声明 name。
  */
 function virtualSlotsTreeData(
   template: PageWidget[],
   componentId: string,
   slotContent: Record<string, PageWidget[]>,
-  slotDescMap: Map<string, string>,
+  slotNameMap: Map<string, string>,
   labelOf: (widget: PageWidget) => string,
 ): WidgetTreeNode[] {
   return collectTemplateSlots(template).map((widget) => {
     let title = labelOf(widget);
-    if (!widget.desc?.trim()) {
-      const declarationDesc = slotDescMap.get(widget.slotId)?.trim();
-      if (declarationDesc) {
-        title = `${title} · ${declarationDesc}`;
+    if (!widget.name?.trim()) {
+      const declarationName = slotNameMap.get(widget.slotId)?.trim();
+      if (declarationName) {
+        title = `${title} · ${declarationName}`;
       }
     }
     return {
@@ -971,12 +1005,12 @@ export function withComponentVirtualTree(
   slots: ComponentSlot[],
   labelOf: (widget: PageWidget) => string,
 ): WidgetTreeNode[] {
-  const slotDescMap = new Map(slots.map((slot) => [slot.id, slot.desc ?? '']));
+  const slotNameMap = new Map(slots.map((slot) => [slot.id, slot.name ?? '']));
   return treeData.map((node) => {
     if (node.key === componentId) {
       return {
         ...node,
-        children: virtualSlotsTreeData(template, componentId, slotContent, slotDescMap, labelOf),
+        children: virtualSlotsTreeData(template, componentId, slotContent, slotNameMap, labelOf),
       };
     }
     if (node.children) {

@@ -15,6 +15,7 @@ import type {
   ProjectDto,
   ProjectIconFileDto,
   ProjectIconGroupDto,
+  ProjectFontFileDto,
   ProjectLangCatalogDto,
   ProjectComponentDto,
   ProjectPageDto,
@@ -268,6 +269,23 @@ export const api = {
       `/projects/${projectId}/versions/${versionId}/icons/groups/${encodeURIComponent(group)}/files/${encodeURIComponent(name)}`,
       { method: 'DELETE' },
     ),
+  listFonts: (projectId: string, versionId: string) =>
+    request<ProjectFontFileDto[]>(`/projects/${projectId}/versions/${versionId}/fonts`),
+  uploadFont: (projectId: string, versionId: string, file: File, name?: string) => {
+    const body = new FormData();
+    body.append('file', file);
+    if (name?.trim()) {
+      body.append('name', name.trim());
+    }
+    return request<ProjectFontFileDto>(`/projects/${projectId}/versions/${versionId}/fonts`, {
+      method: 'POST',
+      body,
+    });
+  },
+  deleteFont: (projectId: string, versionId: string, name: string) =>
+    request<void>(`/projects/${projectId}/versions/${versionId}/fonts/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
   getMethodCode: (projectId: string, methodId: string) =>
     request<MethodCodeDto>(`/projects/${projectId}/methods/${methodId}`),
   putMethodCode: (projectId: string, methodId: string, body: PutMethodCodeInput) =>

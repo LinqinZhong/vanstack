@@ -54,6 +54,10 @@ export type LowcodePageProps = {
   useComponentTestData?: boolean;
   /** 组件编辑态：仅此时渲染组件实例内的插槽 chrome。 */
   slotChrome?: boolean;
+  /** 组件编辑态：实例内部树与数据解耦，显示只由查看状态驱动。 */
+  componentEditing?: boolean;
+  /** 组件编辑态下正在编辑的组件实例 id。 */
+  componentEditId?: string | null;
   icons?: Readonly<Record<string, string>>;
   onCommit?: () => void;
 };
@@ -73,9 +77,10 @@ function pagePropsKey(props: ComponentProp[] | undefined) {
     .join('\n');
 }
 
-export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel, onModelValue, onQueryValue, loadWidgetEvent, pageId, query, components, centerContent, useComponentTestData, slotChrome, icons, onCommit }: LowcodePageProps): ReactElement {
+export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel, onModelValue, onQueryValue, loadWidgetEvent, pageId, query, components, centerContent, useComponentTestData, slotChrome, componentEditing, componentEditId, icons, onCommit }: LowcodePageProps): ReactElement {
   installPageIcons(icons);
-  installPageI18n(catalog, locale || pickPageLocale(catalog));
+  const currentLocale = locale || pickPageLocale(catalog);
+  installPageI18n(catalog, currentLocale);
   const pageQuery = query ?? EMPTY_QUERY;
   const loaderRef = useRef(loadWidgetEvent);
   loaderRef.current = loadWidgetEvent;
@@ -270,9 +275,10 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     const resolved = resolveWidgetTree(expanded, editing ? viewing : null, {
       appliedStateFor: editing ? undefined : (widget) => resolveRuntimeOwnState(widget, hoverInstanceKeys),
       stateLayersSink: sink,
+      locale: currentLocale,
     });
     return { widgets: resolved, stateLayers: sink };
-  }, [paintKey, page.slots, viewing, dataScope, propsScope, liveQuery, editing, hoverInstanceKeys]);
+  }, [paintKey, page.slots, viewing, dataScope, propsScope, liveQuery, editing, hoverInstanceKeys, currentLocale]);
   const drawerBoardIndexes = new Map<string, number>();
   {
     let index = 0;
@@ -284,7 +290,6 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     }
   }
   const toast = usePageToast();
-  const currentLocale = locale || pickPageLocale(catalog);
   const dir = pageI18nDir(catalog, currentLocale);
   const styleText = useMemo(() => pageCssText(page.widgets), [page.widgets]);
 
@@ -418,6 +423,8 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       componentStack,
       useComponentTestData: Boolean(useComponentTestData),
       slotChrome: Boolean(slotChrome),
+      componentEditing: Boolean(componentEditing),
+      componentEditId: componentEditId ?? null,
       viewing,
       icons,
       drawerBoardIndex: drawerBoardIndexes.get(widget.id),
@@ -490,6 +497,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     `${editRail.tail}:${editRail.column}`,
     centerContent ? '1' : '0',
     useComponentTestData ? '1' : '0',
+    componentEditing ? '1' : '0',
     JSON.stringify(viewing),
     JSON.stringify(modelOverrides),
   ].join('\n');

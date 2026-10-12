@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   compactPageI18n,
+  DEFAULT_PAGE_LANG_KEY,
+  DEFAULT_PAGE_LANG_NAME,
   isI18nKey,
   PAGE_I18N_DIRS,
   type PageI18n,
@@ -13,7 +15,10 @@ import {
   type PageI18nLang,
 } from '@vanstack/xml';
 
-const EMPTY_I18N: PageI18n = { langs: [], groups: [] };
+const EMPTY_I18N: PageI18n = {
+  langs: [{ key: DEFAULT_PAGE_LANG_KEY, name: DEFAULT_PAGE_LANG_NAME, dir: 'ltr' }],
+  groups: [],
+};
 
 function nextI18nKey(prefix: string, used: string[]) {
   const taken = new Set(used);
@@ -292,7 +297,7 @@ export function LanguageLibraryPanel({
                     placeholder={t('lowcode.i18nLangName')}
                     onChange={(event) => patchLang(index, { name: event.target.value }, `i18n:lang:${lang.key}:name`)}
                   />
-                  {disabled ? null : (
+                  {disabled || lang.key === DEFAULT_PAGE_LANG_KEY ? null : (
                     <Popconfirm title={t('lowcode.confirmDelete')} onConfirm={() => commit(dropLang(current, lang.key))}>
                       <Button size="small" type="text" danger icon={<DeleteOutlined />} />
                     </Popconfirm>
@@ -302,7 +307,7 @@ export function LanguageLibraryPanel({
                   <Input
                     size="small"
                     variant="filled"
-                    disabled={disabled}
+                    disabled={disabled || lang.key === DEFAULT_PAGE_LANG_KEY}
                     defaultValue={lang.key}
                     key={lang.key}
                     placeholder={t('lowcode.i18nLangKey')}

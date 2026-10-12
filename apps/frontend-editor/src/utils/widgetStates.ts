@@ -5,8 +5,11 @@ import {
   resolveWidgetStateStack,
   compactWidgetProps,
   applyWidgetPresence,
+  DEFAULT_PAGE_LANG_KEY,
   type PageWidget,
   type WidgetContentProps,
+  type WidgetLangFieldDelta,
+  type WidgetLangFields,
   type WidgetStateDelta,
   type WidgetStateFields,
   type WidgetStateLayer,
@@ -184,6 +187,7 @@ export function collectSlotContentStateTree(
   contentPrefix: string,
   slotWidget: PageWidget,
   slotPrefix: string,
+  templateWidgets: PageWidget[],
 ): VisibleWidgetState[] {
   function mapNode(node: VisibleWidgetState): VisibleWidgetState {
     return {
@@ -198,15 +202,37 @@ export function collectSlotContentStateTree(
   if (!selected) {
     return contentTree;
   }
-  const prefixedSlotOwnerId = `${slotPrefix}${slotWidget.id}`;
   const prefixedContentOwnerId = `${contentPrefix}${selected.id}`;
-  const slotInherited: VisibleWidgetState[] = ancestorOwnedStates(slotWidget).map((state) => {
+  // 插槽在组件模板里的祖先链（组件根控件 → … → 插槽本体）：内容节点应能继承这整条链上定义的
+  // 状态，而不是只继承插槽控件自身定义的状态——组件状态往往定义在根控件上，插槽本身没有自定义状态。
+  const ancestorChain: PageWidget[] = [];
+  let cursor: PageWidget | null = slotWidget;
+  while (cursor) {
+    ancestorChain.unshift(cursor);
+    cursor = findParentWidget(templateWidgets, cursor.id);
+  }
+  const used = new Set<string>();
+  const layerStates: Array<{
+    ownerWidget: PageWidget;
+    state: { id: string; name: string; transition?: number | string };
+  }> = [];
+  for (const widget of ancestorChain) {
+    for (const state of ancestorOwnedStates(widget)) {
+      if (used.has(state.id)) {
+        continue;
+      }
+      used.add(state.id);
+      layerStates.push({ ownerWidget: widget, state });
+    }
+  }
+  const inherited: VisibleWidgetState[] = layerStates.map(({ ownerWidget, state }) => {
+    const ownerId = `${slotPrefix}${ownerWidget.id}`;
     const override = selected.stateOverrides?.find((item) => item.id === state.id);
     return {
       id: state.id,
       name: state.name,
       owned: false,
-      ownerId: prefixedSlotOwnerId,
+      ownerId,
       transition: state.transition,
       children: [
         {
@@ -215,7 +241,7 @@ export function collectSlotContentStateTree(
           owned: true,
           ownerId: prefixedContentOwnerId,
           scopeId: state.id,
-          scopeOwnerId: prefixedSlotOwnerId,
+          scopeOwnerId: ownerId,
         },
         ...(override?.states ?? []).map((nested) => ({
           id: nested.id,
@@ -224,12 +250,12 @@ export function collectSlotContentStateTree(
           ownerId: prefixedContentOwnerId,
           transition: nested.transition,
           scopeId: state.id,
-          scopeOwnerId: prefixedSlotOwnerId,
+          scopeOwnerId: ownerId,
         })),
       ],
     };
   });
-  return [...contentTree, ...slotInherited];
+  return [...contentTree, ...inherited];
 }
 
 export type ViewingByOwner = Record<string, string | null>;
@@ -398,8 +424,8 @@ function applyPropsToWidget(widget: PageWidget, props: WidgetContentProps | unde
   return widget;
 }
 
-export function widgetWithStateLayers(widget: PageWidget, layers: WidgetStateLayer[]): PageWidget {
-  const fields = resolveWidgetStateStack(widget, layers);
+export function widgetWithStateLayers(widget: PageWidget, layers: WidgetStateLayer[], locale?: string | null): PageWidget {
+  const fields = resolveWidgetStateStack(widget, layers, locale ?? undefined);
   const next = { ...applyPropsToWidget(widget, fields.props) } as PageWidget;
   if (fields.style) {
     next.style = fields.style;
@@ -434,19 +460,21 @@ export function widgetWithViewing(
   widget: PageWidget,
   owner: PageWidget | null,
   viewingState: string | null,
+  locale?: string | null,
 ): PageWidget {
   return widgetWithStateLayers(
     widget,
     viewingState ? [{ id: viewingState, role: stateRole(owner, widget) }] : [],
+    locale,
   );
 }
 
-export function widgetWithStateLayerDelta(widget: PageWidget, layers: WidgetStateLayer[]): PageWidget {
+export function widgetWithStateLayerDelta(widget: PageWidget, layers: WidgetStateLayer[], locale?: string | null): PageWidget {
   if (layers.length === 0) {
     return widget;
   }
-  const base = resolveWidgetStateStack(widget, layers.slice(0, -1));
-  const full = resolveWidgetStateStack(widget, layers);
+  const base = resolveWidgetStateStack(widget, layers.slice(0, -1), locale ?? undefined);
+  const full = resolveWidgetStateStack(widget, layers, locale ?? undefined);
   const delta = diffWidgetState(widget, full, base);
   const next = { ...applyPropsToWidget(widget, delta.props) } as PageWidget;
   if (delta.style) {
@@ -478,12 +506,12 @@ export function widgetWithStateLayerDelta(widget: PageWidget, layers: WidgetStat
   return delta.presence ? applyWidgetPresence(next, delta.presence) : next;
 }
 
-export function stateOwnKeys(widget: PageWidget, layers: WidgetStateLayer[]): Set<string> | undefined {
+export function stateOwnKeys(widget: PageWidget, layers: WidgetStateLayer[], locale?: string | null): Set<string> | undefined {
   if (layers.length === 0) {
     return undefined;
   }
-  const base = resolveWidgetStateStack(widget, layers.slice(0, -1));
-  const full = resolveWidgetStateStack(widget, layers);
+  const base = resolveWidgetStateStack(widget, layers.slice(0, -1), locale ?? undefined);
+  const full = resolveWidgetStateStack(widget, layers, locale ?? undefined);
   const delta = diffWidgetState(widget, full, base);
   const keys = new Set<string>();
   for (const key of Object.keys(delta.props ?? {})) keys.add(key);
@@ -526,6 +554,7 @@ function cloneDelta(delta: WidgetStateDelta): WidgetStateDelta {
     ...(delta.item ? { item: { ...delta.item } } : {}),
     ...(delta.swiper ? { swiper: { ...delta.swiper } } : {}),
     ...(delta.presence ? { presence: delta.presence } : {}),
+    ...(delta.langFields ? { langFields: { ...delta.langFields } } : {}),
     ...(delta.states?.length ? { states: delta.states.map((item) => cloneDelta(item)) } : {}),
   };
 }
@@ -670,6 +699,7 @@ function upsertNestedState(
     !nextParent.item &&
     !nextParent.swiper &&
     !nextParent.presence &&
+    !nextParent.langFields &&
     !nextParent.states?.length &&
     !nextParent.appliedState;
   if (empty) {
@@ -814,7 +844,7 @@ export function setAppliedState(
         delete parent.appliedState;
       }
       const empty =
-          !parent.props && !parent.style && !parent.flex && !parent.item && !parent.swiper && !parent.presence && !parent.states?.length && !parent.appliedState;
+          !parent.props && !parent.style && !parent.flex && !parent.item && !parent.swiper && !parent.presence && !parent.langFields && !parent.states?.length && !parent.appliedState;
       if (empty) {
         return writeOverrideList(
           widget,
@@ -834,52 +864,138 @@ export function setAppliedState(
   });
 }
 
+/** 语言分支路由：非空且非默认语言（简体中文）时返回语言 key，否则返回 null（走默认基准字段）。 */
+function langKeyFor(locale: string | null | undefined): string | null {
+  const key = locale?.trim() ?? '';
+  return key && key !== DEFAULT_PAGE_LANG_KEY ? key : null;
+}
+
+/** 把字段差异包装成语言增量（仅保留非空字段）。 */
+function langFieldFromFields(delta: WidgetStateFields | undefined): WidgetLangFieldDelta | undefined {
+  if (!delta) {
+    return undefined;
+  }
+  const next: WidgetLangFieldDelta = {};
+  if (delta.props) next.props = delta.props;
+  if (delta.style) next.style = delta.style;
+  if (delta.flex) next.flex = delta.flex;
+  if (delta.item) next.item = delta.item;
+  if (delta.swiper) next.swiper = delta.swiper;
+  if (delta.presence) next.presence = delta.presence;
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+/** 更新某层 langFields 中指定语言的增量，返回新的 langFields（为空时返回 undefined）。 */
+function withLangField(
+  langFields: WidgetLangFields | undefined,
+  langKey: string,
+  langDelta: WidgetLangFieldDelta | undefined,
+): WidgetLangFields | undefined {
+  const next: WidgetLangFields = { ...(langFields ?? {}) };
+  if (langDelta && Object.keys(langDelta).length > 0) {
+    next[langKey] = langDelta;
+  } else {
+    delete next[langKey];
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+/** 把字段差异写入状态层：默认语言走扁平字段，非默认语言写入 langFields[langKey]。 */
+function appliedFieldDelta(
+  delta: WidgetStateFields,
+  prev: WidgetStateDelta | undefined,
+  langKey: string | null,
+): WidgetStateDelta {
+  if (!langKey) {
+    return { ...(prev ?? { id: '' }), ...delta };
+  }
+  const next: WidgetStateDelta = { ...(prev ?? { id: '' }) };
+  const langFields = withLangField(prev?.langFields, langKey, langFieldFromFields(delta));
+  if (langFields) {
+    next.langFields = langFields;
+  } else {
+    delete next.langFields;
+  }
+  return next;
+}
+
+/** 把语言增量写入控件基准层（widget.langFields）。 */
+function writeBaseLangField(widget: PageWidget, langKey: string, langDelta: WidgetLangFieldDelta | undefined): PageWidget {
+  const next = { ...widget };
+  const langFields = withLangField(widget.langFields, langKey, langDelta);
+  if (langFields) {
+    next.langFields = langFields;
+  } else {
+    delete next.langFields;
+  }
+  return next;
+}
+
 function writeDelta(
   widget: PageWidget,
   stateId: string,
   role: WidgetStateRole,
   delta: WidgetStateFields,
   nestedIn?: string | null,
+  langKey?: string | null,
 ): PageWidget {
   if (role === 'owner' && nestedIn) {
     return upsertNestedState(widget, nestedIn, stateId, (current) =>
-      current
-        ? {
-            id: current.id,
-            name: current.name,
-            ...delta,
-            ...(current.transition != null ? { transition: current.transition } : {}),
-            ...(current.states?.length ? { states: current.states } : {}),
-          }
-        : current,
+      current ? appliedFieldDelta(delta, current, langKey ?? null) : current,
     );
   }
   const key = role === 'owner' ? 'states' : 'stateOverrides';
   const list = [...(widget[key] ?? [])];
   const index = list.findIndex((item) => item.id === stateId);
   const prev = index >= 0 ? list[index] : undefined;
-  const empty = !delta.props && !delta.style && !delta.flex && !delta.item && !delta.swiper && !delta.presence;
-  if (role === 'descendant' && empty && !prev?.states?.length && !prev?.appliedState) {
-    if (index < 0) {
-      return widget;
-    }
-    const nextList = list.filter((_, i) => i !== index);
-    const next = { ...widget };
-    if (nextList.length > 0) {
-      next[key] = nextList;
-    } else {
-      delete next[key];
-    }
-    return next;
-  }
+  const nextLangFields = langKey
+    ? withLangField(prev?.langFields, langKey, langFieldFromFields(delta))
+    : prev?.langFields;
   const entry: WidgetStateDelta = {
     id: stateId,
     ...(role === 'owner' && prev?.name != null ? { name: prev.name } : {}),
-    ...delta,
+    ...(langKey
+      ? {
+          ...(prev?.props ? { props: prev.props } : {}),
+          ...(prev?.style ? { style: prev.style } : {}),
+          ...(prev?.flex ? { flex: prev.flex } : {}),
+          ...(prev?.item ? { item: prev.item } : {}),
+          ...(prev?.swiper ? { swiper: prev.swiper } : {}),
+          ...(prev?.presence ? { presence: prev.presence } : {}),
+        }
+      : delta),
     ...(role === 'owner' && prev?.transition != null ? { transition: prev.transition } : {}),
     ...(prev?.states?.length ? { states: prev.states } : {}),
     ...(role === 'descendant' && prev?.appliedState ? { appliedState: prev.appliedState } : {}),
   };
+  if (nextLangFields) {
+    entry.langFields = nextLangFields;
+  }
+  if (role === 'descendant') {
+    const empty =
+      !entry.props &&
+      !entry.style &&
+      !entry.flex &&
+      !entry.item &&
+      !entry.swiper &&
+      !entry.presence &&
+      !entry.langFields &&
+      !entry.states?.length &&
+      !entry.appliedState;
+    if (empty) {
+      if (index < 0) {
+        return widget;
+      }
+      const nextList = list.filter((_, i) => i !== index);
+      const next = { ...widget };
+      if (nextList.length > 0) {
+        next[key] = nextList;
+      } else {
+        delete next[key];
+      }
+      return next;
+    }
+  }
   if (index >= 0) {
     list[index] = entry;
   } else {
@@ -957,7 +1073,9 @@ export function patchResolvedWidget(
   widget: PageWidget,
   patch: WidgetPatch,
   layers: WidgetStateLayer[],
+  locale?: string | null,
 ): PageWidget {
+  const langKey = langKeyFor(locale);
   const baseContent: WidgetPatch = {};
   if ('loop' in patch) {
     baseContent.loop = patch.loop;
@@ -971,7 +1089,16 @@ export function patchResolvedWidget(
   if ('hoverStateId' in patch) {
     baseContent.hoverStateId = patch.hoverStateId;
   }
-  if ('presence' in patch && patch.presence != null && layers.length === 0) {
+  if ('name' in patch) {
+    baseContent.name = patch.name;
+  }
+  if ('slotId' in patch) {
+    baseContent.slotId = patch.slotId;
+  }
+  if ('alias' in patch) {
+    baseContent.alias = patch.alias;
+  }
+  if ('presence' in patch && patch.presence != null && layers.length === 0 && !langKey) {
     baseContent.presence = patch.presence;
   }
   const contentPatch: WidgetPatch =
@@ -1053,44 +1180,97 @@ export function patchResolvedWidget(
   }
 
   if (layers.length === 0) {
-    if (patch.value != null) {
-      baseContent.value = patch.value;
+    if (!langKey) {
+      if (patch.value != null) {
+        baseContent.value = patch.value;
+      }
+      if (patch.text != null) {
+        baseContent.text = patch.text;
+      }
+      if (patch.src != null) {
+        baseContent.src = patch.src;
+      }
+      if (patch.size != null) {
+        baseContent.size = patch.size;
+      }
+      if ('current' in patch) {
+        baseContent.current = patch.current;
+      }
+      let next = Object.keys(baseContent).length > 0 ? patchWidget(widget, baseContent) : widget;
+      if (!hasVisual) {
+        return next;
+      }
+      const visual: WidgetPatch = {
+        ...('style' in patch ? { style: patch.style } : {}),
+        ...('flex' in patch ? { flex: patch.flex } : {}),
+        ...('item' in patch ? { item: patch.item } : {}),
+        ...('swiper' in patch ? { swiper: patch.swiper } : {}),
+      };
+      const layered = patchWidget(next, visual);
+      if (!('style' in patch)) {
+        return layered;
+      }
+      return forcePositionFields(layered, patch.style);
     }
-    if (patch.text != null) {
-      baseContent.text = patch.text;
-    }
-    if (patch.src != null) {
-      baseContent.src = patch.src;
-    }
-    if (patch.size != null) {
-      baseContent.size = patch.size;
-    }
-    if ('current' in patch) {
-      baseContent.current = patch.current;
-    }
+    // 非默认语言：结构字段写入基准，分支字段（props/style/flex/item/swiper/presence）写入 langFields[langKey]。
     let next = Object.keys(baseContent).length > 0 ? patchWidget(widget, baseContent) : widget;
-    if (!hasVisual) {
-      return next;
-    }
-    const visual: WidgetPatch = {
-      ...('style' in patch ? { style: patch.style } : {}),
-      ...('flex' in patch ? { flex: patch.flex } : {}),
-      ...('item' in patch ? { item: patch.item } : {}),
-      ...('swiper' in patch ? { swiper: patch.swiper } : {}),
+    const existing = widget.langFields?.[langKey];
+    const baseLocal = resolveWidgetStateStack(next, [], langKey);
+    const desired: WidgetStateFields = {
+      props: hasPropPatch ? desiredPropsAfterPatch(baseLocal.props, contentPatch) : baseLocal.props,
+      style: 'style' in patch ? patch.style : baseLocal.style,
+      flex: 'flex' in patch ? patch.flex : baseLocal.flex,
+      item: 'item' in patch ? patch.item : baseLocal.item,
+      swiper: 'swiper' in patch ? patch.swiper : baseLocal.swiper,
+      presence: hasPresence ? patch.presence : existing?.presence,
     };
-    const layered = patchWidget(next, visual);
-    if (!('style' in patch)) {
-      return layered;
+    const baseDefault = resolveWidgetStateStack(next, []);
+    const langDelta = diffWidgetState(next, desired, baseDefault);
+    let routed = writeBaseLangField(next, langKey, langFieldFromFields(langDelta));
+    if ('style' in patch) {
+      routed = forcePositionFields(routed, patch.style);
     }
-    return forcePositionFields(layered, patch.style);
+    return routed;
   }
 
   let next = Object.keys(baseContent).length > 0 ? patchWidget(widget, baseContent) : widget;
   if (!hasPropPatch && !hasVisual && !hasPresence) {
     return next;
   }
-  const resolved = resolveWidgetStateStack(next, layers);
   const lastLayer = layers[layers.length - 1];
+
+  if (langKey) {
+    // 非默认语言：计算目标层在语言下的完整贡献，与默认语言贡献相减得到的增量写入 langFields[langKey]。
+    const baseLocal = resolveWidgetStateStack(next, layers.slice(0, -1), langKey);
+    const resolvedLocal = resolveWidgetStateStack(next, layers, langKey);
+    const desiredLocal: WidgetStateFields = {
+      props: hasPropPatch ? desiredPropsAfterPatch(resolvedLocal.props, contentPatch) : resolvedLocal.props,
+      style: 'style' in patch ? patch.style : resolvedLocal.style,
+      flex: 'flex' in patch ? patch.flex : resolvedLocal.flex,
+      item: 'item' in patch ? patch.item : resolvedLocal.item,
+      swiper: 'swiper' in patch ? patch.swiper : resolvedLocal.swiper,
+      presence: hasPresence ? patch.presence : resolvedLocal.presence,
+    };
+    const contribLocal = diffWidgetState(next, desiredLocal, baseLocal);
+    const fullDefault = resolveWidgetStateStack(next, layers);
+    const baseDefault = resolveWidgetStateStack(next, layers.slice(0, -1));
+    const contribDefault = diffWidgetState(next, fullDefault, baseDefault);
+    const langDelta = diffWidgetState(next, contribLocal, contribDefault);
+    let layered = writeDelta(
+      next,
+      lastLayer.id,
+      lastLayer.role,
+      langDelta,
+      lastLayer.role === 'owner' ? nestedOwnerScope(next, lastLayer.id) : null,
+      langKey,
+    );
+    if ('style' in patch) {
+      layered = forcePositionFields(layered, desiredLocal.style);
+    }
+    return layered;
+  }
+
+  const resolved = resolveWidgetStateStack(next, layers);
   const desired: WidgetStateFields = {
     props: hasPropPatch ? desiredPropsAfterPatch(resolved.props, contentPatch) : resolved.props,
     style: 'style' in patch ? patch.style : resolved.style,
@@ -1172,31 +1352,53 @@ export function patchWidgetInState(
   stateId: string | null,
   role: WidgetStateRole,
   nestedIn?: string | null,
+  locale?: string | null,
 ): PageWidget {
+  const langKey = langKeyFor(locale);
   const hasPropPatch =
     patch.value != null || patch.text != null || patch.src != null || patch.size != null;
   const hasVisual = 'style' in patch || 'flex' in patch || 'item' in patch || 'swiper' in patch;
   const hasPresence = 'presence' in patch && patch.presence != null;
 
   if (!stateId) {
-    const allPatch: WidgetPatch = {
-      ...(patch.value != null ? { value: patch.value } : {}),
-      ...(patch.text != null ? { text: patch.text } : {}),
-      ...(patch.src != null ? { src: patch.src } : {}),
-      ...(patch.size != null ? { size: patch.size } : {}),
+    const structural: WidgetPatch = {
       ...('loop' in patch ? { loop: patch.loop } : {}),
       ...('events' in patch ? { events: patch.events } : {}),
       ...('stateFn' in patch ? { stateFn: patch.stateFn } : {}),
-      ...('presence' in patch ? { presence: patch.presence } : {}),
-      ...('style' in patch ? { style: patch.style } : {}),
-      ...('flex' in patch ? { flex: patch.flex } : {}),
-      ...('item' in patch ? { item: patch.item } : {}),
-      ...('swiper' in patch ? { swiper: patch.swiper } : {}),
       ...('place' in patch ? { place: patch.place } : {}),
       ...('mask' in patch ? { mask: patch.mask } : {}),
       ...('maskClose' in patch ? { maskClose: patch.maskClose } : {}),
     };
-    return Object.keys(allPatch).length > 0 ? patchWidget(widget, allPatch) : widget;
+    if (!langKey) {
+      const allPatch: WidgetPatch = {
+        ...(patch.value != null ? { value: patch.value } : {}),
+        ...(patch.text != null ? { text: patch.text } : {}),
+        ...(patch.src != null ? { src: patch.src } : {}),
+        ...(patch.size != null ? { size: patch.size } : {}),
+        ...('presence' in patch ? { presence: patch.presence } : {}),
+        ...('style' in patch ? { style: patch.style } : {}),
+        ...('flex' in patch ? { flex: patch.flex } : {}),
+        ...('item' in patch ? { item: patch.item } : {}),
+        ...('swiper' in patch ? { swiper: patch.swiper } : {}),
+        ...structural,
+      };
+      return Object.keys(allPatch).length > 0 ? patchWidget(widget, allPatch) : widget;
+    }
+    // 非默认语言：结构字段写入基准，分支字段写入 langFields[langKey]。
+    let next = Object.keys(structural).length > 0 ? patchWidget(widget, structural) : widget;
+    const existing = widget.langFields?.[langKey];
+    const baseLocal = resolveWidgetStateStack(next, [], langKey);
+    const desired: WidgetStateFields = {
+      props: hasPropPatch ? desiredPropsAfterPatch(baseLocal.props, patch) : baseLocal.props,
+      style: 'style' in patch ? patch.style : baseLocal.style,
+      flex: 'flex' in patch ? patch.flex : baseLocal.flex,
+      item: 'item' in patch ? patch.item : baseLocal.item,
+      swiper: 'swiper' in patch ? patch.swiper : baseLocal.swiper,
+      presence: hasPresence ? patch.presence : existing?.presence,
+    };
+    const baseDefault = resolveWidgetStateStack(next, []);
+    const langDelta = diffWidgetState(next, desired, baseDefault);
+    return writeBaseLangField(next, langKey, langFieldFromFields(langDelta));
   }
 
   const baseContent: WidgetPatch = {};
@@ -1219,6 +1421,27 @@ export function patchWidgetInState(
         { id: stateId, role: 'owner' },
       ]
     : [{ id: stateId, role }];
+  const nestedRole = nestedIn ? 'owner' : role;
+
+  if (langKey) {
+    const baseLocal = resolveWidgetStateStack(next, layers.slice(0, -1), langKey);
+    const resolvedLocal = resolveWidgetStateStack(next, layers, langKey);
+    const desiredLocal: WidgetStateFields = {
+      props: hasPropPatch ? desiredPropsAfterPatch(resolvedLocal.props, patch) : resolvedLocal.props,
+      style: 'style' in patch ? patch.style : resolvedLocal.style,
+      flex: 'flex' in patch ? patch.flex : resolvedLocal.flex,
+      item: 'item' in patch ? patch.item : resolvedLocal.item,
+      swiper: 'swiper' in patch ? patch.swiper : resolvedLocal.swiper,
+      presence: hasPresence ? patch.presence : resolvedLocal.presence,
+    };
+    const contribLocal = diffWidgetState(next, desiredLocal, baseLocal);
+    const fullDefault = resolveWidgetStateStack(next, layers);
+    const baseDefault = resolveWidgetStateStack(next, layers.slice(0, -1));
+    const contribDefault = diffWidgetState(next, fullDefault, baseDefault);
+    const langDelta = diffWidgetState(next, contribLocal, contribDefault);
+    return writeDelta(next, stateId, nestedRole, langDelta, nestedIn ?? null, langKey);
+  }
+
   const resolved = resolveWidgetStateStack(next, layers);
   const desired: WidgetStateFields = {
     props: hasPropPatch ? desiredPropsAfterPatch(resolved.props, patch) : resolved.props,
@@ -1233,7 +1456,7 @@ export function patchWidgetInState(
   return writeDelta(
     next,
     stateId,
-    nestedIn ? 'owner' : role,
+    nestedRole,
     diffWidgetState(next, desired, base),
     nestedIn ?? null,
   );

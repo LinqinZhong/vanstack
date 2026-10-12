@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { compactSize, convertAngle, compactAngle, DEFAULT_SCROLL_HEIGHT, DEFAULT_SCROLL_WIDTH, DEFAULT_SWIPER_HEIGHT, DEFAULT_SWIPER_WIDTH, isCopyBinding, sanitizeWidgetStyle, ANGLE_UNITS, type AngleUnit, type AngleValue, type PageWidget, type SizeMode, type SizeValue, type WidgetStyle } from '@vanstack/xml';
 import { StyleBoxEdges, pxFromLength } from './StyleBoxEdges';
+import { subscribeFontCatalog, type FontCatalogEntry } from '../utils/fontCatalog';
 
 type ShadowValue = {
   x: number;
@@ -203,11 +204,14 @@ export function WidgetStyleFields({
   const frameLocked = widgetType === 'windows' || widgetType === 'window';
   const [textShadow, setTextShadow] = useState(() => parseCssShadow(current.textShadow));
   const [boxShadow, setBoxShadow] = useState(() => parseCssShadow(current.boxShadow));
+  const [fontEntries, setFontEntries] = useState<FontCatalogEntry[]>([]);
 
   useEffect(() => {
     setTextShadow(parseCssShadow(style?.textShadow));
     setBoxShadow(parseCssShadow(style?.boxShadow));
   }, [widgetId, style?.textShadow, style?.boxShadow]);
+
+  useEffect(() => subscribeFontCatalog(setFontEntries), []);
 
   function patch(next: Partial<WidgetStyle>) {
     onChange(sanitizeWidgetStyle(widgetType, { ...current, ...next }));
@@ -237,7 +241,10 @@ export function WidgetStyleFields({
           disabled={disabled}
           value={current.fontFamily}
           placeholder={t('lowcode.styleFontDefault')}
-          options={fontFamilyOptions(i18n.language)}
+          options={[
+            ...fontFamilyOptions(i18n.language),
+            ...fontEntries.map((entry) => ({ value: `'${entry.family}'`, label: entry.label })),
+          ]}
           onChange={(fontFamily) => patch({ fontFamily: fontFamily || undefined })}
         />
       </Form.Item>

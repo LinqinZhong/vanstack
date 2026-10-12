@@ -92,6 +92,7 @@ export type ProjectVersionRecord = {
   langVersionId: string;
   assetVersionId: string;
   iconVersionId: string;
+  fontVersionId: string;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -128,6 +129,8 @@ export type LibraryVersionRecord = {
   groups: LibraryGroupRecord[];
   updatedAt: Date;
 };
+
+export type LibraryKind = 'asset' | 'icon' | 'font';
 
 export type NamespaceFieldRecord = {
   id: string;
@@ -211,6 +214,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
   private legacyLangs: Collection<LegacyLangRecord> | null = null;
   private assetVersions: Collection<LibraryVersionRecord> | null = null;
   private iconVersions: Collection<LibraryVersionRecord> | null = null;
+  private fontVersions: Collection<LibraryVersionRecord> | null = null;
   private namespaceVersions: Collection<NamespaceVersionRecord> | null = null;
 
   constructor(config: ConfigService) {
@@ -233,6 +237,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     this.legacyLangs = db.collection<LegacyLangRecord>('lang');
     this.assetVersions = db.collection<LibraryVersionRecord>('asset.version');
     this.iconVersions = db.collection<LibraryVersionRecord>('icon.version');
+    this.fontVersions = db.collection<LibraryVersionRecord>('font.version');
     this.namespaceVersions = db.collection<NamespaceVersionRecord>('namespace.version');
     await this.namespaceVersions.createIndex({ projectId: 1 });
     await adoptBusinessId(this.projects, 'id');
@@ -485,19 +490,19 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     return this.addUses(this.langVersionDocs(), id, delta);
   }
 
-  async getLibraryVersion(kind: 'asset' | 'icon', id: string): Promise<LibraryVersionRecord | null> {
+  async getLibraryVersion(kind: LibraryKind, id: string): Promise<LibraryVersionRecord | null> {
     return this.libraryDocs(kind).findOne({ _id: id });
   }
 
-  async saveLibraryVersion(kind: 'asset' | 'icon', record: LibraryVersionRecord): Promise<void> {
+  async saveLibraryVersion(kind: LibraryKind, record: LibraryVersionRecord): Promise<void> {
     await this.libraryDocs(kind).replaceOne({ _id: record._id }, record, { upsert: true });
   }
 
-  async deleteLibraryVersion(kind: 'asset' | 'icon', id: string): Promise<void> {
+  async deleteLibraryVersion(kind: LibraryKind, id: string): Promise<void> {
     await this.libraryDocs(kind).deleteOne({ _id: id });
   }
 
-  async addLibraryUses(kind: 'asset' | 'icon', id: string, delta: number): Promise<number> {
+  async addLibraryUses(kind: LibraryKind, id: string, delta: number): Promise<number> {
     return this.addUses(this.libraryDocs(kind), id, delta);
   }
 
@@ -517,7 +522,8 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     const filter = { 'groups.files.key': key };
     const assets = await this.libraryDocs('asset').countDocuments(filter);
     const icons = await this.libraryDocs('icon').countDocuments(filter);
-    return assets + icons;
+    const fonts = await this.libraryDocs('font').countDocuments(filter);
+    return assets + icons + fonts;
   }
 
   async listFunctions(projectId: string): Promise<FunctionRecord[]> {
@@ -560,6 +566,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     await this.langVersionDocs().deleteMany({ projectId });
     await this.libraryDocs('asset').deleteMany({ projectId });
     await this.libraryDocs('icon').deleteMany({ projectId });
+    await this.libraryDocs('font').deleteMany({ projectId });
     await this.pageDocs().deleteMany({ projectId });
     await this.componentDocs().deleteMany({ projectId });
     await this.componentVersionDocs().deleteMany({ projectId });
@@ -709,8 +716,8 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     return this.namespaceVersions;
   }
 
-  private libraryDocs(kind: 'asset' | 'icon') {
-    const docs = kind === 'asset' ? this.assetVersions : this.iconVersions;
+  private libraryDocs(kind: LibraryKind) {
+    const docs = kind === 'asset' ? this.assetVersions : kind === 'icon' ? this.iconVersions : this.fontVersions;
     if (!docs) {
       throw new Error(`${kind}.version collection is not ready`);
     }
@@ -751,6 +758,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
       langVersions,
       assetVersions,
       iconVersions,
+      fontVersions,
       namespaceVersions,
     ] = await Promise.all([
       this.listProjectVersions(projectId),
@@ -762,6 +770,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
       this.langVersionDocs().find({ projectId }).toArray(),
       this.libraryDocs('asset').find({ projectId }).toArray(),
       this.libraryDocs('icon').find({ projectId }).toArray(),
+      this.libraryDocs('font').find({ projectId }).toArray(),
       this.namespaceVersionDocs().find({ projectId }).toArray(),
     ]);
     return {
@@ -775,6 +784,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
       langVersions,
       assetVersions,
       iconVersions,
+      fontVersions,
       namespaceVersions,
     };
   }
@@ -817,6 +827,9 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
       case 'icon.version':
         await this.saveLibraryVersion('icon', revived as LibraryVersionRecord);
         return;
+      case 'font.version':
+        await this.saveLibraryVersion('font', revived as LibraryVersionRecord);
+        return;
       case 'namespace.version':
         await this.saveNamespaceVersion(revived as NamespaceVersionRecord);
         return;
@@ -853,6 +866,9 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
         return;
       case 'icon.version':
         await this.deleteLibraryVersion('icon', id);
+        return;
+      case 'font.version':
+        await this.deleteLibraryVersion('font', id);
         return;
       case 'namespace.version':
         await this.deleteNamespaceVersion(id);

@@ -18,6 +18,7 @@ export function renderSlot(
     const resolved = resolveWidgetTree(expanded, ctx.viewing ?? null, {
       appliedStateFor: (child) => resolveRuntimeOwnState(child, ctx.editing ? [] : (ctx.hoverInstanceKeys ?? [])),
       stateLayersSink: ctx.stateLayers,
+      locale: ctx.locale,
     });
     children = resolved.map((child) =>
       ctx.render(child, {
@@ -47,7 +48,7 @@ export function renderSlot(
   // display:contents 不影响后代匹配；visibility 可经它继承，display:none 仍移除整棵子树。
   const ownStyleCss = isEmpty ? dynamicStyleCss(widget.style, options) : undefined;
   const itemCss = isEmpty ? flexItemCss(widget.item, options) : undefined;
-  const slotName = showChrome && isEmpty ? widget.desc?.trim() : '';
+  const slotName = showChrome && isEmpty ? widget.name?.trim() : '';
   const plugIcon = showChrome && isEmpty
     ? createElement('svg', { key: 'slot-plug', width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'rgba(0,0,0,0.35)', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
         createElement('path', { d: 'M9 2v6' }),

@@ -4,6 +4,7 @@ import type { PageI18n } from '@vanstack/xml';
 import { AssetLibraryPanel } from '../../../components/AssetLibraryPanel';
 import { DataPoolPanel } from '../../../components/DataPoolPanel';
 import { IconLibraryPanel } from '../../../components/IconLibraryPanel';
+import { FontLibraryPanel } from '../../../components/FontLibraryPanel';
 import { LanguageLibraryPanel } from '../../../components/LanguageLibraryModal';
 import type { EditorNav } from './EditorRail';
 
@@ -45,6 +46,13 @@ export function EditorLibraries({ leftNav, projectId, catalog, onI18nChange }: E
     return (
       <Card size="small" className="editor-panel language-library-card" title={t('lowcode.iconLibrary')}>
         <IconLibraryPanel projectId={projectId} />
+      </Card>
+    );
+  }
+  if (leftNav === 'fonts') {
+    return (
+      <Card size="small" className="editor-panel language-library-card" title={t('lowcode.fontLibrary')}>
+        <FontLibraryPanel projectId={projectId} />
       </Card>
     );
   }

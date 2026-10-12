@@ -63,6 +63,10 @@ export type WidgetRenderContext = {
   useComponentTestData?: boolean;
   /** 是否正处于组件编辑态：仅此时渲染插槽名称/占位 chrome。 */
   slotChrome?: boolean;
+  /** 是否正处于组件编辑态（区别于组件定义编辑器）：实例内部树与数据解耦，显示只由查看状态驱动。 */
+  componentEditing?: boolean;
+  /** 组件编辑态下正在编辑的组件实例 id：该实例直接使用组件自身 testData 并忽略入参。 */
+  componentEditId?: string | null;
   /** 状态查看/切换（含组件内部 prefixed 宿主）。组件/slot 内部求值会透传它。 */
   viewing?: WidgetViewing;
   /** 图标路径 `分组.名称` 到文件地址。 */

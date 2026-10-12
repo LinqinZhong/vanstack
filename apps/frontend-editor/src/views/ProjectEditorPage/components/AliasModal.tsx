@@ -11,17 +11,19 @@ type AliasModalProps = {
   onChange: (value: string) => void;
   onOk: () => void;
   onCancel: () => void;
+  title?: string;
+  placeholder?: string;
 };
 
-export function AliasModal({ open, value, onChange, onOk, onCancel }: AliasModalProps) {
+export function AliasModal({ open, value, onChange, onOk, onCancel, title, placeholder }: AliasModalProps) {
   const { t } = useTranslation();
   return (
-    <Modal open={open} title={t('lowcode.setAlias')} onOk={onOk} onCancel={onCancel} destroyOnHidden>
+    <Modal open={open} title={title ?? t('lowcode.setAlias')} onOk={onOk} onCancel={onCancel} destroyOnHidden>
       <Input
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onPressEnter={onOk}
-        placeholder={t('lowcode.aliasPlaceholder')}
+        placeholder={placeholder ?? t('lowcode.aliasPlaceholder')}
         maxLength={30}
         autoFocus
       />

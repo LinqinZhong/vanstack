@@ -32,6 +32,37 @@ export type WidgetPosition = Exclude<PositionMode, 'static'>;
 
 export const OVERFLOW_MODES = ['visible', 'hidden', 'scroll', 'auto'] as const;
 export type OverflowMode = (typeof OVERFLOW_MODES)[number];
+
+export const BACKGROUND_BLEND_MODES = [
+  'normal',
+  'multiply',
+  'screen',
+  'overlay',
+  'darken',
+  'lighten',
+  'color-dodge',
+  'color-burn',
+  'hard-light',
+  'soft-light',
+  'difference',
+  'exclusion',
+  'saturation',
+  'color',
+  'luminosity',
+] as const;
+export type BackgroundBlendMode = (typeof BACKGROUND_BLEND_MODES)[number];
+
+export const BACKGROUND_FIT_MODES = [
+  'cover',
+  'fill',
+  'vertical-crop',
+  'horizontal-crop',
+  'vertical-stretch',
+  'horizontal-stretch',
+  'contain',
+] as const;
+export type BackgroundFitMode = (typeof BACKGROUND_FIT_MODES)[number];
+
 const STORED_POSITIONS = ['relative', 'absolute', 'fixed', 'sticky'] as const satisfies ReadonlyArray<WidgetPosition>;
 
 export const ANGLE_UNITS = ['deg', 'rad', 'grad', 'turn'] as const;
@@ -49,6 +80,11 @@ export type WidgetStyle = {
   underline?: boolean | string;
   lineThrough?: boolean | string;
   background?: string;
+  backgroundImage?: string;
+  backgroundBlendMode?: BackgroundBlendMode | string;
+  backgroundFit?: BackgroundFitMode | string;
+  backgroundPositionX?: number | string;
+  backgroundPositionY?: number | string;
   borderTopWidth?: number | string;
   borderRightWidth?: number | string;
   borderBottomWidth?: number | string;
@@ -328,6 +364,8 @@ export type WidgetStateDelta = {
   swiper?: SwiperStyle;
   presence?: WidgetPresence;
   states?: WidgetStateDelta[];
+  /** 按语言维度的字段分支（语言 key → 该语言相对默认语言的增量）。 */
+  langFields?: WidgetLangFields;
 };
 
 export type WidgetStateRole = 'owner' | 'descendant';
@@ -337,6 +375,25 @@ export type WidgetStateViewing = {
   state: string | null;
 };
 
+/** 语言维度的字段增量：某个语言相对默认语言（简体中文）的差异。 */
+export type WidgetLangFieldDelta = {
+  props?: WidgetContentProps;
+  style?: WidgetStyle;
+  flex?: FlexContainerStyle;
+  item?: FlexItemStyle;
+  swiper?: SwiperStyle;
+  presence?: WidgetPresence;
+};
+
+/** 语言 key → 该语言下的字段增量。默认语言（zh-CN）不在此表中，其值为各字段的基准值。 */
+export type WidgetLangFields = Record<string, WidgetLangFieldDelta>;
+
+/** 默认页面语言（简体中文）的语言 key，语言库中始终存在。 */
+export const DEFAULT_PAGE_LANG_KEY = 'zh-CN';
+
+/** 默认页面语言（简体中文）的显示名称。 */
+export const DEFAULT_PAGE_LANG_NAME = '简体中文';
+
 type WidgetStates = {
   states?: WidgetStateDelta[];
   stateOverrides?: WidgetStateDelta[];
@@ -344,6 +401,7 @@ type WidgetStates = {
   stateFn?: string;
   hoverStateId?: string;
   transition?: number | string;
+  langFields?: WidgetLangFields;
 };
 
 export const LOOP_FROMS = ['data', 'props', 'literal'] as const;
@@ -410,8 +468,8 @@ export type PageWidget =
       id: string;
       /** 引用组件声明的插槽 id。 */
       slotId: string;
-      /** 插槽描述。 */
-      desc?: string;
+      /** 插槽名称。 */
+      name?: string;
       children: PageWidget[];
       style?: WidgetStyle;
       item?: FlexItemStyle;
@@ -611,7 +669,8 @@ export type ComponentProp = {
 export type ComponentSlot = {
   /** 插槽唯一标识，自动生成。 */
   id: string;
-  desc?: string;
+  /** 插槽名称，允许重复，缺省回退为“插槽”。 */
+  name?: string;
   params?: ComponentProp[];
 };
 
@@ -627,7 +686,7 @@ export function compactComponentSlots(slots: ComponentSlot[] | undefined): Compo
       continue;
     }
     seen.add(id);
-    const desc = slot.desc?.trim();
+    const name = slot.name?.trim();
     const params = (slot.params ?? [])
       .map((param) => ({
         ...param,
@@ -637,7 +696,7 @@ export function compactComponentSlots(slots: ComponentSlot[] | undefined): Compo
       .filter((param) => param.name && isJsIdentifier(param.name) && isComponentPropType(param.type));
     next.push({
       id,
-      ...(desc ? { desc } : {}),
+      ...(name ? { name } : {}),
       ...(params.length > 0 ? { params } : {}),
     });
   }
@@ -871,10 +930,51 @@ export function applyWidgetPresence<T extends { existsFn?: string; displayFn?: s
   return next;
 }
 
+const DATA_BINDING_TOKEN = /\$[A-Za-z_]/;
+
+function isDataDrivenGate(source: string | undefined): boolean {
+  return Boolean(source && DATA_BINDING_TOKEN.test(source));
+}
+
+/** 存在/显示/可见闸门是否引用了绑定（$props/$data/$query 等）——即随数据变化而非结构性常量。 */
+export function hasDataDrivenPresenceGates(widget: {
+  existsFn?: string;
+  displayFn?: string;
+  visibleFn?: string;
+}): boolean {
+  return (
+    isDataDrivenGate(widget.existsFn) || isDataDrivenGate(widget.displayFn) || isDataDrivenGate(widget.visibleFn)
+  );
+}
+
+/** 递归剔除引用绑定的存在/显示/可见闸门，常量闸门（如 return false）保留。组件编辑态与数据解耦时使用。 */
+export function stripDataDrivenPresenceGates(widgets: PageWidget[]): PageWidget[] {
+  return widgets.map((widget) => {
+    let next = widget;
+    if (hasDataDrivenPresenceGates(widget)) {
+      next = { ...next };
+      if (isDataDrivenGate(next.existsFn)) {
+        delete next.existsFn;
+      }
+      if (isDataDrivenGate(next.displayFn)) {
+        delete next.displayFn;
+      }
+      if (isDataDrivenGate(next.visibleFn)) {
+        delete next.visibleFn;
+      }
+    }
+    if ('children' in next && next.children && next.children.length > 0) {
+      next = { ...next, children: stripDataDrivenPresenceGates(next.children) };
+    }
+    return next;
+  });
+}
+
 function parseWidgetPresence(raw: string | undefined): WidgetPresence | undefined {
   const value = raw?.trim();
   return value && (WIDGET_PRESENCES as readonly string[]).includes(value) ? (value as WidgetPresence) : undefined;
 }
+
 
 function parseHostStateFn(raw: string, ownedIds: string[]): string | undefined {
   const value = raw.trim();
@@ -899,11 +999,20 @@ export function formatI18nCopy(groupKey: string, entryKey: string): string {
   return `$t("${groupKey}.${entryKey}")`;
 }
 
+function defaultPageLang(): PageI18nLang {
+  return { key: DEFAULT_PAGE_LANG_KEY, name: DEFAULT_PAGE_LANG_NAME, dir: 'ltr' };
+}
+
+/** 语言库中始终包含简体中文（zh-CN），缺失时补在最前。 */
+export function ensureDefaultPageLang(langs: PageI18nLang[]): PageI18nLang[] {
+  return langs.some((lang) => lang.key === DEFAULT_PAGE_LANG_KEY) ? langs : [defaultPageLang(), ...langs];
+}
+
 export function compactPageI18n(catalog: PageI18n | undefined): PageI18n | undefined {
   if (!catalog) {
     return undefined;
   }
-  const langs = catalog.langs.filter((lang) => isI18nKey(lang.key));
+  const langs = ensureDefaultPageLang(catalog.langs.filter((lang) => isI18nKey(lang.key)));
   const groups = catalog.groups
     .filter((group) => isI18nKey(group.key))
     .map((group) => ({
@@ -937,10 +1046,7 @@ export function resolveI18nCopy(raw: string, catalog: PageI18n | undefined, loca
 }
 
 export function pickPageLocale(catalog: PageI18n | undefined, runtimeLang?: string): string | undefined {
-  const langs = catalog?.langs ?? [];
-  if (langs.length === 0) {
-    return undefined;
-  }
+  const langs = ensureDefaultPageLang(catalog?.langs ?? []);
   const raw = (runtimeLang ?? '').trim();
   if (raw) {
     const exact = langs.find((lang) => lang.key === raw);
@@ -955,7 +1061,7 @@ export function pickPageLocale(catalog: PageI18n | undefined, runtimeLang?: stri
       }
     }
   }
-  return langs[0]?.key;
+  return (langs[0] ?? defaultPageLang()).key;
 }
 
 export function pageI18nDir(catalog: PageI18n | undefined, locale?: string): PageI18nDir {
@@ -1072,6 +1178,11 @@ const STYLE_KEYS = [
   'underline',
   'lineThrough',
   'background',
+  'backgroundImage',
+  'backgroundBlendMode',
+  'backgroundFit',
+  'backgroundPositionX',
+  'backgroundPositionY',
   'borderTopWidth',
   'borderRightWidth',
   'borderBottomWidth',
@@ -1147,6 +1258,80 @@ function parseWidgetHost(node: OrderedNode): {
 function parseWidgetAlias(node: OrderedNode): { alias?: string } {
   const raw = attr(node, 'alias')?.trim();
   return raw ? { alias: raw } : {};
+}
+
+function compactLangFieldDelta(raw: Record<string, unknown> | undefined): WidgetLangFieldDelta | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined;
+  }
+  const row = raw as Record<string, unknown>;
+  const props = compactWidgetProps(row.props as WidgetContentProps | undefined);
+  const style = compactWidgetStyle(row.style as WidgetStyle | undefined);
+  const flex = compactFlexContainer(row.flex as FlexContainerStyle | undefined);
+  const item = compactFlexItem(row.item as FlexItemStyle | undefined);
+  const swiper = compactSwiper(row.swiper as SwiperStyle | undefined);
+  const presenceRaw = typeof row.presence === 'string' ? row.presence : undefined;
+  const presence =
+    presenceRaw && WIDGET_PRESENCES.includes(presenceRaw as WidgetPresence)
+      ? (presenceRaw as WidgetPresence)
+      : undefined;
+  const next: WidgetLangFieldDelta = {};
+  if (props) next.props = props;
+  if (style) next.style = style;
+  if (flex) next.flex = flex;
+  if (item) next.item = item;
+  if (swiper) next.swiper = swiper;
+  if (presence) next.presence = presence;
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+function validLangKey(key: string): boolean {
+  return key.length > 0 && key !== DEFAULT_PAGE_LANG_KEY && !key.includes('.') && !key.includes('"');
+}
+
+function parseWidgetLangFields(raw: string): WidgetLangFields | undefined {
+  if (!raw?.trim()) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return undefined;
+  }
+  const next: WidgetLangFields = {};
+  for (const [lang, deltaRaw] of Object.entries(parsed as Record<string, unknown>)) {
+    const key = lang.trim();
+    if (!validLangKey(key)) {
+      continue;
+    }
+    const delta = compactLangFieldDelta(deltaRaw as Record<string, unknown> | undefined);
+    if (delta) {
+      next[key] = delta;
+    }
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+function serializeWidgetLangFields(langFields: WidgetLangFields | undefined): string | undefined {
+  if (!langFields) {
+    return undefined;
+  }
+  const next: WidgetLangFields = {};
+  for (const [lang, deltaRaw] of Object.entries(langFields)) {
+    const key = lang.trim();
+    if (!validLangKey(key)) {
+      continue;
+    }
+    const delta = compactLangFieldDelta(deltaRaw as unknown as Record<string, unknown>);
+    if (delta) {
+      next[key] = delta;
+    }
+  }
+  return Object.keys(next).length > 0 ? JSON.stringify(next) : undefined;
 }
 
 const WIDGET_TAGS = [
@@ -1778,6 +1963,12 @@ export function compactWidgetStyle(style: WidgetStyle | undefined): WidgetStyle 
     if (key === 'overflow' && !(OVERFLOW_MODES as readonly string[]).includes(value as string)) {
       continue;
     }
+    if (key === 'backgroundBlendMode' && !(BACKGROUND_BLEND_MODES as readonly string[]).includes(value as string)) {
+      continue;
+    }
+    if (key === 'backgroundFit' && !(BACKGROUND_FIT_MODES as readonly string[]).includes(value as string)) {
+      continue;
+    }
     if (
       key === 'top' ||
       key === 'right' ||
@@ -2261,6 +2452,11 @@ function parseStyle(node: OrderedNode): WidgetStyle | undefined {
     underline: parseBoolAttr(attr(node, 'underline')),
     lineThrough: parseBoolAttr(attr(node, 'line-through')),
     background: attr(node, 'background') || undefined,
+    backgroundImage: attr(node, 'background-image') || undefined,
+    backgroundBlendMode: parseBoundEnum(attr(node, 'background-blend-mode'), BACKGROUND_BLEND_MODES),
+    backgroundFit: parseBoundEnum(attr(node, 'background-fit'), BACKGROUND_FIT_MODES),
+    backgroundPositionX: parseNumber(attr(node, 'background-position-x')),
+    backgroundPositionY: parseNumber(attr(node, 'background-position-y')),
     borderTopWidth: parseNonNegative(attr(node, 'border-top-width')) ?? border?.top,
     borderRightWidth: parseNonNegative(attr(node, 'border-right-width')) ?? border?.right,
     borderBottomWidth: parseNonNegative(attr(node, 'border-bottom-width')) ?? border?.bottom,
@@ -2470,6 +2666,21 @@ function styleAttrs(style: WidgetStyle | undefined): Record<string, string> {
   }
   if (compact.background) {
     attrs['@_background'] = compact.background;
+  }
+  if (compact.backgroundImage) {
+    attrs['@_background-image'] = compact.backgroundImage;
+  }
+  if (compact.backgroundBlendMode) {
+    attrs['@_background-blend-mode'] = compact.backgroundBlendMode;
+  }
+  if (compact.backgroundFit) {
+    attrs['@_background-fit'] = compact.backgroundFit;
+  }
+  if (compact.backgroundPositionX != null) {
+    attrs['@_background-position-x'] = String(compact.backgroundPositionX);
+  }
+  if (compact.backgroundPositionY != null) {
+    attrs['@_background-position-y'] = String(compact.backgroundPositionY);
   }
   writeBorderWidths(
     attrs,
@@ -3142,11 +3353,11 @@ function parseComponentSlots(nodes: OrderedNode[]): ComponentSlot[] | undefined 
       continue;
     }
     const id = attr(child, 'id').trim();
-    const desc = attr(child, 'desc').trim();
+    const name = (attr(child, 'name') || attr(child, 'desc')).trim();
     const params = parseContractProps(nodeList(child.slot), 'params') ?? [];
     slots.push({
       id,
-      ...(desc ? { desc } : {}),
+      ...(name ? { name } : {}),
       ...(params.length > 0 ? { params } : {}),
     });
   }
@@ -3157,9 +3368,9 @@ function serializeComponentSlots(slots: ComponentSlot[]): OrderedNode {
   return {
     slots: slots.map((slot) => {
       const attrs: Record<string, string> = { '@_id': slot.id };
-      const desc = slot.desc?.trim();
-      if (desc) {
-        attrs['@_desc'] = desc;
+      const name = slot.name?.trim();
+      if (name) {
+        attrs['@_name'] = name;
       }
       return {
         slot: slot.params?.length ? [serializeContractProps('params', slot.params)] : [],
@@ -3495,8 +3706,9 @@ export function resolveWidgetState(
   widget: PageWidget,
   stateId: string | null | undefined,
   role: WidgetStateRole,
+  locale?: string,
 ): WidgetStateFields {
-  return resolveWidgetStateStack(widget, stateId ? [{ id: stateId, role }] : []);
+  return resolveWidgetStateStack(widget, stateId ? [{ id: stateId, role }] : [], locale);
 }
 
 function widgetFieldBase(widget: PageWidget): WidgetStateFields {
@@ -3510,13 +3722,43 @@ function widgetFieldBase(widget: PageWidget): WidgetStateFields {
   };
 }
 
-export function resolveWidgetStateStack(widget: PageWidget, layers: WidgetStateLayer[]): WidgetStateFields {
+/** 把某个状态层的字段按语言分支合并：非默认语言时叠加 langFields[locale]。 */
+function localizedFieldDelta(delta: WidgetStateDelta | undefined, locale: string | undefined): WidgetStateDelta | undefined {
+  if (!delta || !locale) {
+    return delta;
+  }
+  const lang = delta.langFields?.[locale];
+  if (!lang) {
+    return delta;
+  }
+  return {
+    ...delta,
+    props: mergeProps(delta.props, lang.props),
+    style: mergeStyle(delta.style, lang.style),
+    flex: mergeFlex(delta.flex, lang.flex),
+    item: mergeItem(delta.item, lang.item),
+    swiper: mergeSwiper(delta.swiper, lang.swiper),
+    presence: mergePresence(delta.presence, lang.presence),
+  };
+}
+
+export function resolveWidgetStateStack(widget: PageWidget, layers: WidgetStateLayer[], locale?: string): WidgetStateFields {
   let props = widgetBaseProps(widget);
   let style = compactWidgetStyle(widget.style);
   let flex = widget.type === 'flex' ? compactFlexContainer(widget.flex) : undefined;
   let item = hasFlexItem(widget) ? compactFlexItem(widget.item) : undefined;
   let swiper = widget.type === 'swiper' ? compactSwiper(widget.swiper) : undefined;
   let presence: WidgetPresence | undefined = undefined;
+  if (locale) {
+    const lang = widget.langFields?.[locale];
+    if (lang) {
+      props = mergeProps(props, lang.props);
+      style = mergeStyle(style, lang.style);
+      flex = widget.type === 'flex' ? mergeFlex(flex, lang.flex) : undefined;
+      item = hasFlexItem(widget) ? mergeItem(item, lang.item) : undefined;
+      swiper = widget.type === 'swiper' ? mergeSwiper(swiper, lang.swiper) : undefined;
+    }
+  }
   let activeOverride: WidgetStateDelta | undefined;
   for (const layer of layers) {
     let delta: WidgetStateDelta | undefined;
@@ -3526,6 +3768,7 @@ export function resolveWidgetStateStack(widget: PageWidget, layers: WidgetStateL
       delta = widget.stateOverrides?.find((item) => item.id === layer.id);
       activeOverride = delta;
     }
+    delta = localizedFieldDelta(delta, locale);
     props = mergeProps(props, delta?.props);
     style = mergeStyle(style, delta?.style);
     flex = widget.type === 'flex' ? mergeFlex(flex, delta?.flex) : undefined;
@@ -3611,6 +3854,7 @@ function withResolvedFields(
   widget: PageWidget,
   fields: WidgetStateFields,
   transition?: number | string,
+  locale?: string,
 ): PageWidget {
   let next = applyResolvedProps(widget, fields.props) as PageWidget;
   next = { ...next };
@@ -3642,6 +3886,11 @@ function withResolvedFields(
   }
   if (fields.presence) {
     next = applyWidgetPresence(next, fields.presence);
+  } else if (locale) {
+    const langPresence = widget.langFields?.[locale]?.presence;
+    if (langPresence) {
+      next = applyWidgetPresence(next, langPresence);
+    }
   }
   const duration = compactTransition(transition);
   if (duration) {
@@ -3666,6 +3915,8 @@ function normalizeViewing(
 export type ResolveWidgetTreeOptions = {
   appliedStateFor?: (widget: PageWidget) => string | null;
   stateLayersSink?: WeakMap<object, WidgetStateLayer[]>;
+  /** 当前语言 key，用于按语言分支解析状态字段。 */
+  locale?: string;
 };
 
 function ownerActiveState(
@@ -3710,6 +3961,7 @@ function resolveWidgetNode(
   inheritedTransition: number | string | undefined,
   appliedStateFor?: (widget: PageWidget) => string | null,
   stateLayersSink?: WeakMap<object, WidgetStateLayer[]>,
+  locale?: string,
 ): PageWidget {
   const ownState = ownerActiveState(widget, viewing, appliedStateFor);
   const layers: WidgetStateLayer[] = [];
@@ -3724,13 +3976,26 @@ function resolveWidgetNode(
     (ownState ? stateTransition(widget, ownState) : undefined) ??
     compactTransition(widget.transition) ??
     stackTransition(widget, layers, inheritedTransition);
-  const next = withResolvedFields(widget, resolveWidgetStateStack(widget, layers), transition);
+  const fields = resolveWidgetStateStack(widget, layers, locale);
+  // 控件自身声明的状态被激活、且状态增量未显式指定 presence 时，数据驱动的
+  // 存在/显示/可见闸门（引用 $props/$data 等绑定）不再参与判定：状态激活本身
+  // 就代表该状态下的显隐安排，否则「无数据时隐藏」之类的基础 displayFn 会在
+  // 状态生效时把整个子树遮蔽掉。常量闸门（如 return false）是结构性设计，保留。
+  if (
+    ownState &&
+    widget.states?.some((item) => item.id === ownState) &&
+    fields.presence === undefined &&
+    hasDataDrivenPresenceGates(widget)
+  ) {
+    fields.presence = 'visible';
+  }
+  const next = withResolvedFields(widget, fields, transition, locale);
   stateLayersSink?.set(next, layers);
   if ('children' in next) {
     const childIds = ownState && !inheritedIds.includes(ownState) ? [...inheritedIds, ownState] : inheritedIds;
     const childTransition = transition;
     next.children = next.children.map((child) =>
-      resolveWidgetNode(child, childIds, viewing, childTransition, appliedStateFor, stateLayersSink),
+      resolveWidgetNode(child, childIds, viewing, childTransition, appliedStateFor, stateLayersSink, locale),
     );
   }
   return next;
@@ -3743,7 +4008,7 @@ export function resolveWidgetTree(
 ): PageWidget[] {
   const list = normalizeViewing(viewing);
   return widgets.map((widget) =>
-    resolveWidgetNode(widget, [], list, undefined, options?.appliedStateFor, options?.stateLayersSink),
+    resolveWidgetNode(widget, [], list, undefined, options?.appliedStateFor, options?.stateLayersSink, options?.locale),
   );
 }
 
@@ -3787,6 +4052,7 @@ function parseStateDelta(node: OrderedNode): WidgetStateDelta | undefined {
   const swiper = parseSwiper(node);
   const presence = parseWidgetPresence(attr(node, 'presence'));
   const transition = tag === '_' ? compactTransition(parseNonNegativeInteger(attr(node, 'transition'))) : undefined;
+  const langFields = parseWidgetLangFields(attr(node, 'lang-fields'));
   const nested: WidgetStateDelta[] = [];
   const seen = new Set<string>();
   if (tag === '__') {
@@ -3812,6 +4078,7 @@ function parseStateDelta(node: OrderedNode): WidgetStateDelta | undefined {
     ...(item ? { item } : {}),
     ...(swiper ? { swiper } : {}),
     ...(presence ? { presence } : {}),
+    ...(langFields ? { langFields } : {}),
     ...(nested.length > 0 ? { states: nested } : {}),
   };
 }
@@ -3895,6 +4162,7 @@ function serializeDeltaNode(
   base?: WidgetStateFields,
 ): OrderedNode | null {
   const compact = compactDeltaForWrite(widget, delta, base);
+  const langFields = serializeWidgetLangFields(delta.langFields);
   const attrs: Record<string, string> = {
     '@_id': compact.id,
     ...(tag === '_' && compact.name != null ? { '@_name': compact.name } : {}),
@@ -3905,6 +4173,7 @@ function serializeDeltaNode(
     ...(asItem && hasFlexItem(widget) ? itemAttrs(compact.item) : {}),
     ...(widget.type === 'swiper' ? swiperAttrs(compact.swiper) : {}),
     ...(compact.presence ? { '@_presence': compact.presence } : {}),
+    ...(langFields ? { '@_lang-fields': langFields } : {}),
   };
   const nestedBase: WidgetStateFields = {
     props: compactWidgetProps({ ...((base ?? widgetFieldBase(widget)).props ?? {}), ...(compact.props ?? {}) }),
@@ -4015,7 +4284,7 @@ function widgetStateSpread(
   widgetNode: OrderedNode,
   inner: OrderedNode[],
   ancestorIds: string[],
-): Pick<WidgetStates, 'states' | 'stateOverrides' | 'stateFn' | 'hoverStateId' | 'transition'> & {
+): Pick<WidgetStates, 'states' | 'stateOverrides' | 'stateFn' | 'hoverStateId' | 'transition' | 'langFields'> & {
   rest: OrderedNode[];
 } {
   const { states, overrides, rest } = splitStateNodes(inner);
@@ -4048,6 +4317,7 @@ function widgetStateSpread(
   const hoverAttr = attr(widgetNode, 'hover');
   const hoverStateId = hoverAttr && ownedIds.includes(hoverAttr) ? hoverAttr : undefined;
   const transition = compactTransition(parseNonNegativeInteger(attr(widgetNode, 'transition')));
+  const langFields = parseWidgetLangFields(attr(widgetNode, 'lang-fields'));
   return {
     rest,
     ...(states.length > 0 ? { states } : {}),
@@ -4055,6 +4325,7 @@ function widgetStateSpread(
     ...(stateFn ? { stateFn } : {}),
     ...(hoverStateId ? { hoverStateId } : {}),
     ...(transition ? { transition } : {}),
+    ...(langFields ? { langFields } : {}),
   };
 }
 
@@ -4093,6 +4364,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4121,6 +4393,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4155,6 +4428,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4178,6 +4452,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4207,6 +4482,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4238,6 +4514,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4267,6 +4544,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4290,6 +4568,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4302,12 +4581,12 @@ function parseWidgets(
       const nextIds = [...ancestorIds, ...extraDeclaredIds(extra)];
       const rawSlotId = attr(child, 'slot-id').trim();
       const slotId = rawSlotId === 'undefined' || rawSlotId === 'null' ? '' : rawSlotId;
-      const desc = attr(child, 'desc').trim();
+      const name = (attr(child, 'name') || attr(child, 'desc')).trim();
       widgets.push({
         type: 'slot',
         id: attr(child, 'id') || `n${ids.n}`,
         slotId,
-        ...(desc ? { desc } : {}),
+        ...(name ? { name } : {}),
         children: parseWidgets(extra.rest, ids, 'slot', nextIds),
         ...(style ? { style } : {}),
         ...(item ? { item } : {}),
@@ -4319,6 +4598,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4345,6 +4625,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4373,6 +4654,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4399,6 +4681,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4431,6 +4714,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4457,6 +4741,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4486,6 +4771,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4511,6 +4797,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4533,6 +4820,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4564,6 +4852,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4588,6 +4877,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
       continue;
@@ -4617,6 +4907,7 @@ function parseWidgets(
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
         ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
         ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
         ...(extra.transition ? { transition: extra.transition } : {}),
       });
     }
@@ -4638,6 +4929,7 @@ function widgetHostAttrs(
   const hover = widget.hoverStateId;
   const hoverValid = hover && ownedStateIds(widget).includes(hover) ? hover : null;
   const transition = compactTransition(widget.transition);
+  const langFields = serializeWidgetLangFields(widget.langFields);
   return {
     '@_id': id,
     ...style,
@@ -4652,6 +4944,7 @@ function widgetHostAttrs(
     ...(applied ? { '@_state': applied } : {}),
     ...(hoverValid ? { '@_hover': hoverValid } : {}),
     ...(transition ? { '@_transition': String(transition) } : {}),
+    ...(langFields ? { '@_lang-fields': langFields } : {}),
   };
 }
 
@@ -4709,7 +5002,7 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
     if (widget.type === 'slot') {
       return {
         slot: inner,
-        ':@': widgetHostAttrs(widget, id, style, { ...(widget.slotId ? { '@_slot-id': widget.slotId } : {}), ...(widget.desc ? { '@_desc': widget.desc } : {}), ...item }),
+        ':@': widgetHostAttrs(widget, id, style, { ...(widget.slotId ? { '@_slot-id': widget.slotId } : {}), ...(widget.name ? { '@_name': widget.name } : {}), ...item }),
       };
     }
     if (widget.type === 'button') {

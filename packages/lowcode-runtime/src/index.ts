@@ -33,6 +33,10 @@ export type RenderPageXmlOptions = {
   useComponentTestData?: boolean;
   /** 组件编辑态：仅此时渲染组件实例内的插槽 chrome。 */
   slotChrome?: boolean;
+  /** 组件编辑态：实例内部树与数据解耦，显示只由查看状态驱动。 */
+  componentEditing?: boolean;
+  /** 组件编辑态下正在编辑的组件实例 id。 */
+  componentEditId?: string | null;
   icons?: Readonly<Record<string, string>>;
   /** 变化时整页重挂，清掉预览里改过的数据和控件状态。 */
   previewEpoch?: number;
@@ -99,6 +103,8 @@ export function renderPage(
       centerContent: options?.centerContent,
       useComponentTestData: options?.useComponentTestData,
       slotChrome: options?.slotChrome,
+      componentEditing: Boolean(options?.componentEditing),
+      componentEditId: options?.componentEditId,
       icons: options?.icons,
       onCommit: options?.onCommit,
     });

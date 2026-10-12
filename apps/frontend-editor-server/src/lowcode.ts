@@ -54,6 +54,7 @@ type ProjectVersionRecord = {
   langVersionId: string;
   assetVersionId: string;
   iconVersionId: string;
+  fontVersionId: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -144,6 +145,8 @@ type EventRecord = {
 
 const KEY_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 
+const FONT_GROUP = 'default';
+
 function now(): string {
   return new Date().toISOString();
 }
@@ -201,6 +204,30 @@ export class LocalLowcode {
     return projects;
   }
 
+  async ensureFontLibraries() {
+    const { listProjectIds } = await import('./disk');
+    for (const id of await listProjectIds()) {
+      const project = await this.readProject(id);
+      if (!project) {
+        continue;
+      }
+      const versions = await this.readVersions(id);
+      for (const version of versions) {
+        const existing = version.fontVersionId
+          ? await readJson<LibraryRecord>(mongoFile(id, `font.version/${version.fontVersionId}.json`))
+          : null;
+        if (existing) {
+          continue;
+        }
+        const fontId = newId();
+        await this.writeDoc(id, `font.version/${fontId}.json`, emptyLibrary(id, version.projectKey, fontId, now()));
+        version.fontVersionId = fontId;
+        version.updatedAt = now();
+        await this.writeDoc(id, `project.version/${version._id}.json`, version);
+      }
+    }
+  }
+
   async createProject(input: { name?: string; key?: string; description?: string }) {
     const name = requiredName(input.name);
     const key = requiredKey(input.key);
@@ -212,6 +239,7 @@ export class LocalLowcode {
     const langId = newId();
     const assetId = newId();
     const iconId = newId();
+    const fontId = newId();
     const versionId = newId();
     await mkdir(projectDir(id), { recursive: true });
     const project: ProjectRecord = {
@@ -228,6 +256,7 @@ export class LocalLowcode {
     await this.writeDoc(id, `lang.version/${langId}.json`, emptyLang(id, key, langId, stamp));
     await this.writeDoc(id, `asset.version/${assetId}.json`, emptyLibrary(id, key, assetId, stamp));
     await this.writeDoc(id, `icon.version/${iconId}.json`, emptyLibrary(id, key, iconId, stamp));
+    await this.writeDoc(id, `font.version/${fontId}.json`, emptyLibrary(id, key, fontId, stamp));
     await this.writeDoc(id, `project.version/${versionId}.json`, {
       _id: versionId,
       projectId: id,
@@ -238,6 +267,7 @@ export class LocalLowcode {
       langVersionId: langId,
       assetVersionId: assetId,
       iconVersionId: iconId,
+      fontVersionId: fontId,
       createdAt: stamp,
       updatedAt: stamp,
     } satisfies ProjectVersionRecord);
@@ -313,9 +343,11 @@ export class LocalLowcode {
       const langId = newId();
       const assetId = newId();
       const iconId = newId();
+      const fontId = newId();
       await this.writeDoc(id, `lang.version/${langId}.json`, emptyLang(id, project.key, langId, stamp));
       await this.writeDoc(id, `asset.version/${assetId}.json`, emptyLibrary(id, project.key, assetId, stamp));
       await this.writeDoc(id, `icon.version/${iconId}.json`, emptyLibrary(id, project.key, iconId, stamp));
+      await this.writeDoc(id, `font.version/${fontId}.json`, emptyLibrary(id, project.key, fontId, stamp));
       saved = {
         _id: newId(),
         projectId: id,
@@ -326,6 +358,7 @@ export class LocalLowcode {
         langVersionId: langId,
         assetVersionId: assetId,
         iconVersionId: iconId,
+        fontVersionId: fontId,
         createdAt: stamp,
         updatedAt: stamp,
       };
@@ -716,6 +749,60 @@ export class LocalLowcode {
     }
   }
 
+  async listFonts(id: string, versionId: string) {
+    const library = await this.libraryOf(id, versionId, 'font');
+    const group = library.groups.find((item) => item.name === FONT_GROUP);
+    return (group?.files ?? [])
+      .map((file) => ({ name: file.name, key: file.key, url: fileUrl(file.key), size: file.size }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async uploadFont(
+    id: string,
+    versionId: string,
+    file: { originalName: string; mime: string; body: Buffer },
+    displayName?: string,
+  ) {
+    const project = await this.requireProject(id);
+    const fileName = assertFileName(uploadName(file.originalName, displayName), 'font');
+    const key = `lowcode/${project.key}/blobs/${newId()}/${fileName}`;
+    await this.writeObject(id, key, file.body, file.mime || 'application/octet-stream');
+    try {
+      await this.editLibrary(id, versionId, 'font', (library) => {
+        let target = library.groups.find((item) => item.name === FONT_GROUP);
+        if (!target) {
+          target = { name: FONT_GROUP, files: [] };
+          library.groups.push(target);
+        }
+        if (target.files.some((item) => item.name === fileName)) {
+          throw new ApiError(409, 'file already exists');
+        }
+        target.files.push({ name: fileName, key, size: file.body.length, contentType: file.mime });
+      });
+    } catch (error) {
+      await this.removeObject(id, key);
+      throw error;
+    }
+    return { name: fileName, key, url: fileUrl(key), size: file.body.length };
+  }
+
+  async deleteFont(id: string, versionId: string, fileName: string) {
+    const name = assertFileName(fileName, 'font');
+    let removed = '';
+    await this.editLibrary(id, versionId, 'font', (library) => {
+      const target = library.groups.find((item) => item.name === FONT_GROUP);
+      const file = target?.files.find((item) => item.name === name);
+      if (!target || !file) {
+        throw new ApiError(404, 'file not found');
+      }
+      removed = file.key;
+      target.files = target.files.filter((item) => item.name !== name);
+    });
+    if (removed) {
+      await this.removeObject(id, removed);
+    }
+  }
+
   async listNamespaces(id: string) {
     const project = await this.requireProject(id);
     return (project.namespace ?? []).map((item) => ({ name: item.name, versionId: item.versionId }));
@@ -1050,9 +1137,9 @@ export class LocalLowcode {
     return copy;
   }
 
-  private async libraryOf(id: string, versionId: string, kind: 'asset' | 'icon') {
+  private async libraryOf(id: string, versionId: string, kind: 'asset' | 'icon' | 'font') {
     const version = await this.requireVersion(id, versionId);
-    const libraryId = kind === 'asset' ? version.assetVersionId : version.iconVersionId;
+    const libraryId = kind === 'asset' ? version.assetVersionId : kind === 'icon' ? version.iconVersionId : version.fontVersionId;
     const library = await readJson<LibraryRecord>(mongoFile(id, `${kind}.version/${libraryId}.json`));
     if (!library) {
       throw new ApiError(404, 'library not found');
@@ -1063,11 +1150,11 @@ export class LocalLowcode {
   private async editLibrary(
     id: string,
     versionId: string,
-    kind: 'asset' | 'icon',
+    kind: 'asset' | 'icon' | 'font',
     mutate: (library: LibraryRecord) => void,
   ) {
     const version = await this.requireVersion(id, versionId);
-    const libraryId = kind === 'asset' ? version.assetVersionId : version.iconVersionId;
+    const libraryId = kind === 'asset' ? version.assetVersionId : kind === 'icon' ? version.iconVersionId : version.fontVersionId;
     const current = await readJson<LibraryRecord>(mongoFile(id, `${kind}.version/${libraryId}.json`));
     if (!current) {
       throw new ApiError(404, 'library not found');
@@ -1085,8 +1172,10 @@ export class LocalLowcode {
       await this.writeDoc(id, `${kind}.version/${current._id}.json`, current);
       if (kind === 'asset') {
         version.assetVersionId = library._id;
-      } else {
+      } else if (kind === 'icon') {
         version.iconVersionId = library._id;
+      } else {
+        version.fontVersionId = library._id;
       }
       version.updatedAt = now();
       await this.writeDoc(id, `project.version/${version._id}.json`, version);
@@ -1100,6 +1189,7 @@ export class LocalLowcode {
     await this.bump(id, `lang.version/${version.langVersionId}.json`, 1);
     await this.bump(id, `asset.version/${version.assetVersionId}.json`, 1);
     await this.bump(id, `icon.version/${version.iconVersionId}.json`, 1);
+    await this.bump(id, `font.version/${version.fontVersionId}.json`, 1);
     const seen = new Set<string>();
     for (const page of version.pages) {
       if (!page.currentVersionId || seen.has(page.currentVersionId)) {
@@ -1116,6 +1206,7 @@ export class LocalLowcode {
     await this.bump(id, `lang.version/${version.langVersionId}.json`, -1);
     await this.bump(id, `asset.version/${version.assetVersionId}.json`, -1);
     await this.bump(id, `icon.version/${version.iconVersionId}.json`, -1);
+    await this.bump(id, `font.version/${version.fontVersionId}.json`, -1);
     for (const page of pages) {
       if (page.currentVersionId) {
         await this.releaseSnapshot(id, version, page.currentVersionId);
@@ -1200,6 +1291,7 @@ export class LocalLowcode {
       'lang.version',
       'asset.version',
       'icon.version',
+      'font.version',
       'namespace.version',
     ];
     for (const folder of folders) {
@@ -1374,13 +1466,16 @@ function assertGroupName(name: string) {
   return trimmed;
 }
 
-function assertFileName(name: string, kind: 'asset' | 'icon') {
+function assertFileName(name: string, kind: 'asset' | 'icon' | 'font') {
   const trimmed = safeDecode(name).trim().replace(/[\\/]/g, '');
   if (!trimmed || trimmed === '.' || trimmed === '..' || trimmed === '.keep' || trimmed.length > 200) {
     throw new ApiError(400, 'invalid file name');
   }
   if (kind === 'icon' && !/\.svg$/i.test(trimmed)) {
     throw new ApiError(400, 'only svg files are allowed');
+  }
+  if (kind === 'font' && !/\.(ttf|otf|woff2?|eot)$/i.test(trimmed)) {
+    throw new ApiError(400, 'only font files are allowed');
   }
   return trimmed;
 }
@@ -1488,6 +1583,7 @@ export async function materializeBundle(projectId: string, bundle: Record<string
     ['langVersions', 'lang.version'],
     ['assetVersions', 'asset.version'],
     ['iconVersions', 'icon.version'],
+    ['fontVersions', 'font.version'],
     ['namespaceVersions', 'namespace.version'],
   ];
   for (const [field, folder] of folders) {

@@ -7,6 +7,7 @@ import {
   propModelName,
   resolveCopyValue,
   resolveWidgetTree,
+  stripDataDrivenPresenceGates,
   type BindingScope,
   type ComponentProp,
   type ComponentSlot,
@@ -20,7 +21,34 @@ import { resolveRuntimeOwnState } from '../hover';
 import { expandLoopTree, widgetInstanceKey } from '../loop';
 import { formatStoredValue } from '../stored';
 import { runEventIds } from '../events';
-import { widgetCssOptions, widgetStateAttr, type WidgetRenderContext } from '../widget-render';
+import { widgetCssOptions, widgetStateAttr, type WidgetRenderContext, type WidgetViewing } from '../widget-render';
+
+/**
+ * 组件编辑态下，状态栏「根控件」的查看状态以实例 id 为宿主发送，
+ * 而内部树控件是 `${实例id}__${模板id}` 的 prefixed id，需要重映射后才能命中根控件。
+ */
+function remapInstanceViewing(viewing: WidgetViewing, instanceId: string, rootId: string | undefined): WidgetViewing {
+  if (!viewing || !rootId) {
+    return viewing;
+  }
+  const list = Array.isArray(viewing) ? viewing : [viewing];
+  const mapped = list.map((item) =>
+    item.ownerId === instanceId ? { ...item, ownerId: `${instanceId}__${rootId}` } : item,
+  );
+  // 进入组件编辑时残留的根控件项（`{instanceId}: null`）被重映射后，
+  // 会与选中插槽后写入的继承态项（`{instanceId}__rootId}: stateId`）撞成同一 ownerId。
+  // `ownerActiveState` 用 `viewing.find` 命中顺序靠前项，空值会遮蔽显式选择，
+  // 因此按 ownerId 去重并让非空 state 优先。
+  const byOwner = new Map<string, { ownerId: string; state: string | null }>();
+  for (const item of mapped) {
+    const existing = byOwner.get(item.ownerId);
+    if (!existing || item.state != null) {
+      byOwner.set(item.ownerId, item);
+    }
+  }
+  const deduped = Array.from(byOwner.values());
+  return Array.isArray(viewing) ? deduped : deduped[0];
+}
 
 function prefixTree(widgets: PageWidget[], prefix: string): PageWidget[] {
   return widgets.map((widget) => {
@@ -245,11 +273,17 @@ function ComponentView({
   const stack = ctx.componentStack ?? [];
   const doc = ctx.components?.[widget.componentId];
   const nested = doc && !stack.includes(widget.componentId) ? doc : undefined;
-  const useTestProps = Boolean(ctx.useComponentTestData) && !widget.editProps;
+  // 组件编辑态下：正在编辑的组件实例（widget.id === componentEditId）无视实例入参/编辑覆盖，
+  // 直接使用组件自身的 testData；其余嵌套组件（loop 内子组件等）用 loop 传入的 args，
+  // 避免它们被全局 componentEditing 误伤成自身 testData。
+  const editingThis = Boolean(ctx.componentEditing) && widget.id === ctx.componentEditId;
+  const useTestProps = editingThis
+    ? true
+    : Boolean(ctx.useComponentTestData) && !widget.editProps && !ctx.componentEditing;
   const definedProps = useTestProps
     ? applyTestValues(nested?.props, nested?.testData?.props)
     : nested?.props;
-  const evaluateArgs = ctx.evaluateBindings || Boolean(widget.editProps);
+  const evaluateArgs = editingThis ? false : (ctx.evaluateBindings || Boolean(widget.editProps));
   const query = ctx.bindingScope.query;
   const dataKey = `${componentDataKey(nested?.data, definedProps, widget.args, widget.slotArgs, evaluateArgs)}\0${useTestProps ? 1 : 0}`;
   const [writesStamp, setWritesStamp] = useState(dataKey);
@@ -259,7 +293,8 @@ function ComponentView({
     setWrites({});
   }
   const activeWrites = writesStamp === dataKey ? writes : {};
-  const writtenProps = applyPropWrites(propsWithArgs(definedProps, widget.args, ctx.bindingScope, evaluateArgs), activeWrites);
+  const instanceArgs = editingThis ? undefined : widget.args;
+  const writtenProps = applyPropWrites(propsWithArgs(definedProps, instanceArgs, ctx.bindingScope, evaluateArgs), activeWrites);
   const propsScope = buildPropsRecord(writtenProps, query);
   const createdRef = useRef<{ key: string; props: Record<string, unknown> } | null>(null);
   const childCache = useRef<{ key: string; nodes: Array<ReactElement | null> } | null>(null);
@@ -374,6 +409,7 @@ function ComponentView({
     writesStamp,
     ctx.editing ? '1' : '0',
     ctx.slotChrome ? '1' : '0',
+    ctx.componentEditing ? '1' : '0',
     (ctx.hoverInstanceKeys ?? []).join(','),
     ctx.locale ?? '',
     viewingKey,
@@ -399,10 +435,20 @@ function ComponentView({
       : undefined;
     const expanded = nested ? expandLoopTree(template, scope, false, widgetInstanceKey(widget), slotExpand) : [];
     const innerWidgets = nested
-      ? resolveWidgetTree(expanded, ctx.viewing ?? null, {
-          appliedStateFor: (child) => resolveRuntimeOwnState(child, ctx.editing ? [] : (ctx.hoverInstanceKeys ?? [])),
-          stateLayersSink: ctx.stateLayers,
-        })
+      ? resolveWidgetTree(
+          // 组件编辑态下显示与数据解耦：剔除引用绑定的存在/显示/可见闸门（常量闸门保留），
+          // 显隐只由状态栏选中的查看状态（delta presence）驱动。
+          editingThis ? stripDataDrivenPresenceGates(expanded) : expanded,
+          remapInstanceViewing(ctx.viewing ?? null, widget.id, nested.widgets[0]?.id),
+          {
+            // 组件编辑态下不自动求值 stateFn：状态激活只来自状态栏选择。
+            appliedStateFor: editingThis
+              ? undefined
+              : (child) => resolveRuntimeOwnState(child, ctx.editing ? [] : (ctx.hoverInstanceKeys ?? [])),
+            stateLayersSink: ctx.stateLayers,
+            locale: ctx.locale,
+          },
+        )
       : [];
     childCache.current = {
       key: childKey,

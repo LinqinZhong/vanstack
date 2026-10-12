@@ -15,6 +15,7 @@ import type {
   ProjectDto,
   ProjectIconFileDto,
   ProjectIconGroupDto,
+  ProjectFontFileDto,
   ProjectLangCatalogDto,
   ProjectLangDto,
   ProjectLangEntryDto,
@@ -56,6 +57,7 @@ import {
   type LangVersionRecord,
   type LibraryFileRecord,
   type LibraryGroupRecord,
+  type LibraryKind,
   type LibraryVersionRecord,
   type NamespaceDataRecord,
   type NamespaceFieldRecord,
@@ -67,6 +69,8 @@ import {
   type ProjectRecord,
   type ProjectVersionRecord,
 } from './lowcode-mongo';
+
+const FONT_GROUP = 'default';
 
 function eventJavaScript(source: string): string {
   try {
@@ -120,6 +124,7 @@ export class LowcodeService implements OnApplicationBootstrap {
 
   async onApplicationBootstrap() {
     await this.migrateProjectVersions();
+    await this.ensureFontLibraries();
   }
 
   constructor(
@@ -282,8 +287,9 @@ export class LowcodeService implements OnApplicationBootstrap {
           keys.add(this.langObjectKey(project.key, page.key, version.versionNo, item.key));
         }
       }
-      for (const kind of ['asset', 'icon'] as const) {
-        const libraryId = kind === 'asset' ? version.assetVersionId : version.iconVersionId;
+      for (const kind of ['asset', 'icon', 'font'] as const) {
+        const libraryId =
+          kind === 'asset' ? version.assetVersionId : kind === 'icon' ? version.iconVersionId : version.fontVersionId;
         const library = await this.mongo.getLibraryVersion(kind, libraryId);
         for (const group of library?.groups ?? []) {
           for (const file of group.files) {
@@ -331,6 +337,7 @@ export class LowcodeService implements OnApplicationBootstrap {
         langVersionId: source.langVersionId,
         assetVersionId: source.assetVersionId,
         iconVersionId: source.iconVersionId,
+        fontVersionId: source.fontVersionId,
         createdAt: now,
         updatedAt: now,
       };
@@ -936,6 +943,62 @@ export class LowcodeService implements OnApplicationBootstrap {
     }
   }
 
+  async listFonts(projectId: string, versionId: string): Promise<ProjectFontFileDto[]> {
+    const library = await this.libraryOf('font', projectId, versionId);
+    const group = library.groups.find((item) => item.name === FONT_GROUP);
+    return (group?.files ?? [])
+      .map((file) => ({
+        name: file.name,
+        key: file.key,
+        url: this.oss.getPublicUrl(file.key),
+        size: file.size,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async uploadFont(
+    projectId: string,
+    versionId: string,
+    file: Express.Multer.File,
+    displayName?: string,
+  ): Promise<ProjectFontFileDto> {
+    const project = await this.requireProject(projectId);
+    if (!/\.(ttf|otf|woff2?|eot)$/i.test(file.originalname)) {
+      throw new BadRequestException('only font files are allowed');
+    }
+    const fileName = this.assertFontFileName(this.assetUploadName(file.originalname, displayName));
+    const key = this.blobKey(project.key, fileName);
+    const stored = await this.oss.putObject(key, file.buffer, file.mimetype || 'application/octet-stream');
+    try {
+      await this.editLibrary('font', projectId, versionId, (library) => {
+        let target = library.groups.find((item) => item.name === FONT_GROUP);
+        if (!target) {
+          target = { name: FONT_GROUP, files: [] };
+          library.groups.push(target);
+        }
+        if (target.files.some((item) => item.name === fileName)) {
+          throw new ConflictException('file already exists');
+        }
+        target.files.push({ name: fileName, key: stored.key, size: file.size, contentType: file.mimetype });
+      });
+    } catch (error) {
+      await this.releaseBlob(stored.key);
+      throw error;
+    }
+    return { name: fileName, key: stored.key, url: stored.url, size: file.size };
+  }
+
+  async deleteFont(projectId: string, versionId: string, fileName: string): Promise<void> {
+    const name = this.assertFontFileName(fileName);
+    const removed: string[] = [];
+    await this.editLibrary('font', projectId, versionId, (library) => {
+      removed.push(...this.takeLibraryFile(library, FONT_GROUP, name));
+    });
+    for (const key of removed) {
+      await this.releaseBlob(key);
+    }
+  }
+
 
   async getMethodCode(projectId: string, methodId: string): Promise<MethodCodeDto> {
     await this.requireProject(projectId);
@@ -1455,8 +1518,9 @@ export class LowcodeService implements OnApplicationBootstrap {
     return copy;
   }
 
-  private async writableLibrary(kind: 'asset' | 'icon', version: ProjectVersionRecord): Promise<LibraryVersionRecord> {
-    const currentId = kind === 'asset' ? version.assetVersionId : version.iconVersionId;
+  private async writableLibrary(kind: LibraryKind, version: ProjectVersionRecord): Promise<LibraryVersionRecord> {
+    const currentId =
+      kind === 'asset' ? version.assetVersionId : kind === 'icon' ? version.iconVersionId : version.fontVersionId;
     const current = await this.mongo.getLibraryVersion(kind, currentId);
     if (!current) {
       throw new NotFoundException();
@@ -1474,8 +1538,10 @@ export class LowcodeService implements OnApplicationBootstrap {
     await this.mongo.saveLibraryVersion(kind, copy);
     if (kind === 'asset') {
       version.assetVersionId = copy._id;
-    } else {
+    } else if (kind === 'icon') {
       version.iconVersionId = copy._id;
+    } else {
+      version.fontVersionId = copy._id;
     }
     version.updatedAt = new Date();
     await this.mongo.saveProjectVersion(version);
@@ -1483,9 +1549,9 @@ export class LowcodeService implements OnApplicationBootstrap {
     return copy;
   }
 
-  private async libraryOf(kind: 'asset' | 'icon', projectId: string, versionId: string): Promise<LibraryVersionRecord> {
+  private async libraryOf(kind: LibraryKind, projectId: string, versionId: string): Promise<LibraryVersionRecord> {
     const version = await this.requireProjectVersion(projectId, versionId);
-    const id = kind === 'asset' ? version.assetVersionId : version.iconVersionId;
+    const id = kind === 'asset' ? version.assetVersionId : kind === 'icon' ? version.iconVersionId : version.fontVersionId;
     const library = await this.mongo.getLibraryVersion(kind, id);
     if (!library) {
       throw new NotFoundException();
@@ -1494,7 +1560,7 @@ export class LowcodeService implements OnApplicationBootstrap {
   }
 
   private async editLibrary(
-    kind: 'asset' | 'icon',
+    kind: LibraryKind,
     projectId: string,
     versionId: string,
     mutate: (library: LibraryVersionRecord) => void,
@@ -1574,12 +1640,13 @@ export class LowcodeService implements OnApplicationBootstrap {
     project: ProjectRecord,
     versionNo: number,
     pages: ProjectPageRecord[],
-    shared: { langVersionId: string; assetVersionId: string; iconVersionId: string } | null,
+    shared: { langVersionId: string; assetVersionId: string; iconVersionId: string; fontVersionId: string } | null,
   ): Promise<ProjectVersionRecord> {
     const now = new Date();
     const langId = shared?.langVersionId ?? randomUUID();
     const assetId = shared?.assetVersionId ?? randomUUID();
     const iconId = shared?.iconVersionId ?? randomUUID();
+    const fontId = shared?.fontVersionId ?? randomUUID();
     if (!shared) {
       await this.mongo.saveLangVersion({
         _id: langId,
@@ -1606,6 +1673,14 @@ export class LowcodeService implements OnApplicationBootstrap {
         groups: [],
         updatedAt: now,
       });
+      await this.mongo.saveLibraryVersion('font', {
+        _id: fontId,
+        projectId: project._id,
+        projectKey: project.key,
+        uses: 1,
+        groups: [],
+        updatedAt: now,
+      });
     }
     const version: ProjectVersionRecord = {
       _id: randomUUID(),
@@ -1617,6 +1692,7 @@ export class LowcodeService implements OnApplicationBootstrap {
       langVersionId: langId,
       assetVersionId: assetId,
       iconVersionId: iconId,
+      fontVersionId: fontId,
       createdAt: now,
       updatedAt: now,
     };
@@ -1631,6 +1707,7 @@ export class LowcodeService implements OnApplicationBootstrap {
     await this.mongo.addLangUses(version.langVersionId, 1);
     await this.mongo.addLibraryUses('asset', version.assetVersionId, 1);
     await this.mongo.addLibraryUses('icon', version.iconVersionId, 1);
+    await this.mongo.addLibraryUses('font', version.fontVersionId, 1);
   }
 
   private async releaseVersionShares(version: ProjectVersionRecord) {
@@ -1646,6 +1723,7 @@ export class LowcodeService implements OnApplicationBootstrap {
     }
     await this.releaseLibrary('asset', version.assetVersionId);
     await this.releaseLibrary('icon', version.iconVersionId);
+    await this.releaseLibrary('font', version.fontVersionId);
   }
 
   private async releasePageSnapshot(version: ProjectVersionRecord, snapshotId: string) {
@@ -1658,7 +1736,7 @@ export class LowcodeService implements OnApplicationBootstrap {
     }
   }
 
-  private async releaseLibrary(kind: 'asset' | 'icon', id: string) {
+  private async releaseLibrary(kind: LibraryKind, id: string) {
     const current = await this.mongo.getLibraryVersion(kind, id);
     const uses = await this.mongo.addLibraryUses(kind, id, -1);
     if (uses > 0 || !current) {
@@ -1707,9 +1785,18 @@ export class LowcodeService implements OnApplicationBootstrap {
         groups: await this.manifestFromPrefix(this.iconRoot(project.key)),
         updatedAt: now,
       };
+      const fontVersion: LibraryVersionRecord = {
+        _id: randomUUID(),
+        projectId: project._id,
+        projectKey: project.key,
+        uses: 1,
+        groups: [],
+        updatedAt: now,
+      };
       await this.mongo.saveLangVersion(langVersion);
       await this.mongo.saveLibraryVersion('asset', assetVersion);
       await this.mongo.saveLibraryVersion('icon', iconVersion);
+      await this.mongo.saveLibraryVersion('font', fontVersion);
       const version: ProjectVersionRecord = {
         _id: randomUUID(),
         projectId: project._id,
@@ -1720,6 +1807,7 @@ export class LowcodeService implements OnApplicationBootstrap {
         langVersionId: langVersion._id,
         assetVersionId: assetVersion._id,
         iconVersionId: iconVersion._id,
+        fontVersionId: fontVersion._id,
         createdAt: now,
         updatedAt: now,
       };
@@ -1739,6 +1827,29 @@ export class LowcodeService implements OnApplicationBootstrap {
     }
     for (const project of await this.mongo.listProjects()) {
       await this.recountCodeUses(project._id);
+    }
+  }
+
+  private async ensureFontLibraries() {
+    for (const project of await this.mongo.listProjects()) {
+      for (const version of await this.mongo.listProjectVersions(project._id)) {
+        const existing = version.fontVersionId
+          ? await this.mongo.getLibraryVersion('font', version.fontVersionId)
+          : null;
+        if (!existing) {
+          const fontId = version.fontVersionId || randomUUID();
+          await this.mongo.saveLibraryVersion('font', {
+            _id: fontId,
+            projectId: project._id,
+            projectKey: project.key,
+            uses: 1,
+            groups: [],
+            updatedAt: new Date(),
+          });
+          version.fontVersionId = fontId;
+          await this.mongo.saveProjectVersion(version);
+        }
+      }
     }
   }
 
@@ -2035,6 +2146,17 @@ export class LowcodeService implements OnApplicationBootstrap {
     const trimmed = safeDecode(name).trim().replace(/[\\/]/g, '');
     if (!trimmed || trimmed === '.' || trimmed === '..' || trimmed === '.keep' || trimmed.length > 200) {
       throw new BadRequestException('invalid file name');
+    }
+    return trimmed;
+  }
+
+  private assertFontFileName(name: string) {
+    const trimmed = safeDecode(name).trim().replace(/[\\/]/g, '');
+    if (!trimmed || trimmed === '.' || trimmed === '..' || trimmed === '.keep' || trimmed.length > 200) {
+      throw new BadRequestException('invalid file name');
+    }
+    if (!/\.(ttf|otf|woff2?|eot)$/i.test(trimmed)) {
+      throw new BadRequestException('only font files are allowed');
     }
     return trimmed;
   }

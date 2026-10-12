@@ -6,12 +6,31 @@ import {
   sanitizeWidgetStyle,
   type FlexItemStyle,
   type PageWidget,
+  type WidgetLangFields,
   type WidgetStateDelta,
 } from '@vanstack/xml';
 import type { WidgetCloneContext, WidgetPatch } from './types';
 
 function cloneOptional<T extends object>(value: T | undefined): T | undefined {
   return value ? { ...value } : undefined;
+}
+
+function cloneLangFields(langFields: WidgetLangFields | undefined): WidgetLangFields | undefined {
+  if (!langFields) {
+    return undefined;
+  }
+  const next: WidgetLangFields = {};
+  for (const [lang, delta] of Object.entries(langFields)) {
+    next[lang] = {
+      ...(delta.props ? { props: { ...delta.props } } : {}),
+      ...(delta.style ? { style: { ...delta.style } } : {}),
+      ...(delta.flex ? { flex: { ...delta.flex } } : {}),
+      ...(delta.item ? { item: { ...delta.item } } : {}),
+      ...(delta.swiper ? { swiper: { ...delta.swiper } } : {}),
+      ...(delta.presence ? { presence: delta.presence } : {}),
+    };
+  }
+  return next;
 }
 
 function remapStateDelta(delta: WidgetStateDelta, map: Map<string, string>): WidgetStateDelta {
@@ -26,6 +45,7 @@ function remapStateDelta(delta: WidgetStateDelta, map: Map<string, string>): Wid
     item: cloneOptional(delta.item),
     swiper: cloneOptional(delta.swiper),
     ...(delta.presence ? { presence: delta.presence } : {}),
+    ...(delta.langFields ? { langFields: cloneLangFields(delta.langFields) } : {}),
     ...(delta.states?.length ? { states: delta.states.map((item) => remapStateDelta(item, map)) } : {}),
   };
 }
@@ -51,6 +71,7 @@ function cloneStateFields(widget: PageWidget, stateIdMap: Map<string, string>) {
     ...(widget.hoverStateId
       ? { hoverStateId: stateIdMap.get(widget.hoverStateId) ?? widget.hoverStateId }
       : {}),
+    ...(widget.langFields ? { langFields: cloneLangFields(widget.langFields) } : {}),
     ...(widget.appliedState ? { appliedState: stateIdMap.get(widget.appliedState) ?? widget.appliedState } : {}),
     ...(widget.transition != null ? { transition: widget.transition } : {}),
   };

@@ -12,6 +12,7 @@ const COLLECTIONS = new Set([
   'lang.version',
   'asset.version',
   'icon.version',
+  'font.version',
   'namespace.version',
 ]);
 
@@ -39,10 +40,11 @@ export class WorkspaceBundleService {
     }
     const keys = new Set<string>();
     for (const version of dump.projectVersions) {
-      for (const libraryId of [version.assetVersionId, version.iconVersionId]) {
+      for (const libraryId of [version.assetVersionId, version.iconVersionId, version.fontVersionId]) {
         const library =
           (await this.mongo.getLibraryVersion('asset', libraryId)) ??
-          (await this.mongo.getLibraryVersion('icon', libraryId));
+          (await this.mongo.getLibraryVersion('icon', libraryId)) ??
+          (await this.mongo.getLibraryVersion('font', libraryId));
         for (const group of library?.groups ?? []) {
           for (const file of group.files) {
             keys.add(file.key);

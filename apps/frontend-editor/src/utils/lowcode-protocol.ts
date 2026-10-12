@@ -26,6 +26,8 @@ export type LowcodePreviewMessage = {
   catalog?: PageI18n;
   projectId?: string | null;
   icons?: Record<string, string>;
+  /** 字体族名 → 字体文件 url，用于预览页注入 @font-face。 */
+  fonts?: Record<string, string>;
   pageId?: string | null;
   query?: Record<string, unknown>;
   viewingOwnerId: string | null;

@@ -129,12 +129,9 @@ function materialize(
         outer: slotCtx.outer,
       };
     }
-    if (slotCtx.outer) {
-      // 组件被引用实例化时，插槽始终可见：忽略定义时的存在/显示/可见条件。
-      delete next.existsFn;
-      delete next.displayFn;
-      delete next.visibleFn;
-    }
+    // 插槽的存在/显示/可见（含组件定义中各状态下的配置）必须原样保留：
+    // 组件实例化后由 resolveWidgetTree 按当前状态叠加 presence，
+    // 默认态删除的插槽不应在实例中被强制显示。
   }
   if ('children' in next && Array.isArray(next.children)) {
     next.children = expandLoopTree(next.children, finalScope, editing, key, slotCtx);

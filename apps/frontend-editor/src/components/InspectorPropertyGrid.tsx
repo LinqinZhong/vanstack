@@ -594,8 +594,9 @@ function PropertyInput({
   const caretRef = useRef<{ start: number; end: number } | null>(null);
 
   useEffect(() => {
-    if (!focused && !invalid) {
+    if (!focused) {
       setDraft(value);
+      setInvalid(false);
     }
   }, [focused, invalid, value]);
 
@@ -1253,7 +1254,7 @@ export function WidgetPropertyInspector({
         const stored = slotArgs[slot.id]?.[param.name] ?? '';
         items.push({
           key: `slotArg.${slot.id}.${param.name}`,
-          label: `${slot.desc || slot.id}.${param.name}`,
+          label: `${slot.name || slot.id}.${param.name}`,
           hint: [param.type, param.desc?.trim() ?? '', t('lowcode.slotsTitle')].filter(Boolean).join(' · '),
           value: stored,
           category: 'basic',
@@ -1275,12 +1276,17 @@ export function WidgetPropertyInspector({
 
   if (widget.type === 'slot') {
     items.push({
-      key: 'desc',
-      value: widget.desc ?? '',
+      key: 'name',
+      value: widget.name ?? '',
+      label: t('lowcode.slotName'),
       category: 'basic',
-      placeholder: '描述',
+      placeholder: '名称',
       onChange: (raw) => {
-        onPatch({ desc: raw }, `edit:${widget.id}:desc`);
+        const name = raw.trim();
+        if (!name) {
+          return false;
+        }
+        onPatch({ name }, `edit:${widget.id}:name`);
         return true;
       },
     });
@@ -2325,7 +2331,8 @@ function SlotParamsTab({
       render: (name: string, _record, index) => (
         <Input
           size="small"
-          value={name}
+          defaultValue={name}
+          key={`${slotId}:${index}`}
           disabled={disabled}
           onBlur={(e) => {
             const v = e.target.value.trim();

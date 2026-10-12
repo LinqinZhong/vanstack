@@ -1,13 +1,13 @@
-import { AppstoreOutlined, CodeOutlined, DatabaseOutlined, FolderOpenOutlined, GlobalOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, CodeOutlined, DatabaseOutlined, FolderOpenOutlined, FontSizeOutlined, GlobalOutlined } from '@ant-design/icons';
 import { Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 /**
  * 最左侧竖条当前选中的库。
- * develop 显示页面列表和组件树；数据池、文案、素材、图标由 EditorLibraries 换掉画布。
+ * develop 显示页面列表和组件树；数据池、文案、素材、图标、字体由 EditorLibraries 换掉画布。
  * 切换只改导航，不改页面草稿。
  */
-export type EditorNav = 'develop' | 'pool' | 'i18n' | 'assets' | 'icons';
+export type EditorNav = 'develop' | 'pool' | 'i18n' | 'assets' | 'icons' | 'fonts';
 
 type EditorRailProps = {
   value: EditorNav;
@@ -61,6 +61,15 @@ export function EditorRail({ value, onChange }: EditorRailProps) {
           onClick={() => onChange('icons')}
         >
           <AppstoreOutlined />
+        </button>
+      </Tooltip>
+      <Tooltip title={t('lowcode.fontLibrary')} placement="right">
+        <button
+          type="button"
+          className={['editor-rail-btn', value === 'fonts' ? 'is-active' : ''].filter(Boolean).join(' ')}
+          onClick={() => onChange('fonts')}
+        >
+          <FontSizeOutlined />
         </button>
       </Tooltip>
     </nav>

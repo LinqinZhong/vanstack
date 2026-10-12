@@ -17,6 +17,7 @@ import {
 } from '@vanstack/xml';
 import { PROP_TYPES, SCALAR_TYPES, TypeKindFields, type NamespaceCatalogEntry } from './TypeKindFields';
 import { PropValueEditor } from './PropValueEditor';
+import { nextSlotName } from '../utils/widgetTree';
 
 type PropsPanelProps = {
   props: ComponentProp[];
@@ -172,13 +173,13 @@ export function ComponentSlotsPanel({ slots, namespaces = [], disabled, onChange
       ),
     },
     {
-      title: t('lowcode.dataDesc'),
-      dataIndex: 'desc',
-      render: (desc: string | undefined, record, index) => (
+      title: t('lowcode.slotName'),
+      dataIndex: 'name',
+      render: (name: string | undefined, record, index) => (
         <Input
           size="small"
           disabled={disabled}
-          value={desc ?? ''}
+          value={name ?? ''}
           onChange={(event) => {
             const raw = event.target.value;
             onChange(
@@ -186,10 +187,10 @@ export function ComponentSlotsPanel({ slots, namespaces = [], disabled, onChange
                 if (i !== index) {
                   return item;
                 }
-                const { desc: _ignored, ...rest } = item;
-                return raw.trim() ? { ...rest, desc: raw } : rest;
+                const { name: _ignored, ...rest } = item;
+                return raw.trim() ? { ...rest, name: raw } : rest;
               }),
-              `slots:${record.id}:desc`,
+              `slots:${record.id}:name`,
             );
           }}
           onBlur={onEndCoalesce}
@@ -240,7 +241,7 @@ export function ComponentSlotsPanel({ slots, namespaces = [], disabled, onChange
           size="small"
           icon={<PlusOutlined />}
           disabled={disabled}
-          onClick={() => onChange([...slots, { id: generateSlotId() }])}
+          onClick={() => onChange([...slots, { id: generateSlotId(), name: nextSlotName(slots.map((s) => s.name ?? '')) }])}
         >
           {t('lowcode.slotsAdd')}
         </Button>

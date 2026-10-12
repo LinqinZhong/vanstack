@@ -17,7 +17,7 @@ export const slotHelper = {
       type: 'slot',
       id: ctx.nextId(),
       slotId: widget.slotId,
-      ...(widget.desc ? { desc: widget.desc } : {}),
+      ...(widget.name ? { name: widget.name } : {}),
       children: cloneChildren(widget, ctx),
       ...cloneShared(widget, ctx.stateIdMap),
       ...cloneItemField(widget),
@@ -28,17 +28,17 @@ export const slotHelper = {
     if ('slotId' in patch) {
       next.slotId = patch.slotId?.trim() ?? '';
     }
-    if ('desc' in patch) {
-      const desc = patch.desc?.trim();
-      if (desc) {
-        next.desc = desc;
+    if ('name' in patch) {
+      const name = patch.name?.trim();
+      if (name) {
+        next.name = name;
       } else {
-        delete next.desc;
+        delete next.name;
       }
     }
     return next;
   },
   treeSuffix(widget) {
-    return widget.desc || undefined;
+    return widget.name || undefined;
   },
 } satisfies WidgetHelperInterface<Extract<PageWidget, { type: 'slot' }>>;

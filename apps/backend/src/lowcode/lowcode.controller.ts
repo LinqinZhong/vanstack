@@ -21,6 +21,7 @@ import type {
   ProjectDto,
   ProjectIconFileDto,
   ProjectIconGroupDto,
+  ProjectFontFileDto,
   ProjectLangCatalogDto,
   ProjectComponentDto,
   ProjectPageDto,
@@ -36,6 +37,7 @@ import type {
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { CreateAssetGroupDto, UpdateAssetGroupDto, UploadAssetFileDto } from './dto/asset.dto';
 import { CreateIconGroupDto, UpdateIconGroupDto, UploadIconFileDto } from './dto/icon.dto';
+import { UploadFontFileDto } from './dto/font.dto';
 import { PutProjectLangsDto } from './dto/lang.dto';
 import { CreateNamespaceDto, PutNamespaceDto, RenameNamespaceDto } from './dto/namespace.dto';
 import { PutWidgetEventDto } from './dto/event.dto';
@@ -432,6 +434,43 @@ export class LowcodeController {
     @Param('name') name: string,
   ): Promise<void> {
     return this.lowcode.deleteIconFile(id, versionId, group, name);
+  }
+
+  @Get(':id/versions/:versionId/fonts')
+  listFonts(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<ProjectFontFileDto[]> {
+    return this.lowcode.listFonts(id, versionId);
+  }
+
+  @Post(':id/versions/:versionId/fonts')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 20 * 1024 * 1024 },
+    }),
+  )
+  uploadFont(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+    @UploadedFile() file?: Express.Multer.File,
+    @Body() dto?: UploadFontFileDto,
+  ): Promise<ProjectFontFileDto> {
+    if (!file) {
+      throw new BadRequestException('file is required');
+    }
+    return this.lowcode.uploadFont(id, versionId, file, dto?.name);
+  }
+
+  @Delete(':id/versions/:versionId/fonts/:name')
+  @HttpCode(204)
+  deleteFont(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+    @Param('name') name: string,
+  ): Promise<void> {
+    return this.lowcode.deleteFont(id, versionId, name);
   }
 
   @Get(':id/namespaces')

@@ -23,9 +23,9 @@ export function listen(port: number): Promise<void> {
       }
     });
   });
-  return new Promise((resolve) => {
+  return lowcode.ensureFontLibraries().then(() => new Promise((resolve) => {
     server.listen(port, '127.0.0.1', () => resolve());
-  });
+  }));
 }
 
 async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
@@ -209,6 +209,20 @@ async function dispatch(method: string, id: string, rest: string[], req: http.In
       return undefined;
     }
   }
+  if (rest[0] === 'versions' && rest[2] === 'fonts') {
+    if (rest.length === 3 && method === 'GET') return lowcode.listFonts(id, versionId);
+    if (rest.length === 3 && method === 'POST') {
+      const form = await readForm(req);
+      if (!form.file) {
+        throw new ApiError(400, 'file is required');
+      }
+      return lowcode.uploadFont(id, versionId, form.file, form.fields.name);
+    }
+    if (rest.length === 4 && method === 'DELETE') {
+      await lowcode.deleteFont(id, versionId, rest[3]);
+      return undefined;
+    }
+  }
   if (rest[0] === 'namespaces' && rest.length === 1) {
     if (method === 'GET') return lowcode.listNamespaces(id);
     if (method === 'POST') {
@@ -298,21 +312,30 @@ async function readJson(req: http.IncomingMessage): Promise<Record<string, unkno
 
 function readForm(req: http.IncomingMessage): Promise<{ fields: Record<string, string>; file?: { originalName: string; mime: string; body: Buffer } }> {
   return new Promise((resolve, reject) => {
-    const busboy = Busboy({ headers: req.headers, limits: { fileSize: 8 * 1024 * 1024 } });
+    const busboy = Busboy({ headers: req.headers, limits: { fileSize: 100 * 1024 * 1024 } });
     const fields: Record<string, string> = {};
     const chunks: Buffer[] = [];
     let file: { originalName: string; mime: string; body: Buffer } | undefined;
+    let limitError = false;
     busboy.on('field', (name, value) => {
       fields[name] = value;
     });
     busboy.on('file', (_name, stream, info) => {
       stream.on('data', (chunk: Buffer) => chunks.push(chunk));
-      stream.on('limit', () => reject(new ApiError(400, 'file too large')));
+      stream.on('limit', () => {
+        limitError = true;
+      });
       stream.on('end', () => {
         file = { originalName: info.filename, mime: info.mimeType, body: Buffer.concat(chunks) };
       });
     });
-    busboy.on('finish', () => resolve({ fields, file }));
+    busboy.on('finish', () => {
+      if (limitError) {
+        reject(new ApiError(400, 'file too large'));
+        return;
+      }
+      resolve({ fields, file });
+    });
     busboy.on('error', reject);
     req.pipe(busboy);
   });

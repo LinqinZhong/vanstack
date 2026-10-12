@@ -9,7 +9,7 @@ import {
   DragOutlined,
   EditOutlined,
   ExpandOutlined,
-  HighlightOutlined,
+  BgColorsOutlined,
   ItalicOutlined,
   PictureOutlined,
   BoxPlotOutlined,
@@ -40,6 +40,8 @@ import {
   FLEX_JUSTIFY_CONTENTS,
   OVERFLOW_MODES,
   POSITION_MODES,
+  BACKGROUND_BLEND_MODES,
+  BACKGROUND_FIT_MODES,
   TABLE_ALIGNS,
   TABLE_VALIGNS,
   compactFlexContainer,
@@ -76,6 +78,7 @@ import { CopyDataPicker } from './CopyDataPicker';
 import { CopyI18nPicker } from './CopyI18nPicker';
 import { StyleBoxEdges, pxFromLength } from './StyleBoxEdges';
 import { AngleField, SizeField, fontFamilyOptions } from './WidgetStyleFields';
+import { subscribeFontCatalog, type FontCatalogEntry } from '../utils/fontCatalog';
 import { WidgetEventPanel } from './WidgetEventPanel';
 import { WidgetLoopPanel } from './WidgetLoopPanel';
 import {
@@ -99,7 +102,7 @@ type ShadowValue = {
 const DEFAULT_SHADOW: ShadowValue = { x: 0, y: 0, blur: 4, color: '' };
 const DEFAULT_BUTTON_BACKGROUND = '#ffffff';
 
-export type BoxGroup = 'content' | 'margin' | 'padding' | 'radius' | 'border' | 'size' | 'overflow' | 'position' | 'rotate' | 'loop' | 'events' | 'flex';
+export type BoxGroup = 'content' | 'margin' | 'padding' | 'radius' | 'border' | 'size' | 'overflow' | 'position' | 'rotate' | 'loop' | 'events' | 'flex' | 'background';
 
 export type TableCommand =
   | 'add-column'
@@ -120,6 +123,17 @@ export type TableBubbleModel = {
   onAlign?: (value: TableAlign | undefined) => void;
   onValign?: (value: TableValign | undefined) => void;
 };
+
+const BACKGROUND_TOOL_TYPES: ReadonlyArray<PageWidget['type']> = [
+  'flex',
+  'scroll',
+  'swiper',
+  'swiper-item',
+  'windows',
+  'window',
+  'drawer',
+  'table',
+];
 
 export function isBoxGroupAllowed(type: PageWidget['type'], group: BoxGroup) {
   if (type === 'drawer' && (group === 'margin' || group === 'rotate' || group === 'loop')) {
@@ -316,7 +330,7 @@ function ColorIconPicker({
                 A
               </span>
             ) : (
-              <HighlightOutlined />
+              <BgColorsOutlined />
             )}
           </button>
         </ColorPicker>
@@ -557,9 +571,12 @@ export function WidgetStyleBubble({
   const [textShadow, setTextShadow] = useState(() => parseCssShadow(display.textShadow));
   const [openPopup, setOpenPopup] = useState<string | null>(null);
   const [stateFnOpen, setStateFnOpen] = useState(false);
+  const [fontEntries, setFontEntries] = useState<FontCatalogEntry[]>([]);
 
   const onToolbarPopupChangeRef = useRef(onToolbarPopupChange);
   onToolbarPopupChangeRef.current = onToolbarPopupChange;
+
+  useEffect(() => subscribeFontCatalog(setFontEntries), []);
 
   useEffect(() => {
     setTextShadow(parseCssShadow(style?.textShadow));
@@ -701,7 +718,10 @@ export function WidgetStyleBubble({
                   getPopupContainer={() => document.body}
                   onMouseDown={(event) => event.stopPropagation()}
                   {...popupProps('font-family')}
-                  options={fontFamilyOptions(i18n.language)}
+                  options={[
+                    ...fontFamilyOptions(i18n.language),
+                    ...fontEntries.map((entry) => ({ value: `'${entry.family}'`, label: entry.label })),
+                  ]}
                   onChange={(fontFamily) => patch({ fontFamily: fontFamily || undefined })}
                 />
               </BindingLock>
@@ -845,22 +865,34 @@ export function WidgetStyleBubble({
             </>
           ) : null}
           {widget.type !== 'tr' && widget.type !== 'slot' ? (
-            <ColorIconPicker
-              title={t('lowcode.styleBackground')}
-              kind="fill"
-              allowClear={widget.type !== 'button'}
-              color={display.background || (widget.type === 'button' ? DEFAULT_BUTTON_BACKGROUND : undefined)}
-              bound={isInherited('background') ? undefined : current.background}
-              buttonClassName={inheritedClass('background')}
-              resetKey={widget.id}
-              getPopupContainer={popupContainer}
-              {...popupProps('background')}
-              onChange={(css, cleared) =>
-                patch({
-                  background: cleared && widget.type === 'button' ? DEFAULT_BUTTON_BACKGROUND : css,
-                })
-              }
-            />
+            BACKGROUND_TOOL_TYPES.includes(widget.type) ? (
+              <Tooltip title={t('lowcode.styleBackgroundTool')}>
+                <Button
+                  size="small"
+                  type={openGroup === 'background' ? 'primary' : 'text'}
+                  className={inheritedClass('background')}
+                  icon={<BgColorsOutlined />}
+                  onClick={() => toggleGroup('background')}
+                />
+              </Tooltip>
+            ) : (
+              <ColorIconPicker
+                title={t('lowcode.styleBackground')}
+                kind="fill"
+                allowClear={widget.type !== 'button'}
+                color={display.background || (widget.type === 'button' ? DEFAULT_BUTTON_BACKGROUND : undefined)}
+                bound={isInherited('background') ? undefined : current.background}
+                buttonClassName={inheritedClass('background')}
+                resetKey={widget.id}
+                getPopupContainer={popupContainer}
+                {...popupProps('background')}
+                onChange={(css, cleared) =>
+                  patch({
+                    background: cleared && widget.type === 'button' ? DEFAULT_BUTTON_BACKGROUND : css,
+                  })
+                }
+              />
+            )
           ) : null}
           {isBoxGroupAllowed(widget.type, 'size') ? (
             <Tooltip title={`${t('lowcode.styleSize')} (${modifier}+T)`}>
@@ -1545,6 +1577,91 @@ export function WidgetStyleBubble({
                 popupContainer={popupContainer}
                 onChange={patchFlex}
               />
+            ) : null}
+            {openGroup === 'background' ? (
+              <div className="style-size-panel">
+                <div className="style-bg-row">
+                  <span className="style-box-row-label">{t('lowcode.styleBackground')}</span>
+                  <ColorPicker
+                    size="small"
+                    allowClear
+                    destroyOnHidden
+                    value={colorValue(display.background)}
+                    disabled={disabled}
+                    getPopupContainer={popupContainer}
+                    {...popupProps('background-color')}
+                    onChange={(value, css) => patch({ background: value.cleared ? undefined : css })}
+                  />
+                </div>
+                <div className="style-bg-row">
+                  <span className="style-box-row-label">{t('lowcode.styleBackgroundImage')}</span>
+                  <Input
+                    size="small"
+                    allowClear
+                    disabled={disabled}
+                    value={display.backgroundImage}
+                    placeholder="https://"
+                    onChange={(event) => patch({ backgroundImage: event.target.value.trim() || undefined })}
+                  />
+                  {projectId ? (
+                    <AssetImagePicker
+                      projectId={projectId}
+                      disabled={disabled}
+                      onPick={(url) => patch({ backgroundImage: url })}
+                    />
+                  ) : null}
+                </div>
+                <div className="style-bg-row">
+                  <span className="style-box-row-label">{t('lowcode.styleBackgroundFit')}</span>
+                  <Select
+                    size="small"
+                    allowClear
+                    disabled={disabled}
+                    value={display.backgroundFit}
+                    popupMatchSelectWidth={false}
+                    getPopupContainer={popupContainer}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    options={BACKGROUND_FIT_MODES.map((value) => ({ value, label: t(`lowcode.backgroundFit_${value}` as const) }))}
+                    onChange={(value: string) => patch({ backgroundFit: value || undefined })}
+                  />
+                </div>
+                <div className="style-bg-row">
+                  <span className="style-box-row-label">{t('lowcode.styleBackgroundBlendMode')}</span>
+                  <Select
+                    size="small"
+                    allowClear
+                    disabled={disabled}
+                    value={display.backgroundBlendMode}
+                    popupMatchSelectWidth={false}
+                    getPopupContainer={popupContainer}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    options={BACKGROUND_BLEND_MODES.map((value) => ({ value, label: value }))}
+                    onChange={(value: string) => patch({ backgroundBlendMode: value || undefined })}
+                  />
+                </div>
+                <div className="style-bg-row">
+                  <span className="style-box-row-label">{t('lowcode.styleBackgroundPositionX')}</span>
+                  <InputNumber
+                    size="small"
+                    disabled={disabled}
+                    value={typeof display.backgroundPositionX === 'number' ? display.backgroundPositionX : undefined}
+                    placeholder="0"
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onChange={(value) => patch({ backgroundPositionX: value ?? undefined })}
+                  />
+                </div>
+                <div className="style-bg-row">
+                  <span className="style-box-row-label">{t('lowcode.styleBackgroundPositionY')}</span>
+                  <InputNumber
+                    size="small"
+                    disabled={disabled}
+                    value={typeof display.backgroundPositionY === 'number' ? display.backgroundPositionY : undefined}
+                    placeholder="0"
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onChange={(value) => patch({ backgroundPositionY: value ?? undefined })}
+                  />
+                </div>
+              </div>
             ) : null}
           </div>
         ) : null}

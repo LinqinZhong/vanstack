@@ -187,6 +187,7 @@ import {
   type ViewingByOwner,
 } from '../../utils/widgetStates';
 import { refreshIconCatalog, subscribeIconCatalog } from '../../utils/iconCatalog';
+import { refreshFontCatalog, subscribeFontCatalog, type FontCatalogEntry } from '../../utils/fontCatalog';
 import { publishEditorI18n } from '../../utils/i18nRuntime';
 import { CANVAS_RASTER_SCALE, canEditPositionInsets, clampScale, closeStyleToolbarPopups, computeFitView, dragLengthPx, edgeBoxLength, EDIT_OVERFLOW_X, EDIT_OVERFLOW_Y, ENTER_DOUBLE_MS, FOCUS_PADDING, HISTORY_LIMIT, iframePointToClient, isAutoLength, isBoxDragGroup, isSpacingNudgeGroup, liveWidgetCss, mapIframePoint, MAX_SCALE, paintCanvasView, SCREEN_HEIGHT, SCREEN_WIDTH, sizeLock, snapDevicePixel, spacingAllowsNegative, styleBoxQuad, styleFromBoxQuad, zoomViewAt, ZOOM_IDLE_MS, ZOOM_STEP, type CanvasMode, type CenterTab, type HistoryEntry, type SaveStatus, type ViewTransform } from './helpers';
 import {
@@ -294,6 +295,7 @@ export function ProjectEditorPage() {
   const [pageMethods, setPageMethods] = useState<PageMethod[]>([]);
   const [pageI18n, setPageI18n] = useState<PageI18n | undefined>(undefined);
   const [iconCatalog, setIconCatalog] = useState<Record<string, string>>({});
+  const [fontCatalog, setFontCatalog] = useState<FontCatalogEntry[]>([]);
   const [previewLocale, setPreviewLocale] = useState<string | null>(null);
   const [leftNav, setLeftNav] = useState<EditorNav>('develop');
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
@@ -315,6 +317,8 @@ export function ProjectEditorPage() {
   const [widgetModalOpen, setWidgetModalOpen] = useState(false);
   const [aliasModalId, setAliasModalId] = useState<string | null>(null);
   const [aliasInput, setAliasInput] = useState('');
+  const [slotNameModalId, setSlotNameModalId] = useState<string | null>(null);
+  const [slotNameInput, setSlotNameInput] = useState('');
   const [versionForm] = Form.useForm<VersionFormValues>();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const widgetBoxRef = useRef<{ widgetId: string; width: number; height: number } | null>(null);
@@ -396,6 +400,7 @@ export function ProjectEditorPage() {
   const pageMethodsRef = useRef(pageMethods);
   const commitModelRef = useRef<(name: string, value: string, done?: boolean) => void>(() => {});
   const pageI18nRef = useRef(pageI18n);
+  const previewLocaleRef = useRef(previewLocale);
   const selectedWidgetIdRef = useRef(selectedWidgetId);
   const viewingOwnerIdRef = useRef(viewingOwnerId);
   const viewingStateRef = useRef(viewingState);
@@ -652,6 +657,7 @@ export function ProjectEditorPage() {
   pageEventsRef.current = pageEvents;
   pageMethodsRef.current = pageMethods;
   pageI18nRef.current = pageI18n;
+  previewLocaleRef.current = previewLocale;
   selectedWidgetIdRef.current = selectedWidgetId;
   tableEditIdRef.current = tableEditId;
   scrollEditIdRef.current = scrollEditId;
@@ -692,7 +698,7 @@ export function ProjectEditorPage() {
     if (!widget) {
       return null;
     }
-    return widgetWithStateLayers(widget, stateLayersFor(widget));
+    return widgetWithStateLayers(widget, stateLayersFor(widget), previewLocaleRef.current);
   }
 
   function findViewed(widgetId: string | null | undefined) {
@@ -700,7 +706,7 @@ export function ProjectEditorPage() {
   }
 
   function patchViewingWidget(widget: PageWidget, patch: WidgetPatch) {
-    return patchResolvedWidget(widget, patch, stateLayersFor(widget));
+    return patchResolvedWidget(widget, patch, stateLayersFor(widget), previewLocaleRef.current);
   }
 
   const applyView = useCallback((next: ViewTransform, fromUser = true, commit = true) => {
@@ -1072,6 +1078,7 @@ export function ProjectEditorPage() {
   );
 
   useEffect(() => subscribeIconCatalog(setIconCatalog), []);
+  useEffect(() => subscribeFontCatalog(setFontCatalog), []);
 
   useLayoutEffect(() => {
     publishEditorI18n(pageI18n, previewLocale);
@@ -1082,6 +1089,7 @@ export function ProjectEditorPage() {
       return;
     }
     void refreshIconCatalog(id, projectVersionId).catch(() => undefined);
+    void refreshFontCatalog(id, projectVersionId).catch(() => undefined);
   }, [id, projectVersionId]);
 
   const sendPreview = useCallback(() => {
@@ -1169,6 +1177,7 @@ export function ProjectEditorPage() {
         catalog: pageI18n,
         projectId: project?.id ?? null,
         icons: iconCatalog,
+        fonts: Object.fromEntries(fontCatalog.map((entry) => [entry.family, entry.url])),
         pageId: selectedPageId,
         query: mode === 'preview'
           ? {
@@ -1206,7 +1215,7 @@ export function ProjectEditorPage() {
       },
       window.location.origin,
     );
-  }, [mode, previewLocale, previewQuery, pageI18n, project?.id, selectedPageId, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, tableRange, tableEditId, scrollEditId, swiperEditId, componentEditId, componentDocsKey, iconCatalog]);
+  }, [mode, previewLocale, previewQuery, pageI18n, project?.id, selectedPageId, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, tableRange, tableEditId, scrollEditId, swiperEditId, componentEditId, componentDocsKey, iconCatalog, fontCatalog]);
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -5196,6 +5205,32 @@ export function ProjectEditorPage() {
     setAliasModalId(null);
   }
 
+  function openSlotNameModal(widgetId: string) {
+    if (readOnlyRef.current) {
+      return;
+    }
+    selectWidget(widgetId);
+    const widget = findWidget(widgetsRef.current, widgetId);
+    setSlotNameInput(widget?.type === 'slot' ? (widget.name ?? '') : '');
+    setSlotNameModalId(widgetId);
+  }
+
+  function submitSlotName() {
+    if (!slotNameModalId || readOnlyRef.current) {
+      return;
+    }
+    const name = slotNameInput.trim();
+    if (!name) {
+      return;
+    }
+    commitWidgets(
+      updateWidgetById(widgetsRef.current, slotNameModalId, (item) => patchWidget(item, { name })),
+      selectedWidgetIdRef.current,
+      'edit:slot-name',
+    );
+    setSlotNameModalId(null);
+  }
+
   function undoWidgetEdit() {
     if (readOnlyRef.current || pastRef.current.length === 0) {
       return;
@@ -5610,6 +5645,17 @@ export function ProjectEditorPage() {
           return widget?.type === 'component' ? widget : null;
         })()
       : null;
+  // 选中插槽内容节点时，控件树里所属插槽节点也一并高亮。
+  const treeHighlightKeys = (() => {
+    if (catalogKind !== 'page' || !componentEditInstance || virtualSelection?.kind !== 'content') {
+      return [];
+    }
+    const doc = componentDefinitionDoc(componentEditInstance);
+    const slotWidget = collectTemplateSlots(doc?.widgets ?? []).find(
+      (item) => item.slotId === virtualSelection.slotId,
+    );
+    return slotWidget ? [virtualInnerId(componentEditInstance.id, slotWidget.id)] : [];
+  })();
   const visibleStates = (() => {
     if (!componentEditInstance) {
       return collectStateTree(widgets, selectedWidgetId);
@@ -5636,6 +5682,7 @@ export function ProjectEditorPage() {
           `${componentEditInstance.id}__slot-${virtualSelection.slotId}__`,
           slotWidget,
           `${componentEditInstance.id}__`,
+          doc?.widgets ?? [],
         );
       }
       return collectPrefixedStateTree(
@@ -5650,7 +5697,7 @@ export function ProjectEditorPage() {
     );
   })();
   const selectedDisplayWidget = selectedWidget
-    ? widgetWithStateLayers(selectedWidget, stateLayersFor(selectedWidget))
+    ? widgetWithStateLayers(selectedWidget, stateLayersFor(selectedWidget), previewLocaleRef.current)
     : null;
   const selectedComponentProps =
     selectedDisplayWidget?.type === 'component'
@@ -5665,7 +5712,7 @@ export function ProjectEditorPage() {
           componentDocsRef.current[selectedDisplayWidget.componentId]?.slots
         : undefined;
   const selectedOwnKeys = selectedWidget
-    ? stateOwnKeys(selectedWidget, stateLayersFor(selectedWidget))
+    ? stateOwnKeys(selectedWidget, stateLayersFor(selectedWidget), previewLocaleRef.current)
     : null;
   const owningTable = findOwningTable(widgets, tableRange?.tableId ?? selectedWidgetId);
   const activeRange = tableRange && owningTable && tableRange.tableId === owningTable.table.id ? tableRange : null;
@@ -5733,16 +5780,16 @@ export function ProjectEditorPage() {
       }
     : undefined;
   const widgetTreeData = (() => {
-    const slotDescMap =
+    const slotNameMap =
       catalogKind === 'component'
-        ? new Map(componentSlots.map((slot) => [slot.id, slot.desc ?? '']))
+        ? new Map(componentSlots.map((slot) => [slot.id, slot.name ?? '']))
         : null;
     const treeLabel = (widget: PageWidget): string => {
       const label = widgetTreeLabel(widget, t);
-      if (slotDescMap && widget.type === 'slot' && !widget.desc?.trim()) {
-        const declarationDesc = slotDescMap.get(widget.slotId)?.trim();
-        if (declarationDesc) {
-          return `${label} · ${declarationDesc}`;
+      if (slotNameMap && widget.type === 'slot' && !widget.name?.trim()) {
+        const declarationName = slotNameMap.get(widget.slotId)?.trim();
+        if (declarationName) {
+          return `${label} · ${declarationName}`;
         }
       }
       return label;
@@ -5782,14 +5829,14 @@ export function ProjectEditorPage() {
     if (!componentWidget || componentWidget.type !== 'component' || !doc) {
       return [];
     }
-    const slotDescMap = new Map((doc.slots ?? []).map((slot) => [slot.id, slot.desc ?? '']));
+    const slotNameMap = new Map((doc.slots ?? []).map((slot) => [slot.id, slot.name ?? '']));
     const slotParamsMap = new Map((doc.slots ?? []).map((slot) => [slot.id, slot.params ?? []]));
     return collectTemplateSlots(doc.widgets).map((slotWidget) => {
       let name = widgetTreeLabel(slotWidget, t);
-      if (!slotWidget.desc?.trim()) {
-        const declarationDesc = slotDescMap.get(slotWidget.slotId)?.trim();
-        if (declarationDesc) {
-          name = `${name} · ${declarationDesc}`;
+      if (!slotWidget.name?.trim()) {
+        const declarationName = slotNameMap.get(slotWidget.slotId)?.trim();
+        if (declarationName) {
+          name = `${name} · ${declarationName}`;
         }
       }
       return {
@@ -5859,6 +5906,7 @@ export function ProjectEditorPage() {
                 canDragWidgetToData={canDragWidgetToData}
                 expandedKeys={expandedKeys}
                 selectedWidgetId={selectedWidgetId}
+                highlightKeys={treeHighlightKeys}
                 treeHostRef={widgetTreeHostRef}
                 modifier={modifier}
                 canUndo={canUndo}
@@ -5874,6 +5922,7 @@ export function ProjectEditorPage() {
                 onDelete={deleteSelectedWidget}
                 onAdd={() => setWidgetModalOpen(true)}
                 onOpenAlias={openAliasModal}
+                onOpenSlotName={openSlotNameModal}
                 onOpenLoop={openWidgetLoopPanel}
                 onOpenEvents={openWidgetEventsPanel}
                 onToggleHidden={toggleWidgetHidden}
@@ -6043,6 +6092,15 @@ export function ProjectEditorPage() {
         onChange={setAliasInput}
         onOk={submitAlias}
         onCancel={() => setAliasModalId(null)}
+      />
+      <AliasModal
+        open={slotNameModalId !== null}
+        value={slotNameInput}
+        onChange={setSlotNameInput}
+        onOk={submitSlotName}
+        onCancel={() => setSlotNameModalId(null)}
+        title={t('lowcode.setSlotName')}
+        placeholder={t('lowcode.slotNamePlaceholder')}
       />
       <PageFormModal
         open={pageModalOpen}

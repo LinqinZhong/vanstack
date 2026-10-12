@@ -266,6 +266,39 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
     css.background = background;
   }
 
+  const backgroundImage = cssText(style.backgroundImage, options);
+  if (backgroundImage) {
+    css.backgroundImage = /^\s*url\(/i.test(backgroundImage) ? backgroundImage : `url("${backgroundImage}")`;
+  }
+  const backgroundBlendMode = cssText(style.backgroundBlendMode, options);
+  if (backgroundBlendMode) {
+    css.backgroundBlendMode = backgroundBlendMode as CSSProperties['backgroundBlendMode'];
+  }
+  const backgroundFit = cssText(style.backgroundFit, options);
+  if (backgroundFit) {
+    if (backgroundFit === 'cover') {
+      css.backgroundSize = 'cover';
+    } else if (backgroundFit === 'contain') {
+      css.backgroundSize = 'contain';
+    } else if (backgroundFit === 'vertical-crop') {
+      css.backgroundSize = '100% auto';
+    } else if (backgroundFit === 'horizontal-crop') {
+      css.backgroundSize = 'auto 100%';
+    } else {
+      // fill / vertical-stretch / horizontal-stretch
+      css.backgroundSize = '100% 100%';
+    }
+    css.backgroundRepeat = 'no-repeat';
+  }
+  const backgroundPositionX = cssMeasure(style.backgroundPositionX, options);
+  if (backgroundPositionX) {
+    css.backgroundPositionX = backgroundPositionX;
+  }
+  const backgroundPositionY = cssMeasure(style.backgroundPositionY, options);
+  if (backgroundPositionY) {
+    css.backgroundPositionY = backgroundPositionY;
+  }
+
   const borderEdges = [
     {
       width: style.borderTopWidth,

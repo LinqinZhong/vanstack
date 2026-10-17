@@ -2,6 +2,8 @@ import type { CSSProperties } from 'react';
 import {
   angleCss,
   boxLengthCss,
+  DEFAULT_GRID_COLUMN_COUNT,
+  DEFAULT_GRID_ROW_COUNT,
   isCopyBinding,
   resolveCopyBinding,
   type AngleValue,
@@ -9,6 +11,9 @@ import {
   type BoxLength,
   type FlexContainerStyle,
   type FlexItemStyle,
+  type GridStyle,
+  type GridTrackMode,
+  type GridTrackSize,
   isPresenceFalseBody,
   readPresenceFlag,
   type PageStyle,
@@ -17,6 +22,7 @@ import {
   type TableLine,
   type WidgetStyle,
 } from '@vanstack/xml';
+import { animationKeyframesFor, animationRuleFor } from './animation';
 
 export type WidgetCssOptions = {
   animate?: boolean;
@@ -259,6 +265,15 @@ export function widgetCss(style: WidgetStyle | undefined, options?: WidgetCssOpt
       decorations.push('line-through');
     }
     css.textDecoration = decorations.length > 0 ? decorations.join(' ') : 'none';
+  }
+
+  const textAlign = cssText(style.textAlign, options);
+  if (textAlign) {
+    css.textAlign = textAlign as CSSProperties['textAlign'];
+  }
+  const writingMode = cssText(style.writingMode, options);
+  if (writingMode) {
+    css.writingMode = writingMode as CSSProperties['writingMode'];
   }
 
   const background = cssText(style.background, options);
@@ -536,7 +551,73 @@ export function flexItemCss(style: FlexItemStyle | undefined, options?: WidgetCs
   if (alignSelf) {
     css.alignSelf = alignSelf as CSSProperties['alignSelf'];
   }
+  const gridRowSpan = cssUnitless(style.gridRowSpan, options);
+  if (typeof gridRowSpan === 'number' && Number.isInteger(gridRowSpan) && gridRowSpan >= 1) {
+    css.gridRow = `span ${gridRowSpan}`;
+  }
+  const gridColumnSpan = cssUnitless(style.gridColumnSpan, options);
+  if (typeof gridColumnSpan === 'number' && Number.isInteger(gridColumnSpan) && gridColumnSpan >= 1) {
+    css.gridColumn = `span ${gridColumnSpan}`;
+  }
   return Object.keys(css).length > 0 ? css : undefined;
+}
+
+/** 单条轨道：数字转 px，`auto` 原样，绑定解析后是纯数字也补 px。 */
+function gridTrackSizeCss(value: GridTrackSize | undefined, options?: WidgetCssOptions): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return `${value}px`;
+  }
+  if (value === 'auto') {
+    return 'auto';
+  }
+  const text = cssText(typeof value === 'string' ? value : undefined, options);
+  if (!text) {
+    return undefined;
+  }
+  if (text === 'auto') {
+    return 'auto';
+  }
+  return /^\d+(?:\.\d+)?$/.test(text) ? `${text}px` : text;
+}
+
+function gridTemplateTracks(
+  mode: GridTrackMode | string | undefined,
+  tracks: GridTrackSize[] | undefined,
+  count: number | string | undefined,
+  /** 独立配置下某条轨道未写尺寸时的兜底轨道。 */
+  fallbackTrack: string,
+  fallbackCount: number,
+  options?: WidgetCssOptions,
+): string {
+  if (mode === 'independent' && Array.isArray(tracks) && tracks.length > 0) {
+    return tracks.map((track) => gridTrackSizeCss(track, options) ?? fallbackTrack).join(' ');
+  }
+  const resolved = cssUnitless(count, options);
+  const n = typeof resolved === 'number' && Number.isInteger(resolved) && resolved >= 1 ? resolved : fallbackCount;
+  // 统一配置不写行高、列宽，按数量均分：每份即 100% / 数量。
+  return `repeat(${n}, 1fr)`;
+}
+
+export function gridContainerCss(style: GridStyle | undefined, options?: WidgetCssOptions): CSSProperties {
+  const css: CSSProperties = { display: 'grid' };
+  css.gridTemplateRows = gridTemplateTracks(style?.rowMode, style?.rows, style?.rowCount, 'auto', DEFAULT_GRID_ROW_COUNT, options);
+  css.gridTemplateColumns = gridTemplateTracks(
+    style?.columnMode,
+    style?.columns,
+    style?.columnCount,
+    '1fr',
+    DEFAULT_GRID_COLUMN_COUNT,
+    options,
+  );
+  const rowGap = cssMeasure(style?.rowGap, options);
+  if (rowGap) {
+    css.rowGap = rowGap;
+  }
+  const columnGap = cssMeasure(style?.columnGap, options);
+  if (columnGap) {
+    css.columnGap = columnGap;
+  }
+  return css;
 }
 
 export function boxCss(style: WidgetStyle | undefined, options?: WidgetCssOptions): CSSProperties | undefined {
@@ -798,13 +879,40 @@ export function libraryPaintKey(components: Record<string, { widgets: PageWidget
   return key;
 }
 
-export function pageCssText(widgets: PageWidget[]): string {
+export function pageCssText(widgets: PageWidget[], locale?: string, options?: { animations?: boolean }): string {
   const blocks: string[] = [];
+  // 非默认语言的静态样式存在 langFields 分支里，需要用 [data-lang] 规则输出。
+  // data-lang 设在页面根节点上，语言规则用后代选择器命中控件；
+  // :where() 是零特异性包装，语言规则与对应扁平规则特异性相同，
+  // 纯靠发射顺序对齐 resolveWidgetStateStack 的合并语义（base < lang-base < 状态扁平 < 状态语言）。
+  const lang = locale?.trim() ?? '';
+  const langPrefix = lang ? `:where([data-lang="${escapeStateId(lang)}"]) ` : '';
 
   function push(selector: string, style: WidgetStyle | undefined, includeDefaults: boolean, defaultFontSize = false) {
     const body = styleRuleText(style, includeDefaults, defaultFontSize);
     if (body) {
       blocks.push(`${selector} { ${body}; }`);
+    }
+  }
+
+  // 动画同样跟随状态：为控件基础态与各状态层分别发射 @keyframes + animation 规则。
+  // 同一动画只在首次出现时发射一次 @keyframes（名字含定义 id，天然去重且不冲突）。
+  const emittedKeyframes = new Set<string>();
+  function pushAnimation(selector: string, widget: PageWidget, binding: PageWidget['animation']) {
+    if (!options?.animations || !binding?.id) {
+      return;
+    }
+    const kf = animationKeyframesFor(widget.id, binding);
+    if (!kf) {
+      return;
+    }
+    if (!emittedKeyframes.has(kf.name)) {
+      emittedKeyframes.add(kf.name);
+      blocks.push(kf.css);
+    }
+    const rule = animationRuleFor(selector, widget.id, binding);
+    if (rule) {
+      blocks.push(rule);
     }
   }
 
@@ -814,12 +922,21 @@ export function pageCssText(widgets: PageWidget[]): string {
       for (const override of widget.stateOverrides ?? []) {
         const overrideId = escapeStateId(override.id);
         push(`[data-state~="${overrideId}"] .${cls}`, override.style, false);
+        pushAnimation(`[data-state~="${overrideId}"] .${cls}`, widget, override.animation);
+        if (langPrefix) {
+          push(`${langPrefix}[data-state~="${overrideId}"] .${cls}`, override.langFields?.[lang]?.style, false);
+        }
         for (const nested of override.states ?? []) {
-          push(
-            `[data-state~="${overrideId}"] .${cls}[data-state~="${escapeStateId(nested.id)}"]`,
-            nested.style,
-            false,
-          );
+          const nestedId = escapeStateId(nested.id);
+          push(`[data-state~="${overrideId}"] .${cls}[data-state~="${nestedId}"]`, nested.style, false);
+          pushAnimation(`[data-state~="${overrideId}"] .${cls}[data-state~="${nestedId}"]`, widget, nested.animation);
+          if (langPrefix) {
+            push(
+              `${langPrefix}[data-state~="${overrideId}"] .${cls}[data-state~="${nestedId}"]`,
+              nested.langFields?.[lang]?.style,
+              false,
+            );
+          }
         }
       }
       const stretchTrack = widget.type === 'th' || widget.type === 'tr' || widget.type === 'td';
@@ -829,6 +946,10 @@ export function pageCssText(widgets: PageWidget[]): string {
         !stretchTrack,
         usesDefaultFont(widget) && !hasExplicitFontSize(widget.style),
       );
+      if (langPrefix) {
+        // 语言基准规则必须紧随基础规则之后，保证只盖住基础值、不压状态规则。
+        push(`${langPrefix}.${cls}`, widget.langFields?.[lang]?.style, false);
+      }
       if (widget.type === 'flex' && columnShouldHugContent(widget)) {
         blocks.push(`.lowcode-flex.${cls} { width: min-content; }`);
       }
@@ -842,8 +963,15 @@ export function pageCssText(widgets: PageWidget[]): string {
         blocks.push(...tableLineRules(cls, widget.lines));
       }
       for (const state of widget.states ?? []) {
-        push(`.${cls}[data-state~="${escapeStateId(state.id)}"]`, state.style, false);
+        const stateId = escapeStateId(state.id);
+        push(`.${cls}[data-state~="${stateId}"]`, state.style, false);
+        pushAnimation(`.${cls}[data-state~="${stateId}"]`, widget, state.animation);
+        if (langPrefix) {
+          push(`${langPrefix}.${cls}[data-state~="${stateId}"]`, state.langFields?.[lang]?.style, false);
+        }
       }
+      // 仅预览态播放动画：编辑态不发射 animation 规则，避免画布上动画自播干扰编辑。
+      pushAnimation(`.${cls}`, widget, widget.animation);
       if ('children' in widget) {
         walk(widget.children, false);
       }

@@ -70,6 +70,20 @@ body:has(.preview-host.is-editing) #root {
   line-height: 1.6;
 }
 
+/* 组件定义编辑器：文档「定义尺寸」把定义区域限制为一个居中显示的矩形，虚线标示区域边界。 */
+.preview-mount:has(.lowcode-page.is-design-region),
+.preview-mount .lowcode-edit-anchor:has(.lowcode-page.is-design-region) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-mount .lowcode-page.is-design-region {
+  flex: 0 0 auto;
+  outline: 1px dashed #c9ced6;
+  outline-offset: 0;
+}
+
 .preview-host.is-editing .lowcode-page {
   overflow: visible;
 }
@@ -107,7 +121,8 @@ body:has(.preview-host.is-editing) #root {
   pointer-events: auto;
 }
 
-.preview-mount .lowcode-flex {
+.preview-mount .lowcode-flex,
+.preview-mount .lowcode-grid {
   box-sizing: border-box;
 }
 
@@ -130,7 +145,7 @@ body:has(.preview-host.is-editing) #root {
   box-sizing: border-box;
 }
 
-.preview-mount :where(.lowcode-flex > .lowcode-text, .lowcode-flex > .lowcode-input, .lowcode-flex > .lowcode-checkbox, .lowcode-flex > .lowcode-switch, .lowcode-flex > .lowcode-button, .lowcode-flex > .lowcode-image, .lowcode-flex > .lowcode-flex, .lowcode-flex > .lowcode-scroll, .lowcode-flex > .lowcode-swiper) {
+.preview-mount :where(.lowcode-flex > .lowcode-text, .lowcode-flex > .lowcode-input, .lowcode-flex > .lowcode-checkbox, .lowcode-flex > .lowcode-switch, .lowcode-flex > .lowcode-button, .lowcode-flex > .lowcode-image, .lowcode-flex > .lowcode-flex, .lowcode-flex > .lowcode-scroll, .lowcode-flex > .lowcode-swiper, .lowcode-grid > .lowcode-text, .lowcode-grid > .lowcode-input, .lowcode-grid > .lowcode-checkbox, .lowcode-grid > .lowcode-switch, .lowcode-grid > .lowcode-button, .lowcode-grid > .lowcode-image, .lowcode-grid > .lowcode-flex, .lowcode-grid > .lowcode-grid, .lowcode-grid > .lowcode-scroll, .lowcode-grid > .lowcode-swiper) {
   margin: 0;
 }
 

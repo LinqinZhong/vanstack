@@ -7,11 +7,14 @@ import type { ComponentProp, PageVariable } from '@vanstack/xml';
 export function CopyDataPicker({
   variables,
   componentProps,
+  slotProps,
   disabled,
   onPick,
 }: {
   variables?: PageVariable[];
   componentProps?: ComponentProp[];
+  /** 当前控件所在插槽声明的出参（`$slot.名称`）。 */
+  slotProps?: ComponentProp[];
   disabled?: boolean;
   onPick: (expression: string) => void;
 }) {
@@ -19,7 +22,8 @@ export function CopyDataPicker({
   const [open, setOpen] = useState(false);
   const props = componentProps ?? [];
   const data = variables ?? [];
-  const empty = props.length === 0 && data.length === 0;
+  const slot = slotProps ?? [];
+  const empty = props.length === 0 && data.length === 0 && slot.length === 0;
 
   const content = empty ? (
     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('lowcode.dataPickEmpty')} />
@@ -57,6 +61,24 @@ export function CopyDataPicker({
               }}
             >
               {variable.desc?.trim() ? `$data.${variable.name} · ${variable.desc.trim()}` : `$data.${variable.name}`}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {slot.length > 0 ? (
+        <div className="copy-i18n-picker-group">
+          <div className="copy-i18n-picker-title">{t('lowcode.dataPickSlot')}</div>
+          {slot.map((param) => (
+            <button
+              key={`slot:${param.name}`}
+              type="button"
+              className="copy-i18n-picker-item"
+              onClick={() => {
+                onPick(`$slot.${param.name}`);
+                setOpen(false);
+              }}
+            >
+              {param.desc?.trim() ? `$slot.${param.name} · ${param.desc.trim()}` : `$slot.${param.name}`}
             </button>
           ))}
         </div>

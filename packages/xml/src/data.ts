@@ -52,12 +52,37 @@ export function evaluateDataExpression(
   return new Function('$data', '$props', '$query', program)(scope, props, query);
 }
 
+/** 动态表达式求值失败时的兜底字面量。 */
+function fallbackVariableValue(type: PageVariable['type']): unknown {
+  if (type === 'num') {
+    return 0;
+  }
+  if (type === 'bool') {
+    return false;
+  }
+  if (type === 'arr') {
+    return [];
+  }
+  if (type === 'obj') {
+    return {};
+  }
+  return '';
+}
+
 export function readVariableValue(
   variable: PageVariable,
   data: Record<string, unknown>,
   props: Record<string, unknown> = Object.create(null),
   query: Record<string, unknown> = Object.create(null),
 ): unknown {
+  // 标量类型开启「动态」后按表达式求值，未开启时仍是字面量。
+  if (variable.dynamic && variable.type !== 'arr' && variable.type !== 'obj') {
+    try {
+      return evaluateDataExpression(variable.value || defaultPageDataValue(variable.type), data, props, query);
+    } catch {
+      return fallbackVariableValue(variable.type);
+    }
+  }
   if (variable.type === 'num') {
     const parsed = Number(variable.value);
     return Number.isFinite(parsed) ? parsed : 0;
@@ -95,7 +120,7 @@ export function buildPropsRecord(
   const record: Record<string, unknown> = Object.create(null);
   for (const prop of props ?? []) {
     record[prop.name] = readVariableValue(
-      { type: prop.type, name: prop.name, value: prop.value },
+      { type: prop.type, name: prop.name, value: prop.value, dynamic: prop.dynamic, computed: prop.computed },
       Object.create(null),
       record,
       query,
@@ -121,7 +146,7 @@ export function buildPageDataScope(
 }
 
 function isComputedData(variable: PageVariable): boolean {
-  return variable.computed === true && (variable.type === 'arr' || variable.type === 'obj');
+  return variable.computed === true;
 }
 
 function snapshotLiteral(value: unknown, type: 'arr' | 'obj'): string | null {
@@ -212,7 +237,7 @@ export function presentRuntimeData(
 
 export function validateDataLiteral(
   expr: string,
-  type: 'arr' | 'obj',
+  type: PageDataType,
   data: Record<string, unknown> = {},
   props: Record<string, unknown> = Object.create(null),
   query: Record<string, unknown> = Object.create(null),
@@ -222,7 +247,16 @@ export function validateDataLiteral(
     if (type === 'arr') {
       return Array.isArray(result);
     }
-    return isPlainObject(result);
+    if (type === 'obj') {
+      return isPlainObject(result);
+    }
+    if (type === 'num') {
+      return typeof result === 'number' && Number.isFinite(result);
+    }
+    if (type === 'bool') {
+      return typeof result === 'boolean';
+    }
+    return typeof result === 'string';
   } catch {
     return false;
   }

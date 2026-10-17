@@ -37,6 +37,22 @@ function applyFontFaces(fonts: Record<string, string>) {
     .join('\n');
 }
 
+/** readSlotParams：读取运行时挂到插槽占位上的、该实例解析后的插槽入参值。 */
+function readSlotParams(node: HTMLElement): Record<string, unknown> | null {
+  const raw = node.dataset.slotParams;
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function PreviewPage() {
   const { t } = useTranslation();
   const mountRef = useRef<HTMLDivElement>(null);
@@ -53,6 +69,8 @@ export function PreviewPage() {
   const projectIdRef = useRef<string | null>(null);
   const iconsKeyRef = useRef('{}');
   const fontsKeyRef = useRef('{}');
+  const assetsKeyRef = useRef('{}');
+  const animationsKeyRef = useRef('[]');
   const pageIdRef = useRef<string | null>(null);
   const queryKeyRef = useRef('{}');
   const previewEpochRef = useRef(0);
@@ -79,6 +97,7 @@ export function PreviewPage() {
   const swiperEditingRef = useRef(false);
   const componentEditingRef = useRef(false);
   const componentEditIdRef = useRef<string | null>(null);
+  const slotDebugIdRef = useRef<string | null>(null);
   const centerContentRef = useRef(false);
   const useComponentTestDataRef = useRef(false);
   const chromeLabelsRef = useRef<TableChromeLabels>({
@@ -394,6 +413,7 @@ export function PreviewPage() {
         catalog,
         projectId,
         icons,
+        assets,
         fonts,
         pageId,
         query,
@@ -408,11 +428,13 @@ export function PreviewPage() {
         swiperEditing,
         componentEditing,
         componentEditId,
+        slotDebugId,
         settle,
         components,
         centerContent,
         useComponentTestData,
         previewEpoch,
+        animations,
       } = event.data;
       const nextEditing = mode !== 'preview';
       const nextLocale = locale || undefined;
@@ -427,6 +449,8 @@ export function PreviewPage() {
       const nextIconsKey = JSON.stringify(nextIcons);
       const nextFonts = fonts && typeof fonts === 'object' ? fonts : {};
       const nextFontsKey = JSON.stringify(nextFonts);
+      const nextAssets = assets && typeof assets === 'object' ? assets : {};
+      const nextAssetsKey = JSON.stringify(nextAssets);
       if (nextFontsKey !== fontsKeyRef.current) {
         fontsKeyRef.current = nextFontsKey;
         applyFontFaces(nextFonts);
@@ -441,11 +465,14 @@ export function PreviewPage() {
       const nextCenterContent = Boolean(centerContent);
       const nextUseComponentTestData = Boolean(useComponentTestData);
       const nextPreviewEpoch = typeof previewEpoch === 'number' ? previewEpoch : 0;
+      const nextAnimations = Array.isArray(animations) ? animations : [];
+      const nextAnimationsKey = JSON.stringify(nextAnimations);
       const nextTableEditing = nextEditing && Boolean(tableEditing);
       const nextScrollEditing = nextEditing && Boolean(scrollEditing);
       const nextSwiperEditing = nextEditing && Boolean(swiperEditing);
       const nextComponentEditing = nextEditing && Boolean(componentEditing);
       const nextComponentEditId = nextComponentEditing ? componentEditId ?? null : null;
+      const nextSlotDebugId = nextEditing ? slotDebugId ?? null : null;
       const shouldRender =
         nextDocumentKey !== documentKeyRef.current ||
         nextComponentsKey !== componentsKeyRef.current ||
@@ -460,11 +487,14 @@ export function PreviewPage() {
         nextViewingStates !== viewingStatesRef.current ||
         nextProjectId !== projectIdRef.current ||
         nextIconsKey !== iconsKeyRef.current ||
+        nextAssetsKey !== assetsKeyRef.current ||
         nextPageId !== pageIdRef.current ||
         nextQueryKey !== queryKeyRef.current ||
         nextPreviewEpoch !== previewEpochRef.current ||
         nextComponentEditing !== componentEditingRef.current ||
-        nextComponentEditId !== componentEditIdRef.current;
+        nextComponentEditId !== componentEditIdRef.current ||
+        nextSlotDebugId !== slotDebugIdRef.current ||
+        nextAnimationsKey !== animationsKeyRef.current;
       editingRef.current = nextEditing;
       tableEditingRef.current = nextTableEditing;
       setHostTableEditing(nextTableEditing);
@@ -475,6 +505,7 @@ export function PreviewPage() {
       componentEditingRef.current = nextComponentEditing;
       setHostComponentEditing(nextComponentEditing);
       componentEditIdRef.current = nextComponentEditing ? componentEditId ?? null : null;
+      slotDebugIdRef.current = nextSlotDebugId;
       tableChromeRef.current = nextEditing ? (tableChrome ?? null) : null;
       tableLayoutRef.current = nextTableLayout;
       localeRef.current = nextLocale;
@@ -484,9 +515,11 @@ export function PreviewPage() {
       viewingStatesRef.current = nextViewingStates;
       projectIdRef.current = nextProjectId;
       iconsKeyRef.current = nextIconsKey;
+      assetsKeyRef.current = nextAssetsKey;
       pageIdRef.current = nextPageId;
       queryKeyRef.current = nextQueryKey;
       previewEpochRef.current = nextPreviewEpoch;
+      animationsKeyRef.current = nextAnimationsKey;
       installPageNavigation(
         nextEditing
           ? null
@@ -596,6 +629,17 @@ export function PreviewPage() {
                 }
               }
             : undefined,
+          // 组件「控件」变量通过实例调用暴露方法时，按方法 id 取方法体。
+          loadFunction: nextProjectId
+            ? async (id) => {
+                try {
+                  const saved = await api.getMethodCode(nextProjectId, id);
+                  return saved.code;
+                } catch {
+                  return null;
+                }
+              }
+            : undefined,
           query: nextEditing ? undefined : nextQuery,
           pageId: nextPageId ? `${nextPageId}:${nextQueryKey}` : null,
           components,
@@ -610,7 +654,11 @@ export function PreviewPage() {
           // 组件编辑态（非组件定义编辑器）：实例内部树与数据解耦，显示只由状态栏选择驱动。
           componentEditing: componentEditingRef.current,
           componentEditId: componentEditIdRef.current,
+          slotDebugId: nextSlotDebugId,
           icons: nextIcons,
+          assets: nextAssets,
+          animations: nextAnimations,
+          animationsKey: nextAnimationsKey,
           previewEpoch: nextPreviewEpoch,
           onCommit: paintChrome,
         });
@@ -978,7 +1026,27 @@ export function PreviewPage() {
 
     /** onClick：单击选中；同锚点再点上钻父级（Ctrl 时延时，避免挡双击）。 */
     function onClick(event: MouseEvent) {
-      if (!editingRef.current || event.button !== 0) {
+      if (event.button !== 0) {
+        return;
+      }
+      if (!editingRef.current) {
+        // 组件定义编辑器的预览态：允许点选插槽占位（含循环展开出来的多份实例），
+        // 把选中插槽及其当前实例解析后的入参回传父页，供右侧「数据」面板展示。
+        if (!centerContentRef.current || !(event.target instanceof Element)) {
+          return;
+        }
+        const slotEl = event.target.closest<HTMLElement>('[data-widget-type="slot"]');
+        const slotId = slotEl?.dataset.widgetId;
+        if (!slotEl || !slotId) {
+          postToParent({ type: 'select', widgetId: null, slotParams: null });
+          return;
+        }
+        event.preventDefault();
+        postToParent({
+          type: 'select',
+          widgetId: slotId,
+          slotParams: readSlotParams(slotEl),
+        });
         return;
       }
       const field = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement ? event.target : null;

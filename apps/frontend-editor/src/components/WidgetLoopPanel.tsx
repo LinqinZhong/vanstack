@@ -37,6 +37,7 @@ export function WidgetLoopPanel({
   widget,
   variables,
   props = [],
+  slotProps = [],
   disabled,
   popupContainer,
   onChange,
@@ -44,6 +45,8 @@ export function WidgetLoopPanel({
   widget: PageWidget;
   variables: PageVariable[];
   props?: ComponentProp[];
+  /** 当前控件所在插槽声明的出参（`$slot.名称`）。 */
+  slotProps?: ComponentProp[];
   disabled?: boolean;
   popupContainer?: () => HTMLElement;
   onChange: (loop: WidgetLoop | undefined) => void;
@@ -52,6 +55,7 @@ export function WidgetLoopPanel({
   const [draft, setDraft] = useState(() => draftFromLoop(widget.loop));
   const [editing, setEditing] = useState(false);
   const [literalDraft, setLiteralDraft] = useState('return []');
+  const [codeValid, setCodeValid] = useState(true);
   const widgetIdRef = useRef(widget.id);
 
   const arrayVariables = useMemo(
@@ -76,9 +80,10 @@ export function WidgetLoopPanel({
     return groups;
   }, [arrayProps, arrayVariables, t]);
   const knownNames = useMemo(() => variables.map((variable) => variable.name), [variables]);
+  const slotNames = useMemo(() => slotProps.map((prop) => prop.name), [slotProps]);
   const editorExtensions = useMemo(
-    () => createPageDataEditorExtensions(knownNames, t('lowcode.dataUnknownRef')),
-    [knownNames, t],
+    () => createPageDataEditorExtensions(knownNames, t('lowcode.dataUnknownRef'), props.map((prop) => prop.name), [], slotNames),
+    [knownNames, props, slotNames, t],
   );
 
   useEffect(() => {
@@ -240,7 +245,7 @@ export function WidgetLoopPanel({
         open={editing}
         onCancel={() => setEditing(false)}
         onOk={confirmLiteral}
-        okButtonProps={{ disabled }}
+        okButtonProps={{ disabled: disabled || !codeValid }}
         destroyOnHidden
       >
         <ScriptEditor
@@ -250,6 +255,7 @@ export function WidgetLoopPanel({
           suffix="}"
           extensions={editorExtensions}
           editable={!disabled}
+          onValidateChange={setCodeValid}
           onChange={setLiteralDraft}
         />
         <Typography.Text type="secondary" className="page-data-hint">

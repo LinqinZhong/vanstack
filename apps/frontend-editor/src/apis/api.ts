@@ -32,6 +32,9 @@ import type {
   MethodCodeDto,
   NamespaceDocumentDto,
   ProjectNamespaceDto,
+  AnimationDefinitionDto,
+  CreateAnimationInput,
+  UpdateAnimationInput,
   PutMethodCodeInput,
   PutNamespaceInput,
   RenameNamespaceInput,
@@ -313,6 +316,13 @@ export const api = {
       `/projects/${projectId}/namespaces/${encodeURIComponent(name)}`,
       json('PUT', body),
     ),
+  listAnimations: (projectId: string) => request<AnimationDefinitionDto[]>(`/projects/${projectId}/animations`),
+  createAnimation: (projectId: string, body: CreateAnimationInput) =>
+    request<AnimationDefinitionDto>(`/projects/${projectId}/animations`, json('POST', body)),
+  updateAnimation: (projectId: string, animationId: string, body: UpdateAnimationInput) =>
+    request<AnimationDefinitionDto>(`/projects/${projectId}/animations/${animationId}`, json('PATCH', body)),
+  deleteAnimation: (projectId: string, animationId: string) =>
+    request<void>(`/projects/${projectId}/animations/${animationId}`, { method: 'DELETE' }),
 };
 
 export const localeLabel: Record<Locale, string> = {

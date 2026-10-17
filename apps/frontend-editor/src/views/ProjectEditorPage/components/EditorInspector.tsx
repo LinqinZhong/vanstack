@@ -1,6 +1,6 @@
 import { ConfigProvider, Modal, message } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { ComponentProp, ComponentSlot, PageI18n, PageStyle, PageVariable, PageWidget } from '@vanstack/xml';
+import type { ComponentProp, ComponentSlot, GridStyle, PageI18n, PageStyle, PageVariable, PageWidget } from '@vanstack/xml';
 import { EditorHelpModal } from '../../../components/EditorHelpModal';
 import { PagePropertyInspector, WidgetPropertyInspector } from '../../../components/InspectorPropertyGrid';
 import { inspectorTheme } from '../../../components/inspectorTheme';
@@ -21,10 +21,13 @@ type EditorInspectorProps = {
   open: boolean;
   widget: PageWidget | null;
   parentType?: PageWidget['type'];
+  parentGrid?: GridStyle;
   readOnly: boolean;
   pageI18n: PageI18n | undefined;
   variables: PageVariable[];
   componentProps?: ComponentProp[];
+  /** 当前控件所在插槽声明的出参（`$slot.名称`）。 */
+  slotProps?: ComponentProp[];
   componentSlots?: ComponentSlot[];
   onComponentSlotsChange?: (slots: ComponentSlot[], coalesceKey?: string) => void;
   bindableProps?: ComponentProp[];
@@ -45,10 +48,12 @@ export function EditorInspector({
   open,
   widget,
   parentType,
+  parentGrid,
   readOnly,
   pageI18n,
   variables,
   componentProps,
+  slotProps,
   componentSlots,
   onComponentSlotsChange,
   bindableProps,
@@ -97,11 +102,13 @@ export function EditorInspector({
             <WidgetPropertyInspector
               widget={widget}
               parentType={parentType}
+              parentGrid={parentGrid}
               disabled={readOnly}
               i18nCatalog={pageI18n}
               projectId={projectId}
               variables={variables}
               componentProps={componentProps}
+              slotProps={slotProps}
               componentSlots={componentSlots}
               onComponentSlotsChange={onComponentSlotsChange}
               bindableProps={bindableProps}

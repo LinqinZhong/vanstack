@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
-import type { ProjectComponentDto, ProjectDto, ProjectPageDto, ProjectPageVersionDto, ProjectVersionDto } from '@vanstack/shared';
+import type { AnimationDefinitionDto, ProjectComponentDto, ProjectDto, ProjectPageDto, ProjectPageVersionDto, ProjectVersionDto, UpdateAnimationInput } from '@vanstack/shared';
 import { pageCssText } from '@vanstack/lowcode-runtime';
 import {
   DEFAULT_DRAWER_PLACE,
@@ -28,12 +28,15 @@ import {
   findOwnedDelta,
   normalizeInputModelValue,
   normalizePageDocument,
+  PAGE_ROOT_STATE_OWNER_ID,
+  pageStateRootWidget,
   presentRuntimeData,
   propModelName,
   validateDataLiteral,
   type ComponentEmit,
   type ComponentProp,
   type ComponentSlot,
+  type PageDesignSize,
   type PageI18n,
   type PageMethod,
   type PageStyle,
@@ -42,6 +45,7 @@ import {
   type PageWidget,
   type PageXmlDocument,
   type WidgetEvents,
+  type WidgetStateDelta,
   type WidgetStateLayer,
   type WidgetStyle,
 } from '@vanstack/xml';
@@ -142,6 +146,7 @@ import {
   patchWidget,
   removeSlotContentWidget,
   removeWidget,
+  definitionTreeWidgets,
   toWidgetTreeData,
   updateSlotContentWidget,
   updateWidgetById,
@@ -175,9 +180,9 @@ import {
 import {
   collectComponentRootStates,
   collectPrefixedStateTree,
-  collectSlotContentStateTree,
   collectStateTree,
   patchResolvedWidget,
+  patchWidgetInState,
   pruneViewingByOwner,
   stateLayersForWidget,
   stateOwnKeys,
@@ -187,6 +192,7 @@ import {
   type ViewingByOwner,
 } from '../../utils/widgetStates';
 import { refreshIconCatalog, subscribeIconCatalog } from '../../utils/iconCatalog';
+import { refreshAssetCatalog, subscribeAssetCatalog } from '../../utils/assetCatalog';
 import { refreshFontCatalog, subscribeFontCatalog, type FontCatalogEntry } from '../../utils/fontCatalog';
 import { publishEditorI18n } from '../../utils/i18nRuntime';
 import { CANVAS_RASTER_SCALE, canEditPositionInsets, clampScale, closeStyleToolbarPopups, computeFitView, dragLengthPx, edgeBoxLength, EDIT_OVERFLOW_X, EDIT_OVERFLOW_Y, ENTER_DOUBLE_MS, FOCUS_PADDING, HISTORY_LIMIT, iframePointToClient, isAutoLength, isBoxDragGroup, isSpacingNudgeGroup, liveWidgetCss, mapIframePoint, MAX_SCALE, paintCanvasView, SCREEN_HEIGHT, SCREEN_WIDTH, sizeLock, snapDevicePixel, spacingAllowsNegative, styleBoxQuad, styleFromBoxQuad, zoomViewAt, ZOOM_IDLE_MS, ZOOM_STEP, type CanvasMode, type CenterTab, type HistoryEntry, type SaveStatus, type ViewTransform } from './helpers';
@@ -289,13 +295,21 @@ export function ProjectEditorPage() {
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [widgets, setWidgets] = useState<PageWidget[]>([]);
   const [pageStyle, setPageStyle] = useState<PageStyle | undefined>(undefined);
+  const [pageStates, setPageStates] = useState<WidgetStateDelta[] | undefined>(undefined);
+  // 文档级全局状态的状态函数/hover：与控件自身的 stateFn/hoverStateId 独立。
+  const [pageStateFn, setPageStateFn] = useState<string | undefined>(undefined);
+  const [pageHoverStateId, setPageHoverStateId] = useState<string | undefined>(undefined);
+  /** 组件定义编辑器的「定义尺寸」：仅定义态使用，决定定义插槽时画布上这块区域的大小。 */
+  const [pageDesignSize, setPageDesignSize] = useState<PageDesignSize | undefined>(undefined);
   const [pageData, setPageData] = useState<PageVariable[]>([]);
   const [testData, setTestData] = useState<PageTestData | undefined>(undefined);
   const [pageEvents, setPageEvents] = useState<WidgetEvents | undefined>(undefined);
   const [pageMethods, setPageMethods] = useState<PageMethod[]>([]);
   const [pageI18n, setPageI18n] = useState<PageI18n | undefined>(undefined);
   const [iconCatalog, setIconCatalog] = useState<Record<string, string>>({});
+  const [assetCatalog, setAssetCatalog] = useState<Record<string, string>>({});
   const [fontCatalog, setFontCatalog] = useState<FontCatalogEntry[]>([]);
+  const [animations, setAnimations] = useState<AnimationDefinitionDto[]>([]);
   const [previewLocale, setPreviewLocale] = useState<string | null>(null);
   const [leftNav, setLeftNav] = useState<EditorNav>('develop');
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
@@ -304,6 +318,10 @@ export function ProjectEditorPage() {
   const [scrollEditId, setScrollEditId] = useState<string | null>(null);
   const [swiperEditId, setSwiperEditId] = useState<string | null>(null);
   const [componentEditId, setComponentEditId] = useState<string | null>(null);
+  // 组件定义编辑器：正在调试的插槽 id（隔离显示该插槽内部的调试节点）。
+  const [slotDebugId, setSlotDebugId] = useState<string | null>(null);
+  // 组件定义编辑器预览态下选中的插槽：widgetId + 该实例解析后的入参值。
+  const [previewSlotSel, setPreviewSlotSel] = useState<{ widgetId: string; params: Record<string, unknown> } | null>(null);
   const [viewingOwnerId, setViewingOwnerId] = useState<string | null>(null);
   const [viewingState, setViewingState] = useState<string | null>(null);
   const [viewingByOwner, setViewingByOwner] = useState<ViewingByOwner>({});
@@ -388,6 +406,10 @@ export function ProjectEditorPage() {
   const spacingCancelRef = useRef(false);
   const widgetsRef = useRef(widgets);
   const pageStyleRef = useRef(pageStyle);
+  const pageStatesRef = useRef(pageStates);
+  const pageStateFnRef = useRef(pageStateFn);
+  const pageHoverStateIdRef = useRef(pageHoverStateId);
+  const pageDesignSizeRef = useRef(pageDesignSize);
   const pageDataRef = useRef(pageData);
   const testDataRef = useRef(testData);
   const previewDataEditsRef = useRef<Record<string, string>>({});
@@ -428,6 +450,7 @@ export function ProjectEditorPage() {
   const scrollEditIdRef = useRef<string | null>(null);
   const swiperEditIdRef = useRef<string | null>(null);
   const componentEditIdRef = useRef<string | null>(null);
+  const slotDebugIdRef = useRef<string | null>(null);
   const editOriginViewRef = useRef<ViewTransform | null>(null);
   const centeredEditIdRef = useRef<string | null>(null);
   const exitOneEditRef = useRef<() => boolean>(() => false);
@@ -543,6 +566,10 @@ export function ProjectEditorPage() {
       normalizePageDocument({
         widgets,
         style: pageStyle,
+        states: pageStates && pageStates.length > 0 ? pageStates : undefined,
+        stateFn: pageStateFn,
+        hoverStateId: pageHoverStateId,
+        designSize: pageDesignSize,
         data: pageData.length > 0 ? pageData : undefined,
         events: pageEvents,
         methods: pageMethods.length > 0 ? pageMethods : undefined,
@@ -552,7 +579,7 @@ export function ProjectEditorPage() {
         emits: componentEmits.length > 0 ? componentEmits : undefined,
         testData: compactPageTestData(testData, componentProps, pageData, pageQuery),
       }),
-    [widgets, pageStyle, pageData, pageEvents, pageMethods, componentProps, componentSlots, pageQuery, componentEmits, testData],
+    [widgets, pageStyle, pageStates, pageStateFn, pageHoverStateId, pageDesignSize, pageData, pageEvents, pageMethods, componentProps, componentSlots, pageQuery, componentEmits, testData],
   );
   const documentKey = JSON.stringify(pageDocument);
   documentRef.current = pageDocument;
@@ -652,6 +679,10 @@ export function ProjectEditorPage() {
   pageSnapshotIdRef.current = pageSnapshotId;
   widgetsRef.current = widgets;
   pageStyleRef.current = pageStyle;
+  pageStatesRef.current = pageStates;
+  pageStateFnRef.current = pageStateFn;
+  pageHoverStateIdRef.current = pageHoverStateId;
+  pageDesignSizeRef.current = pageDesignSize;
   pageDataRef.current = pageData;
   testDataRef.current = pageDocument.testData;
   pageEventsRef.current = pageEvents;
@@ -663,6 +694,7 @@ export function ProjectEditorPage() {
   scrollEditIdRef.current = scrollEditId;
   swiperEditIdRef.current = swiperEditId;
   componentEditIdRef.current = componentEditId;
+  slotDebugIdRef.current = slotDebugId;
   viewingOwnerIdRef.current = viewingOwnerId;
   viewingStateRef.current = viewingState;
   viewingByOwnerRef.current = viewingByOwner;
@@ -691,6 +723,8 @@ export function ProjectEditorPage() {
       }
       return layers;
     }
+    // 插槽调试态下画布仍渲染整个组件（调试内容就地落在插槽位置），因此这里沿用整棵模板树的祖先链，
+    // 与画布的状态叠加保持一致；只是状态栏（visibleStates）不展示插槽外的组件私有状态。
     return stateLayersForWidget(widgetsRef.current, widget.id, viewingByOwnerRef.current);
   }
 
@@ -1078,6 +1112,7 @@ export function ProjectEditorPage() {
   );
 
   useEffect(() => subscribeIconCatalog(setIconCatalog), []);
+  useEffect(() => subscribeAssetCatalog(setAssetCatalog), []);
   useEffect(() => subscribeFontCatalog(setFontCatalog), []);
 
   useLayoutEffect(() => {
@@ -1089,8 +1124,78 @@ export function ProjectEditorPage() {
       return;
     }
     void refreshIconCatalog(id, projectVersionId).catch(() => undefined);
+    void refreshAssetCatalog(id, projectVersionId).catch(() => undefined);
     void refreshFontCatalog(id, projectVersionId).catch(() => undefined);
   }, [id, projectVersionId]);
+
+  // 动画库：工程级独立存储（animation.version 集合），不随页面/组件版本切换。
+  useEffect(() => {
+    if (!id) {
+      setAnimations([]);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .listAnimations(id)
+      .then((list) => {
+        if (!cancelled) {
+          setAnimations(list);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  const createAnimation = useCallback(
+    async (name: string) => {
+      if (!id) {
+        return null;
+      }
+      try {
+        const created = await api.createAnimation(id, { name });
+        setAnimations((prev) => [...prev, created]);
+        return created;
+      } catch {
+        message.error(t('lowcode.saveFailed'));
+        return null;
+      }
+    },
+    [id, t],
+  );
+
+  const updateAnimation = useCallback(
+    async (animationId: string, input: UpdateAnimationInput) => {
+      if (!id) {
+        return null;
+      }
+      try {
+        const updated = await api.updateAnimation(id, animationId, input);
+        setAnimations((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+        return updated;
+      } catch {
+        message.error(t('lowcode.saveFailed'));
+        return null;
+      }
+    },
+    [id, t],
+  );
+
+  const deleteAnimation = useCallback(
+    async (animationId: string) => {
+      if (!id) {
+        return;
+      }
+      try {
+        await api.deleteAnimation(id, animationId);
+        setAnimations((prev) => prev.filter((item) => item.id !== animationId));
+      } catch {
+        message.error(t('lowcode.deleteFailed'));
+      }
+    },
+    [id, t],
+  );
 
   const sendPreview = useCallback(() => {
     publishEditorI18n(pageI18n, previewLocale);
@@ -1177,7 +1282,9 @@ export function ProjectEditorPage() {
         catalog: pageI18n,
         projectId: project?.id ?? null,
         icons: iconCatalog,
+        assets: assetCatalog,
         fonts: Object.fromEntries(fontCatalog.map((entry) => [entry.family, entry.url])),
+        animations: animations,
         pageId: selectedPageId,
         query: mode === 'preview'
           ? {
@@ -1206,6 +1313,7 @@ export function ProjectEditorPage() {
         swiperEditing: editLeaf === 'swiper',
         componentEditing: componentEditId !== null,
         componentEditId: componentEditId,
+        slotDebugId: slotDebugId,
         tableChrome:
           editLeaf === 'table' && !readOnlyRef.current
             ? tableChromeState(widgetsRef.current, selectedWidgetId, tableRangeRef.current)
@@ -1215,7 +1323,7 @@ export function ProjectEditorPage() {
       },
       window.location.origin,
     );
-  }, [mode, previewLocale, previewQuery, pageI18n, project?.id, selectedPageId, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, tableRange, tableEditId, scrollEditId, swiperEditId, componentEditId, componentDocsKey, iconCatalog, fontCatalog]);
+  }, [mode, previewLocale, previewQuery, pageI18n, project?.id, selectedPageId, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, tableRange, tableEditId, scrollEditId, swiperEditId, componentEditId, componentDocsKey, iconCatalog, assetCatalog, fontCatalog, animations, slotDebugId]);
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -1253,6 +1361,20 @@ export function ProjectEditorPage() {
         return;
       }
       if (event.data.type === 'select') {
+        // 组件定义编辑器预览态：插槽点选只刷新「插槽入参」展示与控件树高亮，
+        // 不进入画布选中态（预览态不绘制选中框）。
+        if (event.data.slotParams !== undefined) {
+          const slotWidgetId = event.data.widgetId as string | null;
+          if (slotWidgetId) {
+            setExpandedKeys((prev) =>
+              nextExpandedKeys(prev, widgetsRef.current, widgetsRef.current, slotWidgetId),
+            );
+          }
+          setPreviewSlotSel(
+            slotWidgetId ? { widgetId: slotWidgetId, params: event.data.slotParams ?? {} } : null,
+          );
+          return;
+        }
         if (event.data.widgetId == null) {
           if (tableEditIdRef.current || scrollEditIdRef.current || swiperEditIdRef.current || componentEditIdRef.current) {
             return;
@@ -1313,7 +1435,7 @@ export function ProjectEditorPage() {
         return;
       }
       if (event.data.type === 'dismiss-toolbar') {
-        if (tableEditIdRef.current || scrollEditIdRef.current || swiperEditIdRef.current || componentEditIdRef.current) {
+        if (tableEditIdRef.current || scrollEditIdRef.current || swiperEditIdRef.current) {
           return;
         }
         if (!dismissStyleToolbarRef.current()) {
@@ -1439,8 +1561,8 @@ export function ProjectEditorPage() {
   }, [canvasSettling, mode, settleArm]);
 
   useEffect(() => {
-    // 组件编辑态下，选中插槽/插槽内容时：该宿主首次选中则处于默认状态，
-    // 已有的查看状态（如插槽的 a 状态）必须保留——选中其子元素时插槽仍处于 a。
+    // 组件编辑态：宿主按选中对象分派——选中插槽/插槽内容用带前缀的运行时 id，
+    // 未选中内部控件时回退组件实例根（供顶部下拉框切换组件全局状态，状态栏不显示）。
     if (componentEditId) {
       const virtual = resolveVirtualSelection(selectedWidgetId);
       let ownerId: string | null = null;
@@ -1448,28 +1570,32 @@ export function ProjectEditorPage() {
         ownerId = `${componentEditId}__${virtual.slotWidget.id}`;
       } else if (virtual?.kind === 'content') {
         ownerId = `${componentEditId}__slot-${virtual.slotId}__${virtual.widget.id}`;
-      } else if (selectedWidgetId) {
+      } else {
         ownerId = componentEditId;
       }
-      if (ownerId !== null) {
-        const prev = viewingByOwnerRef.current;
-        const stateId = Object.prototype.hasOwnProperty.call(prev, ownerId) ? prev[ownerId] : null;
-        setViewingOwnerId(ownerId);
-        setViewingState(stateId);
-        if (!Object.prototype.hasOwnProperty.call(prev, ownerId)) {
-          setViewingByOwner((current) =>
-            Object.prototype.hasOwnProperty.call(current, ownerId) ? current : { ...current, [ownerId]: null },
-          );
-        }
+      const prev = viewingByOwnerRef.current;
+      const stateId = Object.prototype.hasOwnProperty.call(prev, ownerId) ? prev[ownerId] : null;
+      setViewingOwnerId(ownerId);
+      setViewingState(stateId);
+      if (!Object.prototype.hasOwnProperty.call(prev, ownerId)) {
+        setViewingByOwner((current) =>
+          Object.prototype.hasOwnProperty.call(current, ownerId) ? current : { ...current, [ownerId]: null },
+        );
       }
       return;
     }
     if (!selectedWidgetId) {
-      if (viewingOwnerId !== null) {
-        setViewingOwnerId(null);
-      }
-      if (viewingState !== null) {
-        setViewingState(null);
+      // 未选中节点时展示文档级全局状态（页面态与组件定义态共用 __page__）。
+      // 全局状态与最外层节点自身的状态相互独立，这里只切全局状态。
+      const ownerId = PAGE_ROOT_STATE_OWNER_ID;
+      const prev = viewingByOwnerRef.current;
+      const stateId = Object.prototype.hasOwnProperty.call(prev, ownerId) ? prev[ownerId] : null;
+      setViewingOwnerId(ownerId);
+      setViewingState(stateId);
+      if (!Object.prototype.hasOwnProperty.call(prev, ownerId)) {
+        setViewingByOwner((current) =>
+          Object.prototype.hasOwnProperty.call(current, ownerId) ? current : { ...current, [ownerId]: null },
+        );
       }
       return;
     }
@@ -1497,6 +1623,13 @@ export function ProjectEditorPage() {
       return next;
     });
   }, [widgets, componentEditId]);
+
+  useEffect(() => {
+    // 仅组件定义编辑器的预览态存在插槽点选；离开该场景后清空，避免残留「插槽入参」展示。
+    if (mode !== 'preview' || catalogKind !== 'component') {
+      setPreviewSlotSel(null);
+    }
+  }, [mode, catalogKind, selectedComponentId]);
 
   useEffect(() => {
     const widgetId = selectedWidgetIdRef.current;
@@ -2339,6 +2472,8 @@ export function ProjectEditorPage() {
     resetHistory();
     componentEditIdRef.current = null;
     setComponentEditId(null);
+    slotDebugIdRef.current = null;
+    setSlotDebugId(null);
     if (activeOwnerId) {
       if (sawOwnerRef.current && modeRef.current !== 'preview') {
         beginOwnerCanvas();
@@ -2368,6 +2503,8 @@ export function ProjectEditorPage() {
     resetHistory();
     componentEditIdRef.current = null;
     setComponentEditId(null);
+    slotDebugIdRef.current = null;
+    setSlotDebugId(null);
     if (!selectedPageId) {
       cancelOwnerCanvas();
       setPageSnapshotId(null);
@@ -2382,6 +2519,14 @@ export function ProjectEditorPage() {
     sawOwnerRef.current = true;
     void loadPageSnapshot(selectedPageId, projectVersionId);
   }, [catalogKind, selectedPageId, projectVersionId, pageLoadToken]);
+
+  // 插槽调试态是组件定义编辑器的编辑态能力：切到预览态或离开组件文档时自动退出。
+  useEffect(() => {
+    if (mode === 'preview' && slotDebugIdRef.current) {
+      slotDebugIdRef.current = null;
+      setSlotDebugId(null);
+    }
+  }, [mode]);
 
   function resetHistory() {
     pastRef.current = [];
@@ -2402,10 +2547,18 @@ export function ProjectEditorPage() {
     nextEmits: ComponentEmit[] = [],
     nextTestData?: PageTestData,
     nextQuery: ComponentProp[] = [],
+    nextPageStates?: WidgetStateDelta[],
+    nextPageStateFn?: string,
+    nextPageHoverStateId?: string,
+    nextPageDesignSize?: PageDesignSize,
   ) {
     const selectedId = nextSelectedId === undefined ? (nextWidgets[0]?.id ?? null) : nextSelectedId;
     widgetsRef.current = nextWidgets;
     pageStyleRef.current = nextPageStyle;
+    pageStatesRef.current = nextPageStates;
+    pageStateFnRef.current = nextPageStateFn;
+    pageHoverStateIdRef.current = nextPageHoverStateId;
+    pageDesignSizeRef.current = nextPageDesignSize;
     pageDataRef.current = nextPageData;
     pageEventsRef.current = nextPageEvents;
     pageMethodsRef.current = nextPageMethods;
@@ -2423,6 +2576,10 @@ export function ProjectEditorPage() {
     selectedWidgetIdRef.current = selectedId;
     setWidgets(nextWidgets);
     setPageStyle(nextPageStyle);
+    setPageStates(nextPageStates);
+    setPageStateFn(nextPageStateFn);
+    setPageHoverStateId(nextPageHoverStateId);
+    setPageDesignSize(nextPageDesignSize);
     setPageData(nextPageData);
     setPageEvents(nextPageEvents);
     setPageMethods(nextPageMethods);
@@ -2477,6 +2634,10 @@ export function ProjectEditorPage() {
         parsed.emits ?? [],
         parsed.testData,
         parsed.query ?? [],
+        parsed.states,
+        parsed.stateFn,
+        parsed.hoverStateId,
+        parsed.designSize,
       );
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.invalidXml'));
@@ -2497,6 +2658,10 @@ export function ProjectEditorPage() {
       {
         widgets: widgetsRef.current,
         pageStyle: pageStyleRef.current,
+        pageStates: pageStatesRef.current,
+        pageStateFn: pageStateFnRef.current,
+        pageHoverStateId: pageHoverStateIdRef.current,
+        pageDesignSize: pageDesignSizeRef.current,
         pageData: pageDataRef.current,
         pageEvents: pageEventsRef.current,
         pageMethods: pageMethodsRef.current,
@@ -2593,6 +2758,17 @@ export function ProjectEditorPage() {
       exitComponentEdit();
       return;
     }
+    // 插槽调试态：选中的控件若不在正在调试的插槽子树内，自动退出调试态。
+    const debugSlotId = slotDebugIdRef.current;
+    if (debugSlotId && id && id !== debugSlotId) {
+      const slotWidget = findWidget(widgetsRef.current, debugSlotId);
+      const inside =
+        slotWidget?.type === 'slot' && Boolean(findWidget(slotWidget.children, id));
+      if (!inside) {
+        slotDebugIdRef.current = null;
+        setSlotDebugId(null);
+      }
+    }
     if (tableEditIdRef.current && owning?.table.id !== tableEditIdRef.current) {
       tableEditIdRef.current = null;
       setTableEditId(null);
@@ -2605,7 +2781,7 @@ export function ProjectEditorPage() {
       swiperEditIdRef.current = null;
       setSwiperEditId(null);
     }
-    if (componentEditIdRef.current && selected?.id !== componentEditIdRef.current) {
+    if (componentEditIdRef.current && selected && selected.id !== componentEditIdRef.current) {
       componentEditIdRef.current = null;
       setComponentEditId(null);
     }
@@ -3013,6 +3189,41 @@ export function ProjectEditorPage() {
     return true;
   }
 
+  /**
+   * 组件定义编辑器：进入/退出插槽调试态。
+   * 调试态下画布只渲染该插槽节点（其 children 即调试节点），调试节点与普通控件一样可编辑，
+   * 并可经 `$slot` 访问插槽出参；它们仅用于定义期预览，组件被实例化时会被剔除。
+   */
+  function toggleSlotDebug(slotId?: string | null) {
+    if (readOnlyRef.current || catalogKindRef.current !== 'component') {
+      return;
+    }
+    const current = slotDebugIdRef.current;
+    const target =
+      slotId ??
+      (() => {
+        const selected = findWidget(widgetsRef.current, selectedWidgetIdRef.current);
+        return selected?.type === 'slot' ? selected.id : null;
+      })();
+    // 再次点击同一个插槽即退出；点击另一个插槽则直接切过去继续调试。
+    if (current && (!target || current === target)) {
+      slotDebugIdRef.current = null;
+      setSlotDebugId(null);
+      selectWidgetRef.current(current);
+      setExpandedKeys((prev) => Array.from(new Set([...prev, current])));
+      fitCanvas(false);
+      return;
+    }
+    if (!target) {
+      return;
+    }
+    slotDebugIdRef.current = target;
+    setSlotDebugId(target);
+    selectWidgetRef.current(target);
+    setExpandedKeys((prev) => Array.from(new Set([...prev, target])));
+    fitCanvas(false);
+  }
+
   // -------------------------------------------------------------------------
   // 编辑组件实例时：插槽占位与 slotContent 的虚拟选择/编辑路由
   // -------------------------------------------------------------------------
@@ -3396,6 +3607,10 @@ export function ProjectEditorPage() {
     nextTestData?: PageTestData | null,
     nextQuery?: ComponentProp[],
     nextSlots?: ComponentSlot[],
+    nextPageStates?: WidgetStateDelta[] | null,
+    nextPageStateFn?: string | null,
+    nextPageHoverStateId?: string | null,
+    nextPageDesignSize?: PageDesignSize | null,
   ) {
     editedRef.current = true;
     const events = nextPageEvents === undefined ? pageEventsRef.current : nextPageEvents ?? undefined;
@@ -3403,6 +3618,12 @@ export function ProjectEditorPage() {
     const props = nextProps === undefined ? componentPropsRef.current : nextProps;
     const query = nextQuery === undefined ? pageQueryRef.current : nextQuery;
     const slots = nextSlots === undefined ? componentSlotsRef.current : nextSlots;
+    const states = nextPageStates === undefined ? pageStatesRef.current : nextPageStates ?? undefined;
+    const stateFn = nextPageStateFn === undefined ? pageStateFnRef.current : nextPageStateFn ?? undefined;
+    const hoverStateId =
+      nextPageHoverStateId === undefined ? pageHoverStateIdRef.current : nextPageHoverStateId ?? undefined;
+    const designSize =
+      nextPageDesignSize === undefined ? pageDesignSizeRef.current : nextPageDesignSize ?? undefined;
     const emits = nextEmits === undefined ? componentEmitsRef.current : nextEmits;
     const nextTest = nextTestData === undefined ? testDataRef.current : nextTestData ?? undefined;
     const coalescing = Boolean(coalesceKey && coalesceKey === coalesceKeyRef.current);
@@ -3412,6 +3633,10 @@ export function ProjectEditorPage() {
       const checkpoint = flushPendingRef.current ?? {
         widgets: widgetsRef.current,
         pageStyle: pageStyleRef.current,
+        pageStates: pageStatesRef.current,
+        pageStateFn: pageStateFnRef.current,
+        pageHoverStateId: pageHoverStateIdRef.current,
+        pageDesignSize: pageDesignSizeRef.current,
         pageData: pageDataRef.current,
         pageEvents: pageEventsRef.current,
         pageMethods: pageMethodsRef.current,
@@ -3434,6 +3659,10 @@ export function ProjectEditorPage() {
     }
     widgetsRef.current = nextWidgets;
     pageStyleRef.current = nextPageStyle;
+    pageStatesRef.current = states;
+    pageStateFnRef.current = stateFn;
+    pageHoverStateIdRef.current = hoverStateId;
+    pageDesignSizeRef.current = designSize;
     pageDataRef.current = nextPageData;
     pageEventsRef.current = events;
     pageMethodsRef.current = methods;
@@ -3448,6 +3677,10 @@ export function ProjectEditorPage() {
     flushPendingRef.current = {
       widgets: nextWidgets,
       pageStyle: nextPageStyle,
+      pageStates: states,
+      pageStateFn: stateFn,
+      pageHoverStateId: hoverStateId,
+      pageDesignSize: designSize,
       pageData: nextPageData,
       pageEvents: events,
       pageMethods: methods,
@@ -3461,7 +3694,7 @@ export function ProjectEditorPage() {
     if (nextWidgets !== previousWidgets) {
       const sheet = iframeRef.current?.contentDocument?.querySelector('.lowcode-page > style');
       if (sheet) {
-        sheet.textContent = pageCssText(nextWidgets);
+        sheet.textContent = pageCssText(nextWidgets, previewLocaleRef.current ?? undefined, { animations: modeRef.current === 'preview' });
       }
     }
     if (editorFlushRef.current) {
@@ -3480,6 +3713,10 @@ export function ProjectEditorPage() {
         // refs 可能已在等待期间被渲染体回写成旧值，flush 前统一恢复为本批快照。
         widgetsRef.current = pending.widgets;
         pageStyleRef.current = pending.pageStyle;
+        pageStatesRef.current = pending.pageStates;
+        pageStateFnRef.current = pending.pageStateFn;
+        pageHoverStateIdRef.current = pending.pageHoverStateId;
+        pageDesignSizeRef.current = pending.pageDesignSize;
         pageDataRef.current = pending.pageData;
         pageEventsRef.current = pending.pageEvents;
         pageMethodsRef.current = pending.pageMethods;
@@ -3491,6 +3728,10 @@ export function ProjectEditorPage() {
         selectedWidgetIdRef.current = pending.selectedWidgetId;
         setWidgets(pending.widgets);
         setPageStyle(pending.pageStyle);
+        setPageStates(pending.pageStates);
+        setPageStateFn(pending.pageStateFn);
+        setPageHoverStateId(pending.pageHoverStateId);
+        setPageDesignSize(pending.pageDesignSize);
         setPageData(pending.pageData);
         setPageEvents(pending.pageEvents);
         setPageMethods(pending.pageMethods);
@@ -3531,6 +3772,10 @@ export function ProjectEditorPage() {
       const next = normalizePageDocument({
         widgets: widgetsRef.current,
         style: pageStyleRef.current,
+        states: pageStatesRef.current && pageStatesRef.current.length > 0 ? pageStatesRef.current : undefined,
+        stateFn: pageStateFnRef.current,
+        hoverStateId: pageHoverStateIdRef.current,
+        designSize: pageDesignSizeRef.current,
         data: pageDataRef.current.length > 0 ? pageDataRef.current : undefined,
         events: pageEventsRef.current,
         methods: pageMethodsRef.current.length > 0 ? pageMethodsRef.current : undefined,
@@ -3566,8 +3811,87 @@ export function ProjectEditorPage() {
     );
   }
 
+  function commitPageStates(next: WidgetStateDelta[] | undefined, coalesceKey?: string) {
+    if (readOnlyRef.current) {
+      return;
+    }
+    commitDraft(
+      widgetsRef.current,
+      pageStyleRef.current,
+      pageDataRef.current,
+      selectedWidgetIdRef.current,
+      coalesceKey,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      next ?? null,
+    );
+  }
+
+  /** 文档级全局状态的状态函数/hover 提交；与单个控件的 stateFn/hoverStateId 相互独立。 */
+  function commitPageStateMeta(stateFn: string | undefined, hoverStateId: string | undefined, coalesceKey?: string) {
+    if (readOnlyRef.current) {
+      return;
+    }
+    commitDraft(
+      widgetsRef.current,
+      pageStyleRef.current,
+      pageDataRef.current,
+      selectedWidgetIdRef.current,
+      coalesceKey,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      stateFn ?? null,
+      hoverStateId ?? null,
+    );
+  }
+
+  /** 组件定义编辑器的「定义尺寸」提交：仅影响定义态画布区域大小，不写入任何控件样式。 */
+  function commitComponentDesignSize(next: PageDesignSize | undefined) {
+    if (readOnlyRef.current) {
+      return;
+    }
+    commitDraft(
+      widgetsRef.current,
+      pageStyleRef.current,
+      pageDataRef.current,
+      selectedWidgetIdRef.current,
+      'edit:component-design-size',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      next ?? null,
+    );
+  }
+
   function updatePageStyle(next: PageStyle | undefined, coalesceKey: string) {
     if (readOnlyRef.current) {
+      return;
+    }
+    // 页面全局状态生效时，页面样式改动写入该状态层而不是基准 page.style。
+    const activePageState = viewingByOwnerRef.current[PAGE_ROOT_STATE_OWNER_ID] ?? null;
+    if (activePageState) {
+      const host = pageStateRootWidget({ style: pageStyleRef.current, states: pageStatesRef.current });
+      const desired = compactWidgetStyle(next as WidgetStyle);
+      const layered = patchWidgetInState(host, { style: desired }, activePageState, 'owner');
+      commitPageStates(layered.states, coalesceKey);
       return;
     }
     commitDraft(
@@ -4025,7 +4349,20 @@ export function ProjectEditorPage() {
       commitWidgets(nextWidgets, widget.id);
       return;
     }
-    let nextWidgets = addWidgetToTree(widgetsRef.current, widgetInsertAnchor(), widget);
+    // 插槽调试态：无选中或选中项落在插槽外时，锚点回落到正在调试的插槽，保证新节点加进插槽内部。
+    let anchor = widgetInsertAnchor();
+    const debugSlotId = slotDebugIdRef.current;
+    if (debugSlotId) {
+      const slotWidget = findWidget(widgetsRef.current, debugSlotId);
+      const inside =
+        anchor != null &&
+        slotWidget?.type === 'slot' &&
+        (anchor === debugSlotId || Boolean(findWidget(slotWidget.children, anchor)));
+      if (!inside) {
+        anchor = debugSlotId;
+      }
+    }
+    let nextWidgets = addWidgetToTree(widgetsRef.current, anchor, widget);
     // 组件文档内新增插槽：自动登记插槽声明并补 slotId
     if (catalogKind === 'component' && widget.type === 'slot') {
       const healed = healComponentSlots(nextWidgets, componentSlotsRef.current);
@@ -5241,6 +5578,10 @@ export function ProjectEditorPage() {
     const current: HistoryEntry = {
       widgets: widgetsRef.current,
       pageStyle: pageStyleRef.current,
+      pageStates: pageStatesRef.current,
+      pageStateFn: pageStateFnRef.current,
+      pageHoverStateId: pageHoverStateIdRef.current,
+      pageDesignSize: pageDesignSizeRef.current,
       pageData: pageDataRef.current,
       pageEvents: pageEventsRef.current,
       pageMethods: pageMethodsRef.current,
@@ -5257,6 +5598,10 @@ export function ProjectEditorPage() {
     const previousWidgets = widgetsRef.current;
     widgetsRef.current = previous.widgets;
     pageStyleRef.current = previous.pageStyle;
+    pageStatesRef.current = previous.pageStates;
+    pageStateFnRef.current = previous.pageStateFn;
+    pageHoverStateIdRef.current = previous.pageHoverStateId;
+    pageDesignSizeRef.current = previous.pageDesignSize;
     pageDataRef.current = previous.pageData;
     pageEventsRef.current = previous.pageEvents;
     pageMethodsRef.current = previous.pageMethods;
@@ -5269,6 +5614,10 @@ export function ProjectEditorPage() {
     clearTableRange();
     setWidgets(previous.widgets);
     setPageStyle(previous.pageStyle);
+    setPageStates(previous.pageStates);
+    setPageStateFn(previous.pageStateFn);
+    setPageHoverStateId(previous.pageHoverStateId);
+    setPageDesignSize(previous.pageDesignSize);
     setPageData(previous.pageData);
     setPageEvents(previous.pageEvents);
     setPageMethods(previous.pageMethods);
@@ -5293,6 +5642,10 @@ export function ProjectEditorPage() {
     const current: HistoryEntry = {
       widgets: widgetsRef.current,
       pageStyle: pageStyleRef.current,
+      pageStates: pageStatesRef.current,
+      pageStateFn: pageStateFnRef.current,
+      pageHoverStateId: pageHoverStateIdRef.current,
+      pageDesignSize: pageDesignSizeRef.current,
       pageData: pageDataRef.current,
       pageEvents: pageEventsRef.current,
       pageMethods: pageMethodsRef.current,
@@ -5309,6 +5662,10 @@ export function ProjectEditorPage() {
     const previousWidgets = widgetsRef.current;
     widgetsRef.current = next.widgets;
     pageStyleRef.current = next.pageStyle;
+    pageStatesRef.current = next.pageStates;
+    pageStateFnRef.current = next.pageStateFn;
+    pageHoverStateIdRef.current = next.pageHoverStateId;
+    pageDesignSizeRef.current = next.pageDesignSize;
     pageDataRef.current = next.pageData;
     pageEventsRef.current = next.pageEvents;
     pageMethodsRef.current = next.pageMethods;
@@ -5321,6 +5678,10 @@ export function ProjectEditorPage() {
     clearTableRange();
     setWidgets(next.widgets);
     setPageStyle(next.pageStyle);
+    setPageStates(next.pageStates);
+    setPageStateFn(next.pageStateFn);
+    setPageHoverStateId(next.pageHoverStateId);
+    setPageDesignSize(next.pageDesignSize);
     setPageData(next.pageData);
     setPageEvents(next.pageEvents);
     setPageMethods(next.pageMethods);
@@ -5647,6 +6008,10 @@ export function ProjectEditorPage() {
       : null;
   // 选中插槽内容节点时，控件树里所属插槽节点也一并高亮。
   const treeHighlightKeys = (() => {
+    // 组件定义编辑器预览态点选的插槽：同步高亮控件树里的对应插槽节点。
+    if (previewSlotSel) {
+      return [previewSlotSel.widgetId];
+    }
     if (catalogKind !== 'page' || !componentEditInstance || virtualSelection?.kind !== 'content') {
       return [];
     }
@@ -5656,46 +6021,131 @@ export function ProjectEditorPage() {
     );
     return slotWidget ? [virtualInnerId(componentEditInstance.id, slotWidget.id)] : [];
   })();
+  // 组件定义编辑器预览态点选插槽后：组装「声明（名称/类型）+ 当前实例解析值」供预览数据面板展示。
+  const previewSlotInfo = (() => {
+    if (!previewSlotSel || catalogKind !== 'component') {
+      return null;
+    }
+    const widget = findWidget(widgets, previewSlotSel.widgetId);
+    if (!widget || widget.type !== 'slot') {
+      return null;
+    }
+    const declaration = componentSlots.find((slot) => slot.id === widget.slotId);
+    return {
+      name: widget.name?.trim() || declaration?.name?.trim() || t('lowcode.slotsTitle'),
+      params: declaration?.params ?? [],
+      values: previewSlotSel.params,
+    };
+  })();
+  // 选中组件实例插槽内容控件时，取其所在插槽声明的出参，作为 `$slot.名称` 的可选来源。
+  const selectedSlotProps = (() => {
+    if (componentEditInstance && virtualSelection?.kind === 'content') {
+      const doc = componentDefinitionDoc(virtualSelection.componentWidget);
+      const slot = (doc?.slots ?? []).find((item) => item.id === virtualSelection.slotId);
+      return slot?.params?.length ? slot.params : undefined;
+    }
+    // 组件定义编辑器：选中插槽调试节点（或插槽本体）时，取其所属插槽声明的出参，
+    // 作为调试节点里 `$slot.名称` 的可选来源。
+    if (catalogKind === 'component' && selectedWidgetId) {
+      let current = findWidget(widgets, selectedWidgetId);
+      while (current) {
+        if (current.type === 'slot') {
+          const slotId = current.slotId;
+          const slot = componentSlots.find((item) => item.id === slotId);
+          return slot?.params?.length ? slot.params : undefined;
+        }
+        current = findParentWidget(widgets, current.id);
+      }
+    }
+    return undefined;
+  })();
+  // 文档级全局状态宿主（页面态与组件定义态共用 pageDocument）：承载文档 states + stateFn/hover，
+  // 与「最外层节点（widgets[0]）自身的状态」相互独立。
+  const globalStateHost = pageStateRootWidget({
+    style: pageStyle,
+    states: pageStates,
+    stateFn: pageStateFn,
+    hoverStateId: pageHoverStateId,
+  });
+  // 顶部下拉框/工具栏全局状态控制编辑的宿主：组件定义态用当前文档，组件编辑态用组件定义文档。
+  const componentGlobalHost = (() => {
+    if (componentEditInstance) {
+      const doc = componentDefinitionDoc(componentEditInstance);
+      return doc
+        ? pageStateRootWidget({
+            style: doc.style,
+            states: doc.states,
+            stateFn: doc.stateFn,
+            hoverStateId: doc.hoverStateId,
+          })
+        : null;
+    }
+    return catalogKind === 'component' ? globalStateHost : null;
+  })();
+  // 工具栏「全局状态控制」编辑的宿主（仅组件定义态）：文档级全局状态，与最外层节点自身状态独立。
+  const componentGlobalControlWidget =
+    catalogKind === 'component' && !componentEditId ? globalStateHost : null;
   const visibleStates = (() => {
-    if (!componentEditInstance) {
-      return collectStateTree(widgets, selectedWidgetId);
-    }
-    // 组件编辑态：按选中的组件内部控件（插槽/插槽内容）收集其状态，
-    // 宿主 id 需带运行时前缀，才能让状态切换正确级联到 runtime 的 data-state。
-    if (virtualSelection?.kind === 'slot') {
-      const doc = componentDefinitionDoc(componentEditInstance);
-      return collectPrefixedStateTree(
-        doc?.widgets ?? [],
-        virtualSelection.slotWidget.id,
-        `${componentEditInstance.id}__`,
-      );
-    }
-    if (virtualSelection?.kind === 'content') {
-      const doc = componentDefinitionDoc(componentEditInstance);
-      const slotWidget = collectTemplateSlots(doc?.widgets ?? []).find(
-        (item) => item.slotId === virtualSelection.slotId,
-      );
-      if (slotWidget) {
-        return collectSlotContentStateTree(
+    // 组件编辑态：状态栏只在选中「插槽内容控件」时显示其可编辑状态；
+    // 选中插槽或未选中时隐藏——组件全局状态改由顶部下拉框切换。
+    if (componentEditInstance) {
+      if (virtualSelection?.kind === 'content') {
+        // 组件内部的非全局状态（插槽本体及其祖先链上定义的状态）是组件私有的、由脚本控制，
+        // 不外露到状态栏；这里只展示插槽内容控件自身定义的状态。
+        return collectPrefixedStateTree(
           virtualSelection.componentWidget.slotContent?.[virtualSelection.slotId] ?? [],
           virtualSelection.widget.id,
           `${componentEditInstance.id}__slot-${virtualSelection.slotId}__`,
-          slotWidget,
-          `${componentEditInstance.id}__`,
-          doc?.widgets ?? [],
         );
       }
-      return collectPrefixedStateTree(
-        virtualSelection.componentWidget.slotContent?.[virtualSelection.slotId] ?? [],
-        virtualSelection.widget.id,
-        `${componentEditInstance.id}__slot-${virtualSelection.slotId}__`,
-      );
+      return [];
     }
-    return collectComponentRootStates(
-      componentEditInstance.id,
-      componentDefinitionDoc(componentEditInstance)?.widgets[0],
-    );
+    // 无选中 → 「状态」区块为空：文档级全局状态改由下方「全局状态」区块承载，
+    // 「全局状态」与「最外层节点（widgets[0]）自身的状态」是两个独立的状态，互不混用。
+    if (!selectedWidgetId) {
+      return [];
+    }
+    // 有选中 → 只看该节点自身及其祖先的控件状态（最外层节点状态作为普通节点状态参与继承）。
+    // 插槽调试态：组件模板祖先（插槽之外）的状态是组件私有的、由脚本控制，不在此暴露；
+    // 状态链收口到被调试的插槽子树（插槽自身的状态仍可被其下方调试节点继承）。
+    if (catalogKind === 'component' && slotDebugId) {
+      const slot = findWidget(widgets, slotDebugId);
+      return slot ? collectStateTree([slot], selectedWidgetId) : [];
+    }
+    return collectStateTree(widgets, selectedWidgetId);
   })();
+  // 状态栏操作宿主：有选中用选中控件；无选中时用合成的文档根（承载文档级全局状态）。
+  // 组件编辑态下只有「插槽内容控件」的状态可编辑（插槽本体只读、模板非插槽节点不可选），
+  // 因此把宿主指向该内容控件，状态区块标题行的「状态控制」按钮与状态函数弹窗才会出现。
+  const stateHostWidget = componentEditId
+    ? virtualSelection?.kind === 'content'
+      ? selectedWidget
+      : null
+    : selectedWidget ?? (!selectedWidgetId ? globalStateHost : null);
+  // 状态栏「全局状态」区块：文档级全局状态，始终显示；组件编辑态改由右上角下拉框承载，故不在此显示。
+  // 插槽调试态下也不显示——组件全局状态是组件私有的、由脚本控制，调试插槽时不该出现。
+  const globalStateBarWidget = componentEditId || slotDebugId ? null : globalStateHost;
+  const globalVisibleStates = globalStateBarWidget
+    ? collectComponentRootStates(PAGE_ROOT_STATE_OWNER_ID, globalStateBarWidget)
+    : [];
+  // 顶部「组件全局状态」下拉框：组件定义态取文档级全局状态，组件编辑态取组件实例的文档级全局状态。
+  const componentGlobalOwnerId =
+    componentEditId ?? (catalogKind === 'component' ? PAGE_ROOT_STATE_OWNER_ID : null);
+  const componentGlobalStates = componentGlobalOwnerId && componentGlobalHost
+    ? collectComponentRootStates(componentGlobalOwnerId, componentGlobalHost)
+    : [];
+  const componentGlobalStateId = componentGlobalOwnerId
+    ? viewingByOwner[componentGlobalOwnerId] ?? null
+    : null;
+  function commitComponentGlobalState(id: string | null) {
+    if (readOnlyRef.current || !componentGlobalOwnerId) {
+      return;
+    }
+    setViewingByOwner((prev) => ({ ...prev, [componentGlobalOwnerId]: id }));
+    if (viewingOwnerIdRef.current === componentGlobalOwnerId) {
+      setViewingState(id);
+    }
+  }
   const selectedDisplayWidget = selectedWidget
     ? widgetWithStateLayers(selectedWidget, stateLayersFor(selectedWidget), previewLocaleRef.current)
     : null;
@@ -5794,7 +6244,9 @@ export function ProjectEditorPage() {
       }
       return label;
     };
-    const base = toWidgetTreeData(widgets, treeLabel);
+    // 组件定义编辑器：未进入插槽调试态时插槽不展开内部调试节点；调试态只显示该插槽子树。
+    const treeWidgets = catalogKind === 'component' ? definitionTreeWidgets(widgets, slotDebugId) : widgets;
+    const base = toWidgetTreeData(treeWidgets, treeLabel);
     if (componentEditId && catalogKind === 'page') {
       const componentWidget = findWidget(widgets, componentEditId);
       const doc = componentWidget?.type === 'component' ? componentDefinitionDoc(componentWidget) : null;
@@ -5819,6 +6271,21 @@ export function ProjectEditorPage() {
   const canCopy = Boolean(selectedWidget);
   const canPaste = clipboardTick >= 0 && !readOnly && Boolean(clipboardRef.current);
   const showStyleChrome = !previewing && centerTab === 'layout';
+
+  // 组件定义编辑器：插槽调试面板的插槽清单，取模板里真实存在的插槽控件。
+  const slotDebugSlots = (() => {
+    if (catalogKind !== 'component') {
+      return [] as Array<{ id: string; name: string }>;
+    }
+    const declaredNames = new Map(componentSlots.map((slot) => [slot.id, slot.name ?? '']));
+    return collectTemplateSlots(widgets).map((slotWidget) => ({
+      id: slotWidget.id,
+      name:
+        slotWidget.name?.trim() ||
+        declaredNames.get(slotWidget.slotId)?.trim() ||
+        t('lowcode.slotsTitle'),
+    }));
+  })();
 
   const componentEditSlots = (() => {
     if (!componentEditId || catalogKind !== 'page') {
@@ -5971,10 +6438,12 @@ export function ProjectEditorPage() {
               scrollEditId={scrollEditId}
               swiperEditId={swiperEditId}
               componentEditId={componentEditId}
-              componentEditSelectionKind={virtualSelection?.kind ?? null}
-              componentEditSlotId={virtualSelection?.kind === 'content' ? virtualSelection.slotId : null}
+              slotDebugId={slotDebugId}
+              slotDebugSlots={slotDebugSlots}
+              onToggleSlotDebug={toggleSlotDebug}
               componentEditSlots={componentEditSlots}
               onSelectSlot={selectWidget}
+              previewSlot={previewSlotInfo}
               sendPreview={sendPreview}
               showStyleChrome={showStyleChrome}
               selectedWidget={selectedWidget}
@@ -5989,10 +6458,13 @@ export function ProjectEditorPage() {
               previewQueryEdits={previewQueryEdits}
               commitPreviewTest={commitPreviewTest}
               componentMode={catalogKind === 'component'}
+              designSize={pageDesignSize}
+              onComponentDesignSizeChange={commitComponentDesignSize}
               pageQuery={pageQuery}
               addPageQuery={addPageQuery}
               commitPageQuery={commitPageQuery}
               componentProps={componentProps}
+              slotProps={selectedSlotProps}
               componentEmits={componentEmits}
               componentEmitsById={componentEmitsById}
               commitComponentProps={commitComponentProps}
@@ -6001,6 +6473,10 @@ export function ProjectEditorPage() {
               commitPageEvents={commitPageEvents}
               pageMethods={pageMethods}
               commitPageMethods={commitPageMethods}
+              animations={animations}
+              onCreateAnimation={createAnimation}
+              onUpdateAnimation={updateAnimation}
+              onDeleteAnimation={deleteAnimation}
               pageScopeId={selectedPageId ?? project.id}
               readOnly={readOnly}
               openBoxGroup={openBoxGroup}
@@ -6019,8 +6495,23 @@ export function ProjectEditorPage() {
               setInspectorOpen={setInspectorOpen}
               widgets={widgets}
               visibleStates={visibleStates}
+              stateHostWidget={stateHostWidget}
+              globalVisibleStates={globalVisibleStates}
+              globalStateBarWidget={globalStateBarWidget}
+              commitPageStates={commitPageStates}
+              componentEditSelectionKind={virtualSelection?.kind ?? null}
+              componentEditSlotId={virtualSelection?.kind === 'content' ? virtualSelection.slotId : null}
+              showComponentGlobalState={Boolean(componentEditId) && showStyleChrome}
+              componentGlobalStates={componentGlobalStates}
+              componentGlobalStateId={componentGlobalStateId}
+              onComponentGlobalStateChange={commitComponentGlobalState}
+              componentGlobalWidget={componentGlobalControlWidget}
+              onComponentGlobalStateFnChange={(stateFn, hoverStateId) =>
+                commitPageStateMeta(stateFn, hoverStateId, 'doc-state-fn')
+              }
               viewingOwnerId={viewingOwnerId}
               viewingState={viewingState}
+              viewingByOwner={viewingByOwner}
               setViewingOwnerId={setViewingOwnerId}
               setViewingState={setViewingState}
               setViewingByOwner={setViewingByOwner}
@@ -6063,10 +6554,12 @@ export function ProjectEditorPage() {
         open={inspectorOpen}
         widget={selectedDisplayWidget}
         parentType={selectedParent?.type}
+        parentGrid={selectedParent?.type === 'grid' ? selectedParent.grid : undefined}
         readOnly={readOnly}
         pageI18n={pageI18n}
         variables={pageData}
         componentProps={selectedComponentProps}
+        slotProps={selectedSlotProps}
         componentSlots={selectedComponentSlots}
         onComponentSlotsChange={catalogKind === 'component' ? commitComponentSlots : undefined}
         bindableProps={catalogKind === 'component' ? componentProps : undefined}

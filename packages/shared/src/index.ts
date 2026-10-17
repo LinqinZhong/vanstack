@@ -197,6 +197,70 @@ export interface RuntimeProjectDto {
   pages: RuntimePageDto[];
   /** 图标路径 `分组.名称` 到文件地址。 */
   icons?: Record<string, string>;
+  /** 发布页运行时使用的动画目录。 */
+  animations?: AnimationDefinitionDto[];
+}
+
+/** 关键帧上的元素变形属性。translate 单位 px，rotate/screw 单位 deg，opacity 0–1，scale 无单位。 */
+export interface AnimationProps {
+  translateX?: number;
+  translateY?: number;
+  rotateX?: number;
+  rotateY?: number;
+  rotateZ?: number;
+  /** skew（倾斜），单位 deg。 */
+  screw?: number;
+  opacity?: number;
+  scale?: number;
+}
+
+/** 动画的关键帧。offset 为 0–100 的百分比，最小粒度 0.1。 */
+export interface AnimationKeyframe {
+  offset: number;
+  props: AnimationProps;
+}
+
+/** 独立的动画资源，存于 animation.version 集合，每个动画一条文档。 */
+export interface AnimationDefinitionDto {
+  id: string;
+  name: string;
+  keyframes: AnimationKeyframe[];
+  updatedAt?: string;
+}
+
+export interface CreateAnimationInput {
+  name: string;
+}
+
+export interface UpdateAnimationInput {
+  name?: string;
+  keyframes?: AnimationKeyframe[];
+}
+
+/** 播放模式：单次 / 重复 / 往复 / 保持。 */
+export const ANIMATION_MODES = ['once', 'repeat', 'alternate', 'hold'] as const;
+export type WidgetAnimationMode = (typeof ANIMATION_MODES)[number];
+
+/** 缓动函数。 */
+export const ANIMATION_EASINGS = [
+  'linear',
+  'ease',
+  'easeIn',
+  'easeOut',
+  'easeInOut',
+  'cubicIn',
+  'cubicOut',
+  'cubicInOut',
+] as const;
+export type WidgetAnimationEasing = (typeof ANIMATION_EASINGS)[number];
+
+/** 控件绑定的动画：只存动画 id 与播放参数，定义由运行时按 id 查目录。 */
+export interface WidgetAnimationBinding {
+  id: string;
+  /** 播放时长，单位：秒。 */
+  duration: number;
+  mode: WidgetAnimationMode;
+  easing: WidgetAnimationEasing;
 }
 
 export interface ProjectAssetGroupDto {
@@ -294,6 +358,10 @@ export interface NamespaceDataDto {
   name: string;
   description: string;
   value: unknown;
+  /** 值用表达式生成。缺省按静态字面量编辑。 */
+  dynamic?: boolean;
+  /** 动态值打开后按表达式跟随数据变化。 */
+  computed?: boolean;
 }
 
 export interface NamespaceDocumentDto {

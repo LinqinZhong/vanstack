@@ -31,11 +31,13 @@ import type {
   ProjectPageVersionMetaDto,
   NamespaceDocumentDto,
   ProjectNamespaceDto,
+  AnimationDefinitionDto,
   ProjectVersionDto,
   WidgetEventScriptDto,
 } from '@vanstack/shared';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { CreateAssetGroupDto, UpdateAssetGroupDto, UploadAssetFileDto } from './dto/asset.dto';
+import { CreateAnimationDto, UpdateAnimationDto } from './dto/animation.dto';
 import { CreateIconGroupDto, UpdateIconGroupDto, UploadIconFileDto } from './dto/icon.dto';
 import { UploadFontFileDto } from './dto/font.dto';
 import { PutProjectLangsDto } from './dto/lang.dto';
@@ -513,6 +515,37 @@ export class LowcodeController {
     @Body() dto: PutNamespaceDto,
   ): Promise<NamespaceDocumentDto> {
     return this.lowcode.putNamespace(id, name, dto);
+  }
+
+  @Get(':id/animations')
+  listAnimations(@Param('id', ParseUUIDPipe) id: string): Promise<AnimationDefinitionDto[]> {
+    return this.lowcode.listAnimations(id);
+  }
+
+  @Post(':id/animations')
+  createAnimation(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateAnimationDto,
+  ): Promise<AnimationDefinitionDto> {
+    return this.lowcode.createAnimation(id, dto.name);
+  }
+
+  @Patch(':id/animations/:animationId')
+  updateAnimation(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('animationId', ParseUUIDPipe) animationId: string,
+    @Body() dto: UpdateAnimationDto,
+  ): Promise<AnimationDefinitionDto> {
+    return this.lowcode.updateAnimation(id, animationId, dto);
+  }
+
+  @Delete(':id/animations/:animationId')
+  @HttpCode(204)
+  deleteAnimation(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('animationId', ParseUUIDPipe) animationId: string,
+  ): Promise<void> {
+    return this.lowcode.deleteAnimation(id, animationId);
   }
 
   @Get(':id/methods/:methodId')

@@ -25,6 +25,15 @@ function cloneLangFields(langFields: WidgetLangFields | undefined): WidgetLangFi
       ...(delta.props ? { props: { ...delta.props } } : {}),
       ...(delta.style ? { style: { ...delta.style } } : {}),
       ...(delta.flex ? { flex: { ...delta.flex } } : {}),
+      ...(delta.grid
+        ? {
+            grid: {
+              ...delta.grid,
+              ...(delta.grid.rows ? { rows: [...delta.grid.rows] } : {}),
+              ...(delta.grid.columns ? { columns: [...delta.grid.columns] } : {}),
+            },
+          }
+        : {}),
       ...(delta.item ? { item: { ...delta.item } } : {}),
       ...(delta.swiper ? { swiper: { ...delta.swiper } } : {}),
       ...(delta.presence ? { presence: delta.presence } : {}),
@@ -42,9 +51,17 @@ function remapStateDelta(delta: WidgetStateDelta, map: Map<string, string>): Wid
     props: cloneOptional(delta.props),
     style: cloneOptional(delta.style),
     flex: cloneOptional(delta.flex),
+    grid: delta.grid
+      ? {
+          ...delta.grid,
+          ...(delta.grid.rows ? { rows: [...delta.grid.rows] } : {}),
+          ...(delta.grid.columns ? { columns: [...delta.grid.columns] } : {}),
+        }
+      : undefined,
     item: cloneOptional(delta.item),
     swiper: cloneOptional(delta.swiper),
     ...(delta.presence ? { presence: delta.presence } : {}),
+    ...(delta.animation ? { animation: { ...delta.animation } } : {}),
     ...(delta.langFields ? { langFields: cloneLangFields(delta.langFields) } : {}),
     ...(delta.states?.length ? { states: delta.states.map((item) => remapStateDelta(item, map)) } : {}),
   };
@@ -103,6 +120,11 @@ function cloneAlias(widget: PageWidget): { alias?: string } {
   return alias ? { alias } : {};
 }
 
+function cloneAnimation(widget: PageWidget): { animation?: PageWidget['animation'] } {
+  const animation = widget.animation;
+  return animation && animation.id ? { animation: { ...animation } } : {};
+}
+
 function cloneEvents(widget: PageWidget): { events?: PageWidget['events'] } {
   const events = compactWidgetEvents(widget.type, widget.events);
   return events ? { events } : {};
@@ -116,6 +138,7 @@ export function cloneShared(widget: PageWidget, stateIdMap: WidgetCloneContext['
     ...cloneHidden(widget),
     ...clonePresence(widget),
     ...cloneAlias(widget),
+    ...cloneAnimation(widget),
     ...cloneEvents(widget),
   };
 }
@@ -166,6 +189,13 @@ export function applyCommon<T extends PageWidget>(widget: T, patch: WidgetPatch)
       next.alias = alias;
     } else {
       delete next.alias;
+    }
+  }
+  if ('animation' in patch) {
+    if (patch.animation && patch.animation.id) {
+      next.animation = { ...patch.animation };
+    } else {
+      delete next.animation;
     }
   }
   if ('loop' in patch) {

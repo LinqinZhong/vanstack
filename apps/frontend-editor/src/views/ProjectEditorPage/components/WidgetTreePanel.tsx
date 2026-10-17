@@ -304,14 +304,16 @@ export function WidgetTreePanel({
   const { t } = useTranslation();
   const [treeHeight, setTreeHeight] = useState(320);
   const treeRef = useRef<ComponentRef<typeof Tree>>(null);
-  // 选中项变化时把它滚到可见位置。树是虚拟列表，视口外的节点尚未生成 DOM
+  // 选中项（或仅高亮的预览插槽）变化时把它滚到可见位置。树是虚拟列表，视口外的节点尚未生成 DOM
   // （例如新增到树尾的控件），DOM scrollIntoView 找不到节点，必须走 Tree 的 scrollTo(key)。
+  // 预览态点选插槽时只给 highlightKeys，不设 selectedWidgetId，所以这里要一并兜住。
+  const scrollKey = selectedWidgetId ?? highlightKeys?.[0] ?? null;
   useLayoutEffect(() => {
-    if (!selectedWidgetId) {
+    if (!scrollKey) {
       return;
     }
-    treeRef.current?.scrollTo({ key: selectedWidgetId, align: 'auto' });
-  }, [selectedWidgetId, expandedKeys]);
+    treeRef.current?.scrollTo({ key: scrollKey, align: 'auto' });
+  }, [scrollKey, expandedKeys]);
   useLayoutEffect(() => {
     const node = treeHostRef.current;
     if (!node || typeof ResizeObserver === 'undefined') {

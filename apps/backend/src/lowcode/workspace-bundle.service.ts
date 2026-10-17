@@ -14,6 +14,7 @@ const COLLECTIONS = new Set([
   'icon.version',
   'font.version',
   'namespace.version',
+  'animation.version',
 ]);
 
 type BundleWrite = { collection: string; doc: Record<string, unknown> };

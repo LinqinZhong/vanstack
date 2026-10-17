@@ -661,6 +661,28 @@ export function toWidgetTreeData(
   }));
 }
 
+/**
+ * 组件定义编辑器的控件树取数：未进入插槽调试态时插槽不展开内部调试节点，
+ * 进入调试态后只显示该插槽内部的调试节点（插槽自身不再作为根节点显示）。
+ */
+export function definitionTreeWidgets(widgets: PageWidget[], slotDebugId: string | null): PageWidget[] {
+  if (slotDebugId) {
+    const slot = findWidget(widgets, slotDebugId);
+    return slot && hasChildren(slot) ? slot.children : [];
+  }
+  const prune = (list: PageWidget[]): PageWidget[] =>
+    list.map((widget) => {
+      if (!hasChildren(widget)) {
+        return widget;
+      }
+      if (widget.type === 'slot') {
+        return mapChildren(widget, []);
+      }
+      return mapChildren(widget, prune(widget.children));
+    });
+  return prune(widgets);
+}
+
 // ---------------------------------------------------------------------------
 // 组件插槽：声明修复、组件实例 slotContent 的读写、编辑组件时的虚拟控件树
 // ---------------------------------------------------------------------------

@@ -2,12 +2,15 @@ import {
   buildPropsRecord,
   compactLoop,
   evaluateBindingExpression,
+  isCopyBinding,
   isLoopConfigured,
   loopIndexName,
   loopItemName,
+  resolveCopyValue,
   setWidgetRuntimeMeta,
   getWidgetRuntimeMeta,
   type BindingScope,
+  type ComponentProp,
   type ComponentSlot,
   type PageWidget,
   type ScopeAssign,
@@ -105,6 +108,23 @@ function joinInstanceKey(prefix: string, widgetId: string, unique?: string): str
   return unique == null ? base : `${base}-${unique}`;
 }
 
+/**
+ * 插槽出参默认值：写成 `$(表达式)`（或 `$props.x` 这类路径绑定）时按组件内部作用域求值，
+ * 其余字面量沿用 buildPropsRecord 按类型转换的语义。
+ */
+export function resolveSlotParamDefaults(
+  params: ComponentProp[] | undefined,
+  scope: BindingScope,
+): Record<string, unknown> {
+  const record = buildPropsRecord(params, scope.query);
+  for (const param of params ?? []) {
+    if (isCopyBinding(param.value)) {
+      record[param.name] = resolveCopyValue(param.value, scope);
+    }
+  }
+  return record;
+}
+
 function materialize(
   widget: PageWidget,
   scope: BindingScope,
@@ -117,7 +137,7 @@ function materialize(
   let slotOverride: WidgetSlotOverrideMeta | undefined;
   if (next.type === 'slot' && slotCtx) {
     const def = slotCtx.defs?.find((item) => item.id === next.slotId);
-    const defaults = buildPropsRecord(def?.params, scope.query);
+    const defaults = resolveSlotParamDefaults(def?.params, scope);
     const overrides = slotCtx.args?.[next.slotId];
     const params: Record<string, unknown> = { ...defaults, ...(overrides ?? {}) };
     finalScope = { ...scope, slot: params };

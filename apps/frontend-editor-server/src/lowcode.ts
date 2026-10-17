@@ -125,6 +125,17 @@ type NamespaceVersion = {
   updatedAt: string;
 };
 
+type AnimationVersion = {
+  _id: string;
+  projectId: string;
+  projectKey: string;
+  name: string;
+  keyframes: unknown[];
+  uses: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type FunctionRecord = {
   projectId: string;
   projectKey: string;
@@ -161,7 +172,14 @@ function contentOf(record: PageXmlDocument): PageXmlDocument {
     ...(record.props && record.props.length > 0 ? { props: record.props } : {}),
     ...(record.query && record.query.length > 0 ? { query: record.query } : {}),
     ...(record.emits && record.emits.length > 0 ? { emits: record.emits } : {}),
+    ...(record.slots && record.slots.length > 0 ? { slots: record.slots } : {}),
     ...(record.testData ? { testData: record.testData } : {}),
+    ...(record.states && record.states.length > 0 ? { states: record.states } : {}),
+    ...(record.stateFn ? { stateFn: record.stateFn } : {}),
+    ...(record.hoverStateId ? { hoverStateId: record.hoverStateId } : {}),
+    ...(record.designSize && (record.designSize.width || record.designSize.height)
+      ? { designSize: record.designSize }
+      : {}),
   };
 }
 
@@ -174,7 +192,19 @@ function applyDocument(version: PageXmlDocument, next: PageXmlDocument) {
   assign(version, 'props', next.props && next.props.length > 0 ? next.props : undefined);
   assign(version, 'query', next.query && next.query.length > 0 ? next.query : undefined);
   assign(version, 'emits', next.emits && next.emits.length > 0 ? next.emits : undefined);
+  // 组件文档声明的插槽（含出参 params）必须随文档落盘，否则刷新后出参丢失。
+  assign(version, 'slots', next.slots && next.slots.length > 0 ? next.slots : undefined);
   assign(version, 'testData', next.testData);
+  // 文档级全局状态及其状态函数/hover 与控件节点状态相互独立，必须随文档一并落盘。
+  assign(version, 'states', next.states && next.states.length > 0 ? next.states : undefined);
+  assign(version, 'stateFn', next.stateFn);
+  assign(version, 'hoverStateId', next.hoverStateId);
+  // 组件定义编辑器的「定义尺寸」：仅定义态使用，必须随文档落盘否则刷新丢失。
+  assign(
+    version,
+    'designSize',
+    next.designSize && (next.designSize.width || next.designSize.height) ? next.designSize : undefined,
+  );
 }
 
 function assign(target: object, key: string, value: unknown) {
@@ -892,6 +922,66 @@ export class LocalLowcode {
     return { name: found.name, versionId: version._id, types: version.types, data: version.data };
   }
 
+  async listAnimations(id: string) {
+    await this.requireProject(id);
+    const list = await readCollection<AnimationVersion>(id, 'animation.version');
+    return list.map((row) => this.animationDto(row));
+  }
+
+  async createAnimation(id: string, name: string) {
+    const project = await this.requireProject(id);
+    const trimmed = animationName(name);
+    const stamp = now();
+    const animationId = newId();
+    const record: AnimationVersion = {
+      _id: animationId,
+      projectId: id,
+      projectKey: project.key,
+      name: trimmed,
+      keyframes: [],
+      uses: 0,
+      createdAt: stamp,
+      updatedAt: stamp,
+    };
+    await this.writeDoc(id, `animation.version/${animationId}.json`, record);
+    return this.animationDto(record);
+  }
+
+  async updateAnimation(id: string, animationId: string, input: { name?: unknown; keyframes?: unknown }) {
+    await this.requireProject(id);
+    const record = await readJson<AnimationVersion>(mongoFile(id, `animation.version/${animationId}.json`));
+    if (!record) {
+      throw new ApiError(404, 'animation not found');
+    }
+    if (input.name != null) {
+      record.name = animationName(String(input.name));
+    }
+    if (input.keyframes != null) {
+      record.keyframes = Array.isArray(input.keyframes) ? input.keyframes : [];
+    }
+    record.updatedAt = now();
+    await this.writeDoc(id, `animation.version/${animationId}.json`, record);
+    return this.animationDto(record);
+  }
+
+  async deleteAnimation(id: string, animationId: string) {
+    await this.requireProject(id);
+    const record = await readJson<AnimationVersion>(mongoFile(id, `animation.version/${animationId}.json`));
+    if (!record) {
+      throw new ApiError(404, 'animation not found');
+    }
+    await this.deleteDoc(id, `animation.version/${animationId}.json`);
+  }
+
+  private animationDto(record: AnimationVersion) {
+    return {
+      id: record._id,
+      name: record.name,
+      keyframes: Array.isArray(record.keyframes) ? record.keyframes : [],
+      updatedAt: record.updatedAt,
+    };
+  }
+
   async getMethod(id: string, methodId: string) {
     await this.requireProject(id);
     if (!isPageMethodId(methodId)) {
@@ -1454,6 +1544,14 @@ function namespaceName(name: string) {
   const trimmed = name.trim();
   if (!trimmed || trimmed.length > 64 || /[\s/\\]/.test(trimmed)) {
     throw new ApiError(400, 'invalid namespace name');
+  }
+  return trimmed;
+}
+
+function animationName(name: string) {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.length > 64) {
+    throw new ApiError(400, 'invalid animation name');
   }
   return trimmed;
 }

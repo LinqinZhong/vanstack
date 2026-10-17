@@ -1,4 +1,5 @@
 import type { PageI18n, PageXmlDocument } from '@vanstack/xml';
+import type { AnimationDefinitionDto } from '@vanstack/shared';
 
 export const LOWCODE_MESSAGE_SOURCE = 'vanstack-lowcode';
 
@@ -26,8 +27,12 @@ export type LowcodePreviewMessage = {
   catalog?: PageI18n;
   projectId?: string | null;
   icons?: Record<string, string>;
+  /** 资源库路径 `分组.文件名` → 文件 url，供运行时 $asset 转链接。 */
+  assets?: Record<string, string>;
   /** 字体族名 → 字体文件 url，用于预览页注入 @font-face。 */
   fonts?: Record<string, string>;
+  /** 工程动画目录，供运行时按 id 注入 @keyframes 并播放。 */
+  animations?: AnimationDefinitionDto[];
   pageId?: string | null;
   query?: Record<string, unknown>;
   viewingOwnerId: string | null;
@@ -42,6 +47,8 @@ export type LowcodePreviewMessage = {
   componentEditing?: boolean;
   /** 正在编辑的组件实例 id（组件编辑态，供画布侧定位居中主体与退出按钮）。 */
   componentEditId?: string | null;
+  /** 组件定义编辑器：正在调试的插槽 id（隔离显示其内部调试节点）。 */
+  slotDebugId?: string | null;
   settle?: number;
   /** 组件画布：内容在屏幕区域内居中，父页不再画屏幕框。 */
   centerContent?: boolean;
@@ -63,6 +70,8 @@ export type LowcodeSelectMessage = {
   source: typeof LOWCODE_MESSAGE_SOURCE;
   type: 'select';
   widgetId: string | null;
+  /** 组件定义编辑器预览态：选中插槽时该实例解析后的插槽入参值。 */
+  slotParams?: Record<string, unknown> | null;
 };
 
 export type LowcodeTableSelectMessage = {

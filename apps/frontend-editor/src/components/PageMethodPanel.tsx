@@ -1,5 +1,4 @@
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
-import { javascript } from '@codemirror/lang-javascript';
 import { ScriptEditor } from './ScriptEditor';
 import { Button, ConfigProvider, Form, Input, Modal, Popconfirm, Select, Switch, Table, message } from 'antd';
 import type { TableColumnsType } from 'antd';
@@ -11,9 +10,11 @@ import {
   isPageMethodParamName,
   type MethodParamType,
   type PageMethod,
+  type PageMethodData,
   type PageMethodParam,
 } from '@vanstack/xml';
 import { api } from '../apis/api';
+import { createPageDataEditorExtensions } from '../utils/pageDataEditor';
 import { inspectorTheme } from './inspectorTheme';
 
 type PageMethodPanelProps = {
@@ -21,6 +22,10 @@ type PageMethodPanelProps = {
   projectId?: string;
   disabled?: boolean;
   showExpose?: boolean;
+  /** 可用的页面/组件数据名，用于 $data.xxx 补全。 */
+  dataNames?: string[];
+  /** 组件入参名，用于 $props.xxx 补全。 */
+  propNames?: string[];
   onChange: (next: PageMethod[]) => void;
 };
 
@@ -30,36 +35,84 @@ type ParamDraft = {
   type: MethodParamType;
 };
 
+type DataDraft = {
+  key: string;
+  name: string;
+  type: MethodParamType;
+  value: string;
+};
+
 type MethodDraft = {
   id: string | null;
   name: string;
   desc: string;
   expose: boolean;
   params: ParamDraft[];
-  returns: ParamDraft[];
+  /** 出参：单个可选类型，null 表示无出参（void）。 */
+  returns: MethodParamType | null;
+  data: DataDraft[];
   code: string;
   originalCode: string;
 };
 
-const editorExtensions = [javascript()];
+/** 方法类型到 TypeScript 类型的映射，用于生成函数声明。 */
+const TS_TYPES: Record<MethodParamType, string> = {
+  string: 'string',
+  number: 'number',
+  boolean: 'boolean',
+  object: 'Record<string, any>',
+  array: 'any[]',
+  any: 'any',
+};
 
 function blankParam(): ParamDraft {
   return { key: crypto.randomUUID(), name: '', type: 'string' };
+}
+
+function blankData(): DataDraft {
+  return { key: crypto.randomUUID(), name: '', type: 'string', value: '' };
 }
 
 function toDraftParams(params: PageMethodParam[]): ParamDraft[] {
   return params.map((param) => ({ key: crypto.randomUUID(), name: param.name, type: param.type }));
 }
 
+function toDraftData(data: PageMethodData[]): DataDraft[] {
+  return data.map((item) => ({ key: crypto.randomUUID(), name: item.name, type: item.type, value: item.value }));
+}
+
 function formatParams(params: PageMethodParam[]) {
   return params.map((param) => `${param.name}: ${param.type}`).join(', ');
 }
 
-export function PageMethodPanel({ methods, projectId, disabled, showExpose, onChange }: PageMethodPanelProps) {
+/** 由方法名、入参和出参拼出不可编辑的函数声明首行。 */
+function methodSignature(name: string, params: ParamDraft[], returns: MethodParamType | null): string {
+  const args = params
+    .filter((param) => param.name.trim())
+    .map((param) => `${param.name.trim()}: ${TS_TYPES[param.type]}`)
+    .join(', ');
+  return `function ${name.trim() || 'method'}(${args}): ${returns ? TS_TYPES[returns] : 'void'} {`;
+}
+
+/** 用 \u0000 连接成稳定 key，避免上层每次渲染传入新数组导致补全扩展重建。 */
+function listKey(items: string[]): string {
+  return items.filter(Boolean).join('\u0000');
+}
+
+export function PageMethodPanel({
+  methods,
+  projectId,
+  disabled,
+  showExpose,
+  dataNames = [],
+  propNames = [],
+  onChange,
+}: PageMethodPanelProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState<MethodDraft | null>(null);
+  const [codeValid, setCodeValid] = useState(true);
   const typeOptions = useMemo(
     () =>
       METHOD_PARAM_TYPES.map((type) => ({
@@ -69,6 +122,25 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
     [t],
   );
 
+  const dataKey = listKey(dataNames);
+  const propKey = listKey(propNames);
+  const localKey = listKey(draft ? draft.data.map((item) => item.name.trim()) : []);
+  // `$this.xxx()`：方法体里调用本文档（页面/组件）自己的方法，用现有方法名补全。
+  const thisKey = listKey(methods.map((method) => method.name));
+  const editorExtensions = useMemo(
+    () =>
+      createPageDataEditorExtensions(
+        dataKey ? dataKey.split('\u0000') : [],
+        t('lowcode.dataUnknownRef'),
+        propKey ? propKey.split('\u0000') : [],
+        [],
+        [],
+        localKey ? localKey.split('\u0000') : [],
+        thisKey ? thisKey.split('\u0000') : [],
+      ),
+    [dataKey, propKey, localKey, thisKey, t],
+  );
+
   function openCreate() {
     setDraft({
       id: null,
@@ -76,7 +148,8 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
       desc: '',
       expose: false,
       params: [],
-      returns: [],
+      returns: null,
+      data: [],
       code: '',
       originalCode: '',
     });
@@ -96,7 +169,8 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
         desc: method.desc ?? '',
         expose: Boolean(method.expose),
         params: toDraftParams(method.params),
-        returns: toDraftParams(method.returns),
+        returns: method.returns ?? null,
+        data: toDraftData(method.data ?? []),
         code: saved.code,
         originalCode: saved.code,
       });
@@ -108,7 +182,7 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
     }
   }
 
-  function updateParam(kind: 'params' | 'returns', key: string, patch: Partial<ParamDraft>) {
+  function updateParam(kind: 'params', key: string, patch: Partial<ParamDraft>) {
     setDraft((current) => {
       if (!current) {
         return current;
@@ -120,7 +194,7 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
     });
   }
 
-  function removeParam(kind: 'params' | 'returns', key: string) {
+  function removeParam(kind: 'params', key: string) {
     setDraft((current) => {
       if (!current) {
         return current;
@@ -129,13 +203,30 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
     });
   }
 
-  function addParam(kind: 'params' | 'returns') {
+  function addParam(kind: 'params') {
     setDraft((current) => {
       if (!current) {
         return current;
       }
       return { ...current, [kind]: [...current[kind], blankParam()] };
     });
+  }
+
+  function updateData(key: string, patch: Partial<DataDraft>) {
+    setDraft((current) => {
+      if (!current) {
+        return current;
+      }
+      return { ...current, data: current.data.map((row) => (row.key === key ? { ...row, ...patch } : row)) };
+    });
+  }
+
+  function removeData(key: string) {
+    setDraft((current) => (current ? { ...current, data: current.data.filter((row) => row.key !== key) } : current));
+  }
+
+  function addData() {
+    setDraft((current) => (current ? { ...current, data: [...current.data, blankData()] } : current));
   }
 
   function readParams(rows: ParamDraft[]): PageMethodParam[] | null {
@@ -157,6 +248,25 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
     return params;
   }
 
+  function readData(rows: DataDraft[]): PageMethodData[] | null {
+    const data: PageMethodData[] = [];
+    const names = new Set<string>();
+    for (const row of rows) {
+      const name = row.name.trim();
+      if (!name) {
+        message.error(t('lowcode.methodInvalidData'));
+        return null;
+      }
+      if (!isPageMethodParamName(name) || names.has(name)) {
+        message.error(t('lowcode.methodInvalidData'));
+        return null;
+      }
+      names.add(name);
+      data.push({ name, type: row.type, value: row.value });
+    }
+    return data;
+  }
+
   async function saveDraft() {
     if (!draft || !projectId || disabled) {
       return;
@@ -171,8 +281,8 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
       return;
     }
     const params = readParams(draft.params);
-    const returns = params ? readParams(draft.returns) : null;
-    if (!params || !returns) {
+    const data = params ? readData(draft.data) : null;
+    if (!params || !data) {
       return;
     }
     setSaving(true);
@@ -187,7 +297,8 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
         id,
         name,
         params,
-        returns,
+        ...(draft.returns ? { returns: draft.returns } : {}),
+        ...(data.length > 0 ? { data } : {}),
         ...(desc ? { desc } : {}),
         ...(draft.expose ? { expose: true } : {}),
       };
@@ -227,7 +338,8 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
       title: t('lowcode.methodReturns'),
       dataIndex: 'returns',
       ellipsis: true,
-      render: (params: PageMethodParam[]) => formatParams(params) || '—',
+      render: (returns: MethodParamType | undefined) =>
+        returns ? t(`lowcode.methodType.${returns}`) : t('lowcode.methodReturnVoid'),
     },
     ...(showExpose
       ? [
@@ -312,9 +424,9 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
           className="inspector-modal"
           title={draft?.id ? t('lowcode.methodEdit') : t('lowcode.methodCreate')}
           open={open}
-          width={760}
+          width={800}
           confirmLoading={saving}
-          okButtonProps={{ disabled: disabled || !draft }}
+          okButtonProps={{ disabled: disabled || !draft || !codeValid }}
           onCancel={() => {
             setOpen(false);
             setDraft(null);
@@ -323,7 +435,13 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
           destroyOnHidden
         >
           {draft ? (
-            <Form layout="vertical">
+            <Form
+              className="page-method-form"
+              layout="horizontal"
+              labelAlign="left"
+              labelCol={{ flex: '0 0 76px' }}
+              wrapperCol={{ flex: '1 1 auto' }}
+            >
               <Form.Item label={t('lowcode.methodName')} required extra={t('lowcode.methodNameHint')}>
                 <Input
                   value={draft.name}
@@ -369,23 +487,39 @@ export function PageMethodPanel({ methods, projectId, disabled, showExpose, onCh
                 />
               </Form.Item>
               <Form.Item label={t('lowcode.methodReturns')}>
-                <ParamList
-                  rows={draft.returns}
+                <Select
+                  allowClear
+                  value={draft.returns ?? undefined}
+                  options={typeOptions}
+                  placeholder={t('lowcode.methodReturnVoid')}
+                  disabled={disabled}
+                  onChange={(type: MethodParamType | undefined) =>
+                    setDraft((current) => (current ? { ...current, returns: type ?? null } : current))
+                  }
+                />
+              </Form.Item>
+              <Form.Item label={t('lowcode.methodData')} extra={t('lowcode.methodDataHint')}>
+                <DataList
+                  rows={draft.data}
                   typeOptions={typeOptions}
                   disabled={disabled}
-                  addLabel={t('lowcode.methodAddReturn')}
-                  namePlaceholder={t('lowcode.methodParamName')}
-                  onAdd={() => addParam('returns')}
-                  onRemove={(key) => removeParam('returns', key)}
-                  onChange={(key, patch) => updateParam('returns', key, patch)}
+                  addLabel={t('lowcode.methodAddData')}
+                  namePlaceholder={t('lowcode.methodDataName')}
+                  valuePlaceholder={t('lowcode.methodDataValue')}
+                  onAdd={addData}
+                  onRemove={removeData}
+                  onChange={updateData}
                 />
               </Form.Item>
               <Form.Item label={t('lowcode.methodCode')} required>
                 <ScriptEditor
                   value={draft.code}
                   height="280px"
-                  extensions={editorExtensions}
                   editable={!disabled}
+                  prefix={methodSignature(draft.name, draft.params, draft.returns)}
+                  suffix="}"
+                  extensions={editorExtensions}
+                  onValidateChange={setCodeValid}
                   onChange={(code) => setDraft((current) => (current ? { ...current, code } : current))}
                 />
               </Form.Item>
@@ -431,6 +565,65 @@ function ParamList({
             options={typeOptions}
             disabled={disabled}
             onChange={(type: MethodParamType) => onChange(row.key, { type })}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            disabled={disabled}
+            onClick={() => onRemove(row.key)}
+          />
+        </div>
+      ))}
+      <Button size="small" icon={<PlusOutlined />} disabled={disabled} onClick={onAdd}>
+        {addLabel}
+      </Button>
+    </div>
+  );
+}
+
+function DataList({
+  rows,
+  typeOptions,
+  disabled,
+  addLabel,
+  namePlaceholder,
+  valuePlaceholder,
+  onAdd,
+  onRemove,
+  onChange,
+}: {
+  rows: DataDraft[];
+  typeOptions: Array<{ value: MethodParamType; label: string }>;
+  disabled?: boolean;
+  addLabel: string;
+  namePlaceholder: string;
+  valuePlaceholder: string;
+  onAdd: () => void;
+  onRemove: (key: string) => void;
+  onChange: (key: string, patch: Partial<DataDraft>) => void;
+}) {
+  return (
+    <div className="page-method-params">
+      {rows.map((row) => (
+        <div key={row.key} className="page-method-param-row page-method-data-row">
+          <Input
+            value={row.name}
+            placeholder={namePlaceholder}
+            disabled={disabled}
+            onChange={(event) => onChange(row.key, { name: event.target.value })}
+          />
+          <Select
+            value={row.type}
+            options={typeOptions}
+            disabled={disabled}
+            onChange={(type: MethodParamType) => onChange(row.key, { type })}
+          />
+          <Input
+            value={row.value}
+            placeholder={valuePlaceholder}
+            disabled={disabled}
+            onChange={(event) => onChange(row.key, { value: event.target.value })}
           />
           <Button
             type="text"

@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ProjectAssetFileDto, ProjectAssetGroupDto } from '@vanstack/shared';
 import { api } from '../apis/api';
+import { refreshAssetCatalog } from '../utils/assetCatalog';
 import { useProjectVersionId } from '../utils/projectVersion';
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i;
@@ -127,6 +128,7 @@ export function AssetLibraryBrowser({
       setCreating(false);
       await loadGroups();
       setGroupName(created.name);
+      void refreshAssetCatalog(projectId, versionId);
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.assetsGroupFailed'));
     }
@@ -148,6 +150,7 @@ export function AssetLibraryBrowser({
       setRenameOpen(false);
       await loadGroups();
       setGroupName(renamed.name);
+      void refreshAssetCatalog(projectId, versionId);
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.assetsGroupFailed'));
     }
@@ -163,6 +166,7 @@ export function AssetLibraryBrowser({
       }
       await api.deleteAssetGroup(projectId, versionId, groupName);
       await loadGroups();
+      void refreshAssetCatalog(projectId, versionId);
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.assetsGroupFailed'));
     }
@@ -200,6 +204,7 @@ export function AssetLibraryBrowser({
       setPendingFile(null);
       setUploadName('');
       await loadFiles(groupName);
+      void refreshAssetCatalog(projectId, versionId);
       if (onPick) {
         onPick(resolveAssetUrl(stored.url));
       }
@@ -220,6 +225,7 @@ export function AssetLibraryBrowser({
       }
       await api.deleteAssetFile(projectId, versionId, groupName, file.name);
       await loadFiles(groupName);
+      void refreshAssetCatalog(projectId, versionId);
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('lowcode.assetsDeleteFailed'));
     }

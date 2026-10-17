@@ -1,5 +1,6 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { AnimationKeyframe } from '@vanstack/shared';
 import { type PageXmlDocument } from '@vanstack/xml';
 import { Collection, Db, MongoClient } from 'mongodb';
 
@@ -154,6 +155,8 @@ export type NamespaceDataRecord = {
   name: string;
   description: string;
   value: unknown;
+  dynamic?: boolean;
+  computed?: boolean;
 };
 
 /** 一个命名空间的类型定义和数据。由工程文档的 namespace.versionId 指向。 */
@@ -164,6 +167,18 @@ export type NamespaceVersionRecord = {
   uses: number;
   types: NamespaceTypeRecord[];
   data: NamespaceDataRecord[];
+  updatedAt: Date;
+};
+
+/** 独立的动画资源，每个动画一条文档，存于 `animation.version` 集合。 */
+export type AnimationVersionRecord = {
+  _id: string;
+  projectId: string;
+  projectKey: string;
+  name: string;
+  keyframes: AnimationKeyframe[];
+  uses: number;
+  createdAt: Date;
   updatedAt: Date;
 };
 
@@ -216,6 +231,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
   private iconVersions: Collection<LibraryVersionRecord> | null = null;
   private fontVersions: Collection<LibraryVersionRecord> | null = null;
   private namespaceVersions: Collection<NamespaceVersionRecord> | null = null;
+  private animationVersions: Collection<AnimationVersionRecord> | null = null;
 
   constructor(config: ConfigService) {
     this.dbName = config.get<string>('MONGO_DB', 'vanstack');
@@ -239,7 +255,9 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     this.iconVersions = db.collection<LibraryVersionRecord>('icon.version');
     this.fontVersions = db.collection<LibraryVersionRecord>('font.version');
     this.namespaceVersions = db.collection<NamespaceVersionRecord>('namespace.version');
+    this.animationVersions = db.collection<AnimationVersionRecord>('animation.version');
     await this.namespaceVersions.createIndex({ projectId: 1 });
+    await this.animationVersions.createIndex({ projectId: 1 });
     await adoptBusinessId(this.projects, 'id');
     await adoptBusinessId(this.pageVersions, 'versionId');
     await adoptBusinessId(this.components, 'id');
@@ -518,6 +536,22 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     await this.namespaceVersionDocs().deleteOne({ _id: id });
   }
 
+  async listAnimations(projectId: string): Promise<AnimationVersionRecord[]> {
+    return this.animationVersionDocs().find({ projectId }).sort({ createdAt: 1 }).toArray();
+  }
+
+  async getAnimationVersion(id: string): Promise<AnimationVersionRecord | null> {
+    return this.animationVersionDocs().findOne({ _id: id });
+  }
+
+  async saveAnimationVersion(record: AnimationVersionRecord): Promise<void> {
+    await this.animationVersionDocs().replaceOne({ _id: record._id }, record, { upsert: true });
+  }
+
+  async deleteAnimationVersion(id: string): Promise<void> {
+    await this.animationVersionDocs().deleteOne({ _id: id });
+  }
+
   async countBlobKey(key: string): Promise<number> {
     const filter = { 'groups.files.key': key };
     const assets = await this.libraryDocs('asset').countDocuments(filter);
@@ -573,6 +607,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     await this.functionDocs().deleteMany({ projectId });
     await this.eventDocs().deleteMany({ projectId });
     await this.namespaceVersionDocs().deleteMany({ projectId });
+    await this.animationVersionDocs().deleteMany({ projectId });
   }
 
   async renameProjectKey(projectId: string, projectKey: string): Promise<void> {
@@ -587,6 +622,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     await this.functionDocs().updateMany({ projectId }, set);
     await this.eventDocs().updateMany({ projectId }, set);
     await this.namespaceVersionDocs().updateMany({ projectId }, set);
+    await this.animationVersionDocs().updateMany({ projectId }, set);
   }
 
   /** 迁走工程文档上残留的 pages 字段，并记下当前工程版本。 */
@@ -716,6 +752,13 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
     return this.namespaceVersions;
   }
 
+  private animationVersionDocs() {
+    if (!this.animationVersions) {
+      throw new Error('animation.version collection is not ready');
+    }
+    return this.animationVersions;
+  }
+
   private libraryDocs(kind: LibraryKind) {
     const docs = kind === 'asset' ? this.assetVersions : kind === 'icon' ? this.iconVersions : this.fontVersions;
     if (!docs) {
@@ -760,6 +803,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
       iconVersions,
       fontVersions,
       namespaceVersions,
+      animationVersions,
     ] = await Promise.all([
       this.listProjectVersions(projectId),
       this.listProjectPageSnapshots(projectId),
@@ -772,6 +816,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
       this.libraryDocs('icon').find({ projectId }).toArray(),
       this.libraryDocs('font').find({ projectId }).toArray(),
       this.namespaceVersionDocs().find({ projectId }).toArray(),
+      this.animationVersionDocs().find({ projectId }).toArray(),
     ]);
     return {
       project,
@@ -786,6 +831,7 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
       iconVersions,
       fontVersions,
       namespaceVersions,
+      animationVersions,
     };
   }
 
@@ -833,6 +879,9 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
       case 'namespace.version':
         await this.saveNamespaceVersion(revived as NamespaceVersionRecord);
         return;
+      case 'animation.version':
+        await this.saveAnimationVersion(revived as AnimationVersionRecord);
+        return;
       default:
         throw new Error(`unknown collection ${collection}`);
     }
@@ -872,6 +921,9 @@ export class LowcodeMongo implements OnModuleInit, OnModuleDestroy {
         return;
       case 'namespace.version':
         await this.deleteNamespaceVersion(id);
+        return;
+      case 'animation.version':
+        await this.deleteAnimationVersion(id);
         return;
       default:
         throw new Error(`unknown collection ${collection}`);

@@ -7,12 +7,14 @@ import {
   type ComponentEmit,
   type ComponentProp,
   type ComponentSlot,
+  type PageDesignSize,
   type PageMethod,
   type PageStyle,
   type PageTestData,
   type PageVariable,
   type PageWidget,
   type WidgetEvents,
+  type WidgetStateDelta,
   type WidgetStyle,
 } from '@vanstack/xml';
 import { isBoxDragKind, type BoxDragKind, type SpacingEdge } from '../../utils/spacingDrag';
@@ -32,6 +34,11 @@ export const HISTORY_LIMIT = 100;
 export type HistoryEntry = {
   widgets: PageWidget[];
   pageStyle?: PageStyle;
+  pageStates?: WidgetStateDelta[];
+  /** 文档级全局状态的状态函数/hover，与控件级独立。 */
+  pageStateFn?: string;
+  pageHoverStateId?: string;
+  pageDesignSize?: PageDesignSize;
   pageData: PageVariable[];
   pageEvents?: WidgetEvents;
   pageMethods: PageMethod[];
@@ -42,7 +49,7 @@ export type HistoryEntry = {
   testData?: PageTestData;
   selectedWidgetId: string | null;
 };
-export type CenterTab = 'layout' | 'data' | 'events' | 'methods';
+export type CenterTab = 'layout' | 'data' | 'events' | 'methods' | 'animation';
 const FIT_PADDING_X = 32;
 const FIT_PADDING_TOP = 24;
 const FIT_PADDING_BOTTOM = 64;

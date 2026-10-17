@@ -2,6 +2,7 @@ import type {
   DrawerPlace,
   FlexContainerStyle,
   FlexItemStyle,
+  GridStyle,
   PageWidget,
   SwiperStyle,
   TableAlign,
@@ -12,6 +13,7 @@ import type {
   WidgetLoop,
   WidgetPresence,
   WidgetStyle,
+  WidgetAnimation,
 } from '@vanstack/xml';
 
 export type WidgetPatch = {
@@ -31,6 +33,7 @@ export type WidgetPatch = {
   activeColor?: string;
   hidden?: boolean;
   alias?: string;
+  animation?: WidgetAnimation | undefined;
   loop?: WidgetLoop | undefined;
   events?: WidgetEvents | undefined;
   args?: Record<string, string> | undefined;
@@ -44,6 +47,7 @@ export type WidgetPatch = {
   presence?: WidgetPresence | undefined;
   style?: WidgetStyle | undefined;
   flex?: FlexContainerStyle | undefined;
+  grid?: GridStyle | undefined;
   swiper?: SwiperStyle | undefined;
   item?: FlexItemStyle | undefined;
   scrollX?: boolean;

@@ -31,6 +31,7 @@ export function WidgetStateFnModal({
   widget,
   variables,
   props = [],
+  slotProps = [],
   disabled,
   onCancel,
   onChange,
@@ -39,6 +40,8 @@ export function WidgetStateFnModal({
   widget: PageWidget;
   variables: PageVariable[];
   props?: ComponentProp[];
+  /** 当前控件所在插槽声明的出参（`$slot.名称`）。 */
+  slotProps?: ComponentProp[];
   disabled?: boolean;
   onCancel: () => void;
   onChange: (stateFn: string | undefined, hoverStateId?: string) => void;
@@ -46,8 +49,10 @@ export function WidgetStateFnModal({
   const { t } = useTranslation();
   const [draft, setDraft] = useState(widget.stateFn ?? '');
   const [hoverDraft, setHoverDraft] = useState(widget.hoverStateId ?? '');
+  const [codeValid, setCodeValid] = useState(true);
   const knownNames = useMemo(() => variables.map((variable) => variable.name), [variables]);
   const propNames = useMemo(() => props.map((prop) => prop.name), [props]);
+  const slotNames = useMemo(() => slotProps.map((prop) => prop.name), [slotProps]);
   const hoverChoices = useMemo(
     () =>
       (widget.states ?? []).map((state) => ({
@@ -71,8 +76,8 @@ export function WidgetStateFnModal({
     return rows;
   }, [widget]);
   const editorExtensions = useMemo(
-    () => createPageDataEditorExtensions(knownNames, t('lowcode.dataUnknownRef'), propNames),
-    [knownNames, propNames, t],
+    () => createPageDataEditorExtensions(knownNames, t('lowcode.dataUnknownRef'), propNames, [], slotNames),
+    [knownNames, propNames, slotNames, t],
   );
 
   useEffect(() => {
@@ -86,7 +91,7 @@ export function WidgetStateFnModal({
     const body = compactStateFn(draft);
     if (body) {
       try {
-        new Function('$data', '$item', '$index', '$props', '$query', `"use strict";\n${body}`);
+        new Function('$data', '$item', '$index', '$props', '$query', '$slot', `"use strict";\n${body}`);
       } catch {
         message.error(t('lowcode.stateFnInvalid'));
         return;
@@ -102,7 +107,7 @@ export function WidgetStateFnModal({
       open={open}
       onCancel={onCancel}
       onOk={confirm}
-      okButtonProps={{ disabled }}
+      okButtonProps={{ disabled: disabled || !codeValid }}
       width={580}
       destroyOnHidden
     >
@@ -131,6 +136,7 @@ export function WidgetStateFnModal({
             suffix="}"
             extensions={editorExtensions}
             editable={!disabled}
+            onValidateChange={setCodeValid}
             onChange={setDraft}
           />
         </Form.Item>

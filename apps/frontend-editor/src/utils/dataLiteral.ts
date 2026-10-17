@@ -1,9 +1,10 @@
 const T_CALL = /^\$t\("([^".]+)\.([^".]+)"\)$/;
 const ICON_CALL = /^\$icon\((['"])([^'"]+)\1\)$/;
+const ASSET_CALL = /^\$asset\((['"])([^'"]+)\1\)$/;
 
-/** 字符串值本身就是 `$t("分组.条目")` 或 `$icon('分组.名称')`。 */
+/** 字符串值本身就是 `$t("分组.条目")`、`$icon('分组.名称')` 或 `$asset('分组.文件名')`。 */
 export function isRuntimeCall(value: string): boolean {
-  return T_CALL.test(value) || ICON_CALL.test(value);
+  return T_CALL.test(value) || ICON_CALL.test(value) || ASSET_CALL.test(value);
 }
 
 export function tryParseDataLiteral(source: string): unknown | undefined {
@@ -57,7 +58,7 @@ class Parser {
     if (char === '"' || char === "'") {
       return this.parseString();
     }
-    if (this.startsWith('$t(') || this.startsWith('$icon(')) {
+    if (this.startsWith('$t(') || this.startsWith('$icon(') || this.startsWith('$asset(')) {
       return this.parseCall();
     }
     if (this.keyword('true')) {
@@ -185,7 +186,7 @@ class Parser {
   }
 
   private parseCall(): string {
-    const name = this.startsWith('$t(') ? '$t' : '$icon';
+    const name = this.startsWith('$t(') ? '$t' : this.startsWith('$icon(') ? '$icon' : '$asset';
     this.index += name.length + 1;
     this.skip();
     const quote = this.peek();
@@ -202,10 +203,10 @@ class Parser {
       return `$t("${arg}")`;
     }
     if (!arg.trim()) {
-      throw new Error('icon');
+      throw new Error(name);
     }
     const wrapped = quote === "'" ? `'${arg}'` : `"${arg}"`;
-    return `$icon(${wrapped})`;
+    return `${name}(${wrapped})`;
   }
 
   private parseNumber(): number {

@@ -293,6 +293,10 @@
   min-width: 132px;
 }
 
+.canvas-component-state-select {
+  min-width: 120px;
+}
+
 .canvas-card-body {
   position: relative;
   flex: 1;
@@ -308,6 +312,55 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* 组件定义编辑器的插槽调试面板：固定在画布视口左上角，不随画布缩放/平移。 */
+.canvas-slot-debug-panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 208px;
+  padding: 10px 12px 12px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  cursor: default;
+}
+
+.canvas-slot-debug-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.canvas-slot-debug-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.canvas-slot-debug-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.canvas-slot-debug-row.is-active .canvas-slot-debug-name {
+  color: #3dba9a;
+}
+
+.canvas-slot-debug-panel .ant-btn {
+  flex: none;
+  font-size: 12px;
 }
 
 .canvas-wrap.is-hidden {
@@ -345,8 +398,7 @@
   display: flex;
   flex-direction: column;
   width: 280px;
-  padding: 14px 14px 8px;
-  overflow: auto;
+  overflow: hidden;
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 10px;
@@ -354,11 +406,72 @@
   cursor: default;
 }
 
+/* 折叠后只保留固定标题行，卡片高度收缩到标题。 */
+.preview-scope-card.is-collapsed {
+  bottom: auto;
+}
+
+/* 标题是卡片的固定头部，不参与内容滚动，因此按钮位置不受滚动条影响。 */
 .preview-scope-card-title {
-  margin-bottom: 12px;
-  font-size: 14px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px 8px;
+  background: #fff;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.4;
+}
+
+.preview-scope-card.is-collapsed .preview-scope-card-title {
+  padding-bottom: 12px;
+}
+
+/* 滚动只发生在内容区，卡片本身不滚动，圆角在任何状态下都保留。 */
+.preview-scope-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 14px 8px;
+  overflow: hidden auto;
+}
+
+.preview-scope-card.is-collapsed .preview-scope-card-body {
+  display: none;
+}
+
+/* 滚动条不用浏览器自带样式，仅鼠标悬停时显示。 */
+.preview-scope-card-body::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.preview-scope-card-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.preview-scope-card-body::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+}
+
+.preview-scope-card:hover .preview-scope-card-body::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.preview-scope-card-toggle {
+  flex: none;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.preview-scope-card-toggle .anticon {
+  font-size: 12px;
+}
+
+.preview-scope-card-toggle:hover {
+  color: rgba(0, 0, 0, 0.88) !important;
+  background: rgba(0, 0, 0, 0.06) !important;
 }
 
 .preview-scope-section + .preview-scope-section {
@@ -380,12 +493,12 @@
 .preview-scope-section-add {
   width: 22px;
   height: 22px;
-  color: #eb2f96;
+  color: #3dba9a;
 }
 
 .preview-scope-section-add:hover {
-  color: #eb2f96 !important;
-  background: rgba(235, 47, 150, 0.08) !important;
+  color: #3dba9a !important;
+  background: rgba(61, 186, 154, 0.1) !important;
 }
 
 .preview-scope-empty {
@@ -454,6 +567,20 @@
   flex: none;
 }
 
+/* 编辑按钮用主题色；删除按钮（danger）保持红色，不覆盖。 */
+.preview-scope-literal .ant-btn:not(.ant-btn-dangerous),
+.preview-scope-item .ant-btn:not(.ant-btn-dangerous),
+.preview-scope-name-action {
+  color: #3dba9a;
+}
+
+.preview-scope-literal .ant-btn:not(.ant-btn-dangerous):hover,
+.preview-scope-item .ant-btn:not(.ant-btn-dangerous):hover,
+.preview-scope-name-action:hover {
+  color: #3dba9a !important;
+  background: rgba(61, 186, 154, 0.08) !important;
+}
+
 .preview-scope-literal-text {
   flex: 1;
   min-width: 0;
@@ -473,10 +600,31 @@
   min-width: 0;
 }
 
-.preview-scope-add,
+/* 展开 / 折叠用主题色，字号比正文小一档。 */
 .preview-scope-fold {
   width: 100%;
   margin-top: 4px;
+  font-size: 12px;
+  color: #3dba9a;
+}
+
+.preview-scope-fold:hover {
+  color: #3dba9a !important;
+  background: rgba(61, 186, 154, 0.08) !important;
+}
+
+/* 添加按钮用主题色并居中。 */
+.preview-scope-add {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin: 4px auto 0;
+  color: #3dba9a;
+}
+
+.preview-scope-add:hover {
+  color: #3dba9a !important;
+  background: rgba(61, 186, 154, 0.08) !important;
 }
 
 .canvas-settle {
@@ -582,10 +730,64 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   color: rgba(0, 0, 0, 0.88);
 }
 
+// 状态栏：上下两个区块（全局状态 / 状态），中间用一条线隔开，共用一个卡片外壳。
+.canvas-state-bar {
+  display: flex;
+  flex-direction: column;
+  width: 200px;
+  padding: 8px 8px 6px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.canvas-state-bar .canvas-state-list {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.canvas-state-bar .canvas-state-list-items {
+  max-height: 160px;
+}
+
+.canvas-state-bar-split {
+  height: 1px;
+  margin: 6px 0;
+  background: rgba(0, 0, 0, 0.08);
+}
+
 .canvas-state-list-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   margin: 0 4px 6px;
   font-size: 12px;
   color: rgba(0, 0, 0, 0.45);
+}
+
+.canvas-state-list-title-extra {
+  display: flex;
+  align-items: center;
+}
+
+.canvas-state-list-title-extra .ant-btn {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.canvas-state-list-title-extra .ant-btn:hover {
+  color: #3dba9a;
+  background: rgba(61, 186, 154, 0.12);
 }
 
 .canvas-state-list-items {
@@ -1127,6 +1329,23 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   margin-left: auto;
 }
 
+.page-data-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.page-data-collapse-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.page-data-toolbar .page-data-namespace-select {
+  min-width: 140px;
+}
+
 .page-data-stack {
   display: flex;
   flex: 1;
@@ -1524,6 +1743,12 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   height: 100%;
 }
 
+/* 网格面板不再强制最小宽度，避免在窄浮层里挤出横向滚动条。 */
+.flex-control-panel.grid-control-panel {
+  min-width: 0;
+  width: 100%;
+}
+
 .flex-control-panel {
   display: flex;
   flex-direction: column;
@@ -1698,6 +1923,36 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   flex-wrap: wrap;
   align-items: center;
   gap: 2px;
+}
+
+/* 未选中节点时的精简浮层：组件定义态的「调整大小」+「设置」。 */
+.widget-style-bubble.is-minimal {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.design-size-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 176px;
+}
+
+.design-size-panel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.design-size-panel-label {
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.design-size-panel .ant-input-number {
+  width: 100px;
 }
 
 .widget-style-inherited {
@@ -2385,6 +2640,16 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   align-items: center;
 }
 
+.page-method-data-row {
+  grid-template-columns: minmax(0, 1fr) 128px minmax(0, 1fr) 32px;
+}
+
+.page-method-form {
+  .ant-form-item-label > label {
+    white-space: nowrap;
+  }
+}
+
 .page-data-toolbar {
   flex: 0 0 auto;
   display: flex;
@@ -2534,6 +2799,21 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   user-select: none;
 }
 
+.cm-i18n-value {
+  display: inline-block;
+  max-width: 14em;
+  vertical-align: bottom;
+  line-height: 1.4;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #eaf7f1;
+  color: #2f9d7f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
 .page-data-code .cm-icon-call {
   display: inline-block;
   width: 1em;
@@ -2554,14 +2834,69 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
 
 .page-data-code .cm-editor {
   border-radius: 0;
-  font-size: 16px;
+  font-size: 13px;
+}
+
+.page-data-code .cm-editor,
+.page-data-code .cm-content,
+.page-data-code .cm-tooltip {
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', 'Microsoft YaHei', 'PingFang SC', monospace;
+}
+
+.page-data-code .script-editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 4px 8px;
+  background: #fafafa;
+  border: 1px solid #e8e8e8;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+}
+
+.page-data-code .script-editor-error {
+  margin-right: auto;
+  color: #ff4d4f;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.page-data-code .script-editor-format-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(0, 0, 0, 0.65);
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.page-data-code .script-editor-format-btn:hover {
+  color: #3dba9a;
+  border-color: #3dba9a;
+}
+
+.page-data-code .script-editor-format-btn kbd {
+  padding: 0 4px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: rgba(0, 0, 0, 0.45);
+  background: #f5f5f5;
+  border: 1px solid #e8e8e8;
+  border-radius: 3px;
 }
 
 .page-data-code .cm-scroller,
 .page-data-code .cm-content,
 .page-data-code .cm-gutters,
 .page-data-code .cm-tooltip {
-  font-size: 16px;
+  font-size: 13px;
 }
 
 .page-data-code .cm-lintRange-error {

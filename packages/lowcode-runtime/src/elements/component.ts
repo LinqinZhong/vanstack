@@ -5,6 +5,9 @@ import {
   resolvePageData,
   isCopyBinding,
   propModelName,
+  pageStateRootWidget,
+  resolvePageStyleWithStates,
+  resolveStateFnId,
   resolveCopyValue,
   resolveWidgetTree,
   stripDataDrivenPresenceGates,
@@ -21,6 +24,7 @@ import { resolveRuntimeOwnState } from '../hover';
 import { expandLoopTree, widgetInstanceKey } from '../loop';
 import { formatStoredValue } from '../stored';
 import { runEventIds } from '../events';
+import { buildSelf, initMethodLocal, runMethodCode, type ComponentInstance } from '../methods';
 import { widgetCssOptions, widgetStateAttr, type WidgetRenderContext, type WidgetViewing } from '../widget-render';
 
 /**
@@ -54,7 +58,10 @@ function prefixTree(widgets: PageWidget[], prefix: string): PageWidget[] {
   return widgets.map((widget) => {
     const id = `${prefix}${widget.id}`;
     if ('children' in widget && widget.children) {
-      return { ...widget, id, children: prefixTree(widget.children, prefix) };
+      // 插槽的 children 只服务于组件定义期的「调试节点」，组件实例化时必须剔除，
+      // 插槽内容一律由实例的 slotContent 覆盖渲染。
+      const children = widget.type === 'slot' ? [] : prefixTree(widget.children, prefix);
+      return { ...widget, id, children };
     }
     return { ...widget, id };
   });
@@ -313,6 +320,37 @@ function ComponentView({
   );
   const scope = { data: dataScope, props: propsScope, query, aliases: { ...ctx.bindingScope.aliases } };
   const options = widgetCssOptions(ctx);
+  // 组件文档级「全局状态」：与组件根控件（模板最外层节点）自身的状态相互独立。
+  // 编辑器显式查看优先；否则由组件文档 stateFn 求值。样式应用到组件外壳，与页面全局状态一致。
+  const globalStateId = (() => {
+    if (!nested) {
+      return null;
+    }
+    const list = !ctx.viewing ? [] : Array.isArray(ctx.viewing) ? ctx.viewing : [ctx.viewing];
+    const explicit = list.find((item) => item.ownerId === widget.id)?.state ?? null;
+    if (explicit) {
+      return explicit;
+    }
+    if (editingThis) {
+      return null;
+    }
+    return resolveStateFnId(
+      pageStateRootWidget({
+        style: nested.style,
+        states: nested.states,
+        stateFn: nested.stateFn,
+        hoverStateId: nested.hoverStateId,
+      }),
+      scope,
+    );
+  })();
+  const globalStateStyle = nested
+    ? resolvePageStyleWithStates(
+        { style: nested.style, states: nested.states, stateFn: nested.stateFn, hoverStateId: nested.hoverStateId },
+        [globalStateId],
+        ctx.locale,
+      )
+    : undefined;
   const prefix = `${widget.id}__`;
   const template = nested ? prefixTree(nested.widgets, prefix) : [];
   const prefixedSlotContent = widget.slotContent
@@ -321,7 +359,7 @@ function ComponentView({
       )
     : undefined;
   const paintSource = prefixedSlotContent ? [...template, ...Object.values(prefixedSlotContent).flat()] : template;
-  const nestedStyle = paintSource.length > 0 ? pageCssText(paintSource) : '';
+  const nestedStyle = paintSource.length > 0 ? pageCssText(paintSource, ctx.locale, { animations: !ctx.editing }) : '';
   const slotArgValues = evaluateSlotArgs(widget.slotArgs, nested?.slots, ctx.bindingScope, evaluateArgs);
   const nestedStack = [...stack, widget.componentId];
   const dataArg = /^\$data\.([\p{ID_Start}$_][\p{ID_Continue}$]*)$/u;
@@ -352,6 +390,43 @@ function ComponentView({
     dataScope[name] = value;
     setWrites((prev) => (prev[name] === stored ? prev : { ...prev, [name]: stored }));
   };
+  // 页面级「控件」变量指向本实例时，通过这个句柄调用组件暴露的方法。
+  // 方法体在实例内部作用域（$data/$props）里执行，$local 为方法级单例。
+  const methodLocalRef = useRef<Map<string, Record<string, unknown>>>(new Map());
+  function invokeNestedMethod(name: string, args: unknown[]): unknown {
+    const method = nested?.methods?.find((item) => item.name === name);
+    const loader = ctx.loadFunction;
+    if (!method || !loader) {
+      return undefined;
+    }
+    let local = methodLocalRef.current.get(method.id);
+    if (!local) {
+      local = initMethodLocal(method.data);
+      methodLocalRef.current.set(method.id, local);
+    }
+    const store = local;
+    return (async () => {
+      const code = await loader(method.id);
+      if (!code) {
+        return undefined;
+      }
+      return runMethodCode(
+        code,
+        method.params.map((param) => param.name),
+        { data: dataScope, props: propsScope, local: store, assign: assignScope, self: nestedSelf },
+        args,
+      );
+    })();
+  }
+  // 组件内部脚本（含插槽里的调试节点）用 `$this.xxx()` 调用本组件自己的方法。
+  const nestedSelf = buildSelf(nested?.methods, invokeNestedMethod);
+  const instance: ComponentInstance = {
+    call(name, args) {
+      return invokeNestedMethod(name, args);
+    },
+  };
+  ctx.componentInstances?.set(widget.id, instance);
+
   const emitEvent = (name: string, ...args: unknown[]) => {
     if (!nested?.emits?.some((item) => item.name === name)) {
       return;
@@ -413,6 +488,7 @@ function ComponentView({
     (ctx.hoverInstanceKeys ?? []).join(','),
     ctx.locale ?? '',
     viewingKey,
+    globalStateId ?? '',
     propsValueKey,
     slotValueKey,
     dataWritesValueKey,
@@ -441,15 +517,22 @@ function ComponentView({
           editingThis ? stripDataDrivenPresenceGates(expanded) : expanded,
           remapInstanceViewing(ctx.viewing ?? null, widget.id, nested.widgets[0]?.id),
           {
-            // 组件编辑态下不自动求值 stateFn：状态激活只来自状态栏选择。
-            appliedStateFor: editingThis
-              ? undefined
-              : (child) => resolveRuntimeOwnState(child, ctx.editing ? [] : (ctx.hoverInstanceKeys ?? [])),
+            // 组件内部控件状态一律由各自脚本（stateFn）驱动：编辑态也照常求值，
+            // 不再回退到设计期 appliedState；组件全局状态由引用者的 viewing 承载，二者互不影响。
+            appliedStateFor: (child) => resolveRuntimeOwnState(child, ctx.editing ? [] : (ctx.hoverInstanceKeys ?? [])),
             stateLayersSink: ctx.stateLayers,
             locale: ctx.locale,
+            // 组件文档级「全局状态」同样作为最外层后代层叠加到组件内部控件，
+            // 否则模板节点在某个全局状态下记录的 stateOverrides（如「加载中」显隐）不会生效。
+            // 组件编辑态下该状态已由 viewing 重映射到内部根控件承载，避免重复叠加。
+            rootGlobalState: editingThis ? undefined : globalStateId,
           },
         )
       : [];
+    // 组件编辑态下同一插槽声明（slotId）在循环/多次实例化后会出现多份 chrome：
+    // 仅保留第一个可点选，其余在 slot.ts 中降级为不可点选的占位框。集合按渲染轮次新建，
+    // 深度优先遍历保证最先渲染到的实例登记为「第一个」。
+    const slotChromeSeen = new Set<string>();
     childCache.current = {
       key: childKey,
       nodes: innerWidgets.map((child) =>
@@ -459,6 +542,8 @@ function ComponentView({
           assignScope,
           instantiate: true,
           emit: emitEvent,
+          self: nestedSelf,
+          slotChromeSeen,
         }),
       ),
     };
@@ -474,7 +559,7 @@ function ComponentView({
       'data-widget-type': 'component',
       'data-state': widgetStateAttr(widget, ctx),
       style: mergeCss(
-        frameStyle(nested?.style, { ...options, bindingScope: scope }),
+        frameStyle(globalStateStyle, { ...options, bindingScope: scope }),
         innerNodes.length === 0 ? { minHeight: '72px', alignItems: 'center', justifyContent: 'center' } : undefined,
         dynamicStyleCss(widget.style, options),
         flexItemCss(widget.item, options),

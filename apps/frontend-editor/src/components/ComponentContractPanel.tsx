@@ -1,7 +1,7 @@
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
-import { Button, Input, InputNumber, Modal, Select, Switch, Table, message } from 'antd';
+import { Button, Input, Modal, Select, Switch, Table, message } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   METHOD_PARAM_TYPES,
@@ -16,7 +16,7 @@ import {
   type PageMethodParam,
 } from '@vanstack/xml';
 import { PROP_TYPES, SCALAR_TYPES, TypeKindFields, type NamespaceCatalogEntry } from './TypeKindFields';
-import { PropValueEditor } from './PropValueEditor';
+import { ValueEditCell, ValueEditor, applyValueResult } from './PropValueEditor';
 import { nextSlotName } from '../utils/widgetTree';
 
 type PropsPanelProps = {
@@ -24,6 +24,9 @@ type PropsPanelProps = {
   variant?: 'props' | 'query';
   namespaces?: NamespaceCatalogEntry[];
   disabled?: boolean;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+  collapseIcon?: ReactNode;
   onChange: (next: ComponentProp[], coalesceKey?: string) => void;
   onEndCoalesce: () => void;
 };
@@ -46,6 +49,7 @@ export function ComponentSlotsPanel({ slots, namespaces = [], disabled, onChange
   const { t } = useTranslation();
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [draft, setDraft] = useState<ComponentProp[]>([]);
+  const [editingValueIndex, setEditingValueIndex] = useState<number | null>(null);
 
   function openParams(index: number) {
     const slot = slots[index];
@@ -139,11 +143,10 @@ export function ComponentSlotsPanel({ slots, namespaces = [], disabled, onChange
       dataIndex: 'value',
       width: 160,
       render: (value: string, record, index) => (
-        <PropValueEditor
-          type={record.type}
-          value={value}
+        <ValueEditCell
+          preview={record.type === 'bool' ? (value === '1' ? 'true' : 'false') : value}
           disabled={disabled}
-          onChange={(next) => patchDraft(index, { ...record, value: next })}
+          onEdit={() => setEditingValueIndex(index)}
         />
       ),
     },
@@ -286,6 +289,25 @@ export function ComponentSlotsPanel({ slots, namespaces = [], disabled, onChange
           {t('lowcode.slotsAddParam')}
         </Button>
       </Modal>
+      <ValueEditor
+        open={editingValueIndex != null}
+        type={draft[editingValueIndex ?? -1]?.type ?? 'str'}
+        of={draft[editingValueIndex ?? -1]?.of}
+        name={draft[editingValueIndex ?? -1]?.name}
+        value={draft[editingValueIndex ?? -1]?.value ?? ''}
+        dynamic={draft[editingValueIndex ?? -1]?.dynamic}
+        computed={draft[editingValueIndex ?? -1]?.computed}
+        disabled={disabled}
+        onCancel={() => setEditingValueIndex(null)}
+        onConfirm={(next) => {
+          const target = editingValueIndex;
+          if (target == null) {
+            return;
+          }
+          setDraft((current) => current.map((item, i) => (i === target ? applyValueResult(item, next) : item)));
+          setEditingValueIndex(null);
+        }}
+      />
     </section>
   );
 }
@@ -315,10 +337,14 @@ export function ComponentPropsPanel({
   variant = 'props',
   namespaces = [],
   disabled,
+  collapsed,
+  onToggleCollapse,
+  collapseIcon,
   onChange,
   onEndCoalesce,
 }: PropsPanelProps) {
   const { t } = useTranslation();
+  const [editingValueIndex, setEditingValueIndex] = useState<number | null>(null);
   const typeAllow = variant === 'query' ? SCALAR_TYPES : PROP_TYPES;
 
   function rename(index: number, nextName: string) {
@@ -436,39 +462,13 @@ export function ComponentPropsPanel({
       title: t('lowcode.dataValue'),
       dataIndex: 'value',
       width: 140,
-      render: (value: string, record, index) => {
-        if (record.type === 'num') {
-          return (
-            <InputNumber
-              size="small"
-              disabled={disabled}
-              value={Number(value)}
-              style={{ width: '100%' }}
-              onChange={(next) => patch(index, { ...record, value: String(next ?? 0) }, `${variant}:${record.name}:value`)}
-              onBlur={onEndCoalesce}
-            />
-          );
-        }
-        if (record.type === 'bool') {
-          return (
-            <Switch
-              size="small"
-              disabled={disabled}
-              checked={value === '1'}
-              onChange={(checked) => patch(index, { ...record, value: checked ? '1' : '0' })}
-            />
-          );
-        }
-        return (
-          <Input
-            size="small"
-            disabled={disabled}
-            value={value}
-            onChange={(event) => patch(index, { ...record, value: event.target.value }, `${variant}:${record.name}:value`)}
-            onBlur={onEndCoalesce}
-          />
-        );
-      },
+      render: (value: string, record, index) => (
+        <ValueEditCell
+          preview={record.type === 'bool' ? (value === '1' ? 'true' : 'false') : value}
+          disabled={disabled}
+          onEdit={() => setEditingValueIndex(index)}
+        />
+      ),
     },
     ...(variant === 'props'
       ? [
@@ -507,7 +507,12 @@ export function ComponentPropsPanel({
   return (
     <section className="component-contract">
       <div className="page-data-toolbar">
-        <span className="component-contract-title">{t('lowcode.propsTitle')}</span>
+        <span className="page-data-head-title">
+          {onToggleCollapse ? (
+            <Button size="small" type="text" className="page-data-collapse-btn" icon={collapseIcon} onClick={onToggleCollapse} />
+          ) : null}
+          <span className="component-contract-title">{t('lowcode.propsTitle')}</span>
+        </span>
         <span className="component-contract-hint">
           {t(variant === 'query' ? 'lowcode.queryHint' : 'lowcode.propsHint')}
         </span>
@@ -529,16 +534,38 @@ export function ComponentPropsPanel({
           {t('lowcode.propsAdd')}
         </Button>
       </div>
-      <div className="page-data-table-wrap">
-        <Table
-          size="small"
-          rowKey="name"
-          pagination={false}
-          columns={columns}
-          dataSource={props}
-          locale={{ emptyText: <span className="component-contract-empty">{t('lowcode.propsEmpty')}</span> }}
-        />
-      </div>
+      {collapsed ? null : (
+        <div className="page-data-table-wrap">
+          <Table
+            size="small"
+            rowKey="name"
+            pagination={false}
+            columns={columns}
+            dataSource={props}
+            locale={{ emptyText: <span className="component-contract-empty">{t('lowcode.propsEmpty')}</span> }}
+          />
+        </div>
+      )}
+      <ValueEditor
+        open={editingValueIndex != null}
+        type={props[editingValueIndex ?? -1]?.type ?? 'str'}
+        of={props[editingValueIndex ?? -1]?.of}
+        name={props[editingValueIndex ?? -1]?.name}
+        value={props[editingValueIndex ?? -1]?.value ?? ''}
+        dynamic={props[editingValueIndex ?? -1]?.dynamic}
+        computed={props[editingValueIndex ?? -1]?.computed}
+        disabled={disabled}
+        allowDynamic={variant === 'query'}
+        onCancel={() => setEditingValueIndex(null)}
+        onConfirm={(next) => {
+          const target = editingValueIndex;
+          if (target == null) {
+            return;
+          }
+          patch(target, applyValueResult(props[target], next));
+          setEditingValueIndex(null);
+        }}
+      />
     </section>
   );
 }

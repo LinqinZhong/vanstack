@@ -242,6 +242,20 @@ async function dispatch(method: string, id: string, rest: string[], req: http.In
       return undefined;
     }
   }
+  if (rest[0] === 'animations' && rest.length === 1) {
+    if (method === 'GET') return lowcode.listAnimations(id);
+    if (method === 'POST') {
+      const payload = await body();
+      return lowcode.createAnimation(id, String(payload.name ?? ''));
+    }
+  }
+  if (rest[0] === 'animations' && rest.length === 2) {
+    if (method === 'PATCH') return lowcode.updateAnimation(id, rest[1], await body());
+    if (method === 'DELETE') {
+      await lowcode.deleteAnimation(id, rest[1]);
+      return undefined;
+    }
+  }
   if (rest[0] === 'methods' && rest.length === 2) {
     if (method === 'GET') return lowcode.getMethod(id, rest[1]);
     if (method === 'PUT') {

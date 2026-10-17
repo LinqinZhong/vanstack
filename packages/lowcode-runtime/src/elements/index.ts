@@ -6,6 +6,7 @@ import { renderComponent } from './component';
 import { renderCheckbox } from './checkbox';
 import { renderSwitch } from './switch';
 import { renderFlex } from './flex';
+import { renderGrid } from './grid';
 import { renderScroll } from './scroll';
 import { renderIcon } from './icon';
 import { renderInput } from './input';
@@ -40,6 +41,7 @@ export function widgetElement(widget: PageWidget, ctx: WidgetRenderContext): Rea
     aliases: ctx.bindingScope.aliases,
     assign: ctx.assignScope,
     emit: ctx.emit,
+    self: ctx.self,
   });
   if (!bindings) {
     return node;
@@ -73,6 +75,8 @@ function renderWidget(widget: PageWidget, ctx: WidgetRenderContext): ReactElemen
       return renderButton(widget, ctx);
     case 'flex':
       return renderFlex(widget, ctx);
+    case 'grid':
+      return renderGrid(widget, ctx);
     case 'scroll':
       return renderScroll(widget, ctx);
     case 'swiper':

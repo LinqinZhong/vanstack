@@ -6,7 +6,6 @@ import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PROP_TYPES, TypeKindFields } from './TypeKindFields';
-import { PropValueEditor } from './PropValueEditor';
 import {
   FLEX_ALIGN_CONTENTS,
   FLEX_ALIGN_ITEMS,
@@ -21,6 +20,9 @@ import {
   SWIPER_EASINGS,
   compactFlexContainer,
   compactFlexItem,
+  compactGrid,
+  gridTrackCounts,
+  GRID_TRACK_MODES,
   compactPageStyle,
   compactSize,
   compactSwiper,
@@ -33,6 +35,8 @@ import {
   DEFAULT_DRAWER_MASK,
   DEFAULT_DRAWER_PLACE,
   DRAWER_PLACES,
+  TEXT_ALIGNS,
+  WRITING_MODES,
   DEFAULT_SCROLL_HEIGHT,
   DEFAULT_SCROLL_WIDTH,
   DEFAULT_SWIPER_HEIGHT,
@@ -57,6 +61,9 @@ import {
   type FlexItemStyle,
   type FlexJustifyContent,
   type FlexWrap,
+  type GridStyle,
+  type GridTrackMode,
+  type GridTrackSize,
   type PageStyle,
   type PageVariable,
   type PageWidget,
@@ -78,6 +85,26 @@ type BoxQuad = {
   bottom?: number | string;
   left?: number | string;
 };
+
+/** 文本类与容器类控件：可编辑「对齐方式」（CSS text-align 可继承，容器设置后影响内部文本）。 */
+const TEXT_ALIGN_TYPES = new Set<PageWidget['type']>([
+  'text',
+  'button',
+  'input',
+  'checkbox',
+  'flex',
+  'grid',
+  'scroll',
+  'swiper',
+  'swiper-item',
+  'windows',
+  'window',
+  'drawer',
+  'table',
+  'tr',
+  'slot',
+  'component',
+]);
 
 type InspectorProp = {
   key: string;
@@ -479,6 +506,37 @@ function parseNumber(raw: string, min?: number): number | string | undefined | f
   return value;
 }
 
+/** 独立配置的轨道列表输入：JSON 数组，元素为数字 / `auto` / 绑定字符串。 */
+function parseTrackList(raw: string): GridTrackSize[] | undefined | false {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return false;
+    }
+    const tracks: GridTrackSize[] = [];
+    for (const item of parsed) {
+      if (typeof item === 'number' && Number.isFinite(item) && item >= 0) {
+        tracks.push(item);
+      } else if (typeof item === 'string' && item.trim()) {
+        tracks.push(item.trim());
+      } else {
+        return false;
+      }
+    }
+    return tracks;
+  } catch {
+    return false;
+  }
+}
+
+function formatTrackList(tracks: GridTrackSize[] | undefined): string {
+  return tracks && tracks.length > 0 ? JSON.stringify(tracks) : '';
+}
+
 function formatTextDecoration(style?: WidgetStyle) {
   if (typeof style?.underline === 'string' || typeof style?.lineThrough === 'string') {
     if (style.underline === style.lineThrough && typeof style.underline === 'string') {
@@ -657,6 +715,7 @@ function PropertyGrid({
   projectId,
   variables,
   componentProps,
+  slotProps,
   dev,
   slotParamsTab,
 }: {
@@ -668,6 +727,8 @@ function PropertyGrid({
   projectId?: string;
   variables?: PageVariable[];
   componentProps?: ComponentProp[];
+  /** 当前控件所在插槽声明的出参（`$slot.名称`）。 */
+  slotProps?: ComponentProp[];
   dev?: { checked: boolean; onChange: (checked: boolean) => void };
   slotParamsTab?: { widget: Extract<PageWidget, { type: 'slot' }>; slots: ComponentSlot[]; onChange: (next: ComponentSlot[], coalesceKey?: string) => void };
 }) {
@@ -812,6 +873,7 @@ function PropertyGrid({
             <CopyDataPicker
               variables={variables}
               componentProps={componentProps}
+              slotProps={slotProps}
               disabled={disabled || item.disabled}
               onPick={(expression) => item.onChange(expression)}
             />
@@ -956,6 +1018,7 @@ function PropertyGrid({
             <CopyDataPicker
               variables={variables}
               componentProps={componentProps}
+              slotProps={slotProps}
               disabled={disabled || editing?.disabled}
               onPick={(expression) => setEditorDraft(expression)}
             />
@@ -1037,6 +1100,7 @@ function acceptComponentArg(type: ComponentPropType, raw: string): string | null
 export function WidgetPropertyInspector({
   widget,
   parentType,
+  parentGrid,
   disabled,
   onPatch,
   onInvalidChange,
@@ -1048,9 +1112,12 @@ export function WidgetPropertyInspector({
   componentSlots,
   onComponentSlotsChange,
   bindableProps,
+  slotProps,
 }: {
   widget: PageWidget;
   parentType?: PageWidget['type'];
+  /** 父级是宫格布局时，它的行列配置（用于钳制跨行/跨列上限）。 */
+  parentGrid?: GridStyle;
   disabled?: boolean;
   onPatch: (patch: WidgetPatch, coalesceKey: string) => void;
   onInvalidChange?: (invalid: boolean) => void;
@@ -1065,14 +1132,17 @@ export function WidgetPropertyInspector({
   onComponentSlotsChange?: (slots: ComponentSlot[], coalesceKey?: string) => void;
   /** 正在编辑组件时，控件可以双向绑定到这些入参。 */
   bindableProps?: ComponentProp[];
+  /** 当前控件所在插槽声明的出参（`$slot.名称`）。 */
+  slotProps?: ComponentProp[];
 }) {
   const { t } = useTranslation();
   const style = widget.style ?? {};
   const frameLocked = widget.type === 'windows' || widget.type === 'window';
   const flex = widget.type === 'flex' ? (widget.flex ?? {}) : undefined;
+  const grid = widget.type === 'grid' ? (widget.grid ?? {}) : undefined;
   const swiper = widget.type === 'swiper' ? (widget.swiper ?? {}) : undefined;
   const item =
-    parentType === 'flex' &&
+    (parentType === 'flex' || parentType === 'grid') &&
     widget.type !== 'swiper-item' &&
     widget.type !== 'window' &&
     widget.type !== 'th' &&
@@ -1104,6 +1174,10 @@ export function WidgetPropertyInspector({
 
   function patchSwiper(next: Partial<SwiperStyle>) {
     onPatch({ swiper: compactSwiper({ ...(swiper ?? {}), ...next }) }, `edit:${widget.id}:swiper`);
+  }
+
+  function patchGrid(next: Partial<GridStyle>) {
+    onPatch({ grid: compactGrid({ ...(grid ?? {}), ...next }) }, `edit:${widget.id}:grid`);
   }
 
   function lengthProp(
@@ -1888,6 +1962,43 @@ export function WidgetPropertyInspector({
     },
   );
 
+  if (TEXT_ALIGN_TYPES.has(widget.type)) {
+    items.push({
+      key: 'textAlign',
+      label: t('lowcode.prop.textAlign'),
+      value: style.textAlign ?? '',
+      picker: 'model',
+      placeholder: t('lowcode.styleFontDefault'),
+      options: TEXT_ALIGNS.map((value) => ({ value, label: t(`lowcode.textAlign.${value}`) })),
+      onChange: (raw) => {
+        const trimmed = raw.trim();
+        if (!trimmed) {
+          patchStyle({ textAlign: undefined });
+          return true;
+        }
+        return accepted(parseEnum(trimmed, TEXT_ALIGNS), (textAlign) => patchStyle({ textAlign }));
+      },
+    });
+  }
+  if (widget.type === 'text') {
+    items.push({
+      key: 'writingMode',
+      label: t('lowcode.prop.writingMode'),
+      value: style.writingMode ?? '',
+      picker: 'model',
+      placeholder: t('lowcode.styleFontDefault'),
+      options: WRITING_MODES.map((value) => ({ value, label: t(`lowcode.writingMode.${value}`) })),
+      onChange: (raw) => {
+        const trimmed = raw.trim();
+        if (!trimmed) {
+          patchStyle({ writingMode: undefined });
+          return true;
+        }
+        return accepted(parseEnum(trimmed, WRITING_MODES), (writingMode) => patchStyle({ writingMode }));
+      },
+    });
+  }
+
   if (widget.type !== 'swiper-item' && !frameLocked) {
     items.push(
     lengthBoxProp(
@@ -2085,7 +2196,51 @@ export function WidgetPropertyInspector({
     );
   }
 
-  if (item) {
+  if (grid) {
+    items.push(
+      {
+        key: 'rowMode',
+        value: grid.rowMode ?? '',
+        onChange: (raw) => accepted(parseEnum<GridTrackMode>(raw, GRID_TRACK_MODES), (rowMode) => patchGrid({ rowMode })),
+      },
+      {
+        key: 'rowCount',
+        value: grid.rowCount == null ? '' : String(grid.rowCount),
+        onChange: (raw) =>
+          accepted(parseNumber(raw, 1), (parsed) =>
+            patchGrid({ rowCount: typeof parsed === 'number' ? Math.trunc(parsed) : parsed }),
+          ),
+      },
+      pxProp('rowGap', grid.rowGap, (rowGap) => patchGrid({ rowGap })),
+      {
+        key: 'rows',
+        value: formatTrackList(grid.rows),
+        onChange: (raw) => accepted(parseTrackList(raw), (rows) => patchGrid({ rows })),
+      },
+      {
+        key: 'columnMode',
+        value: grid.columnMode ?? '',
+        onChange: (raw) =>
+          accepted(parseEnum<GridTrackMode>(raw, GRID_TRACK_MODES), (columnMode) => patchGrid({ columnMode })),
+      },
+      {
+        key: 'columnCount',
+        value: grid.columnCount == null ? '' : String(grid.columnCount),
+        onChange: (raw) =>
+          accepted(parseNumber(raw, 1), (parsed) =>
+            patchGrid({ columnCount: typeof parsed === 'number' ? Math.trunc(parsed) : parsed }),
+          ),
+      },
+      pxProp('columnGap', grid.columnGap, (columnGap) => patchGrid({ columnGap })),
+      {
+        key: 'columns',
+        value: formatTrackList(grid.columns),
+        onChange: (raw) => accepted(parseTrackList(raw), (columns) => patchGrid({ columns })),
+      },
+    );
+  }
+
+  if (item && parentType === 'flex') {
     items.push(
       {
         key: 'order',
@@ -2112,6 +2267,26 @@ export function WidgetPropertyInspector({
         value: item.alignSelf ?? '',
         onChange: (raw) =>
           accepted(parseEnum<FlexAlignSelf>(raw, FLEX_ALIGN_SELFS), (alignSelf) => patchItem({ alignSelf })),
+      },
+    );
+  }
+
+  if (item && parentType === 'grid') {
+    const trackCounts = gridTrackCounts(parentGrid);
+    const clampSpan = (parsed: number | string | undefined, max: number) =>
+      typeof parsed === 'number' ? Math.min(Math.max(1, Math.trunc(parsed)), max) : parsed;
+    items.push(
+      {
+        key: 'gridRowSpan',
+        value: item.gridRowSpan == null ? '' : String(item.gridRowSpan),
+        onChange: (raw) =>
+          accepted(parseNumber(raw, 1), (parsed) => patchItem({ gridRowSpan: clampSpan(parsed, trackCounts.rows) })),
+      },
+      {
+        key: 'gridColumnSpan',
+        value: item.gridColumnSpan == null ? '' : String(item.gridColumnSpan),
+        onChange: (raw) =>
+          accepted(parseNumber(raw, 1), (parsed) => patchItem({ gridColumnSpan: clampSpan(parsed, trackCounts.columns) })),
       },
     );
   }
@@ -2256,6 +2431,7 @@ export function WidgetPropertyInspector({
       projectId={projectId}
       variables={variables}
       componentProps={bindableProps ?? componentProps}
+      slotProps={slotProps}
       dev={
         widget.type === 'component'
           ? {
@@ -2387,13 +2563,15 @@ function SlotParamsTab({
     {
       title: t('lowcode.dataValue'),
       dataIndex: 'value',
-      render: (value: string, record, index) => (
-        <PropValueEditor
-          type={record.type}
-          value={value}
+      // 出参初始值一律按 `$(表达式)` 存储：`$(`、`)` 固定不可编辑，只编辑括号内的表达式。
+      render: (value: string, _record, index) => (
+        <Input
+          size="small"
           disabled={disabled}
-          onChange={(next) => patchParam(index, { ...params[index], value: next })}
-          onEndCoalesce={() => undefined}
+          prefix="$("
+          suffix=")"
+          value={unwrapExprValue(value)}
+          onChange={(event) => patchParam(index, { ...params[index], value: `$(${event.target.value})` })}
         />
       ),
     },
@@ -2430,6 +2608,11 @@ function SlotParamsTab({
       />
     </div>
   );
+}
+
+/** 出参初始值以 `$(表达式)` 存储，展示时只露出括号内的表达式。 */
+function unwrapExprValue(raw: string): string {
+  return raw.startsWith('$(') && raw.endsWith(')') ? raw.slice(2, -1) : raw;
 }
 
 export function PagePropertyInspector({

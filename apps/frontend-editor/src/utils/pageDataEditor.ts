@@ -1,25 +1,35 @@
 import { startCompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
-import { javascript } from '@codemirror/lang-javascript';
+import { javascriptLanguage, typescriptLanguage } from '@codemirror/lang-javascript';
 import { linter, type Diagnostic } from '@codemirror/lint';
 import { EditorView } from '@codemirror/view';
 import { findDataRefRanges } from './pageData';
 
+/**
+ * 语言本身由 ScriptEditor 统一提供（TypeScript），
+ * 这里只补充 $data/$props/$query/$slot/$local/$this 的补全与未知引用检查。
+ */
 export function createPageDataEditorExtensions(
   names: string[],
   unknownMessage: string,
   propNames: string[] = [],
   queryNames: string[] = [],
+  slotNames: string[] = [],
+  localNames: string[] = [],
+  thisNames: string[] = [],
 ) {
   const known = new Set(names);
-  const language = javascript();
+  const completions = {
+    autocomplete: (context: CompletionContext) =>
+      completeDataRef(context, names) ??
+      completeScopeRef(context, '$props', propNames) ??
+      completeScopeRef(context, '$query', queryNames) ??
+      completeScopeRef(context, '$slot', slotNames) ??
+      completeScopeRef(context, '$local', localNames) ??
+      completeScopeRef(context, '$this', thisNames),
+  };
   return [
-    language,
-    language.language.data.of({
-      autocomplete: (context: CompletionContext) =>
-        completeDataRef(context, names) ??
-        completeScopeRef(context, '$props', propNames) ??
-        completeScopeRef(context, '$query', queryNames),
-    }),
+    javascriptLanguage.data.of(completions),
+    typescriptLanguage.data.of(completions),
     triggerDataRefCompletion(),
     linter(createDataRefLinter(known, unknownMessage), { delay: 150 }),
   ];
@@ -31,8 +41,15 @@ function triggerDataRefCompletion() {
       return;
     }
     const pos = update.state.selection.main.head;
-    const recent = update.state.sliceDoc(Math.max(0, pos - 7), pos);
-    if (recent === '$data.' || recent.endsWith('$props.') || recent.endsWith('$query.')) {
+    const recent = update.state.sliceDoc(Math.max(0, pos - 8), pos);
+    if (
+      recent.endsWith('$data.') ||
+      recent.endsWith('$props.') ||
+      recent.endsWith('$query.') ||
+      recent.endsWith('$slot.') ||
+      recent.endsWith('$local.') ||
+      recent.endsWith('$this.')
+    ) {
       startCompletion(update.view);
     }
   });
@@ -58,13 +75,21 @@ function completeDataRef(context: CompletionContext, names: string[]): Completio
   };
 }
 
+const SCOPE_REF: Record<'$props' | '$query' | '$slot' | '$local' | '$this', RegExp> = {
+  $props: /\$props\.[^\s,;:?)}\]]*/u,
+  $query: /\$query\.[^\s,;:?)}\]]*/u,
+  $slot: /\$slot\.[^\s,;:?)}\]]*/u,
+  $local: /\$local\.[^\s,;:?)}\]]*/u,
+  $this: /\$this\.[^\s,;:?)}\]]*/u,
+};
+
 function completeScopeRef(
   context: CompletionContext,
-  scope: '$props' | '$query',
+  scope: '$props' | '$query' | '$slot' | '$local' | '$this',
   names: string[],
 ): CompletionResult | null {
   const prefix = `${scope}.`;
-  const match = context.matchBefore(scope === '$props' ? /\$props\.[^\s,;:?)}\]]*/u : /\$query\.[^\s,;:?)}\]]*/u);
+  const match = context.matchBefore(SCOPE_REF[scope]);
   if (!match || match.text.length < prefix.length) {
     return null;
   }

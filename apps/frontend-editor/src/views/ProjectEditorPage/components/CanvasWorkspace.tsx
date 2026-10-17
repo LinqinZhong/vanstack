@@ -1,22 +1,25 @@
-import { DeleteOutlined, EditOutlined, ExpandOutlined, GlobalOutlined, PlusOutlined, SettingOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons';
-import { Button, Card, ConfigProvider, Empty, Input, Modal, Segmented, Select, Spin, Switch, Tooltip, Typography, message, theme } from 'antd';
+import { CaretDownOutlined, CaretRightOutlined, ColumnWidthOutlined, ControlOutlined, DeleteOutlined, DownOutlined, EditOutlined, ExpandOutlined, GlobalOutlined, PlusOutlined, RightOutlined, SettingOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons';
+import { Button, Card, ConfigProvider, Empty, Input, InputNumber, Modal, Popover, Segmented, Select, Spin, Switch, Tooltip, Typography, message, theme } from 'antd';
 import { ScriptEditor } from '../../../components/ScriptEditor';
-import { javascript } from '@codemirror/lang-javascript';
 import { useEffect, useState, type Dispatch, type MouseEvent, type PointerEvent, type RefObject, type SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
-import { applyTestValues, buildPropsRecord, evaluateDataExpression, resolvePageData, DEFAULT_DRAWER_PLACE, type ComponentEmit, type ComponentProp, type PageI18n, type PageMethod, type PageTestData, type PageVariable, type PageWidget, type WidgetEvents } from '@vanstack/xml';
-import { PAGE_EVENT_SPECS } from '@vanstack/xml';
+import { applyTestValues, buildPropsRecord, DEFAULT_COMPONENT_DESIGN_SIZE, evaluateDataExpression, resolvePageData, DEFAULT_DRAWER_PLACE, type ComponentEmit, type ComponentProp, type PageDesignSize, type PageI18n, type PageMethod, type PageTestData, type PageVariable, type PageWidget, type WidgetEvents, type WidgetStateDelta } from '@vanstack/xml';
+import { PAGE_EVENT_SPECS, PAGE_ROOT_STATE_OWNER_ID } from '@vanstack/xml';
+import type { AnimationDefinitionDto, UpdateAnimationInput } from '@vanstack/shared';
 import { ComponentEmitsPanel, ComponentPropsPanel } from '../../../components/ComponentContractPanel';
 import { formatTypeLabel, useNamespaceCatalog } from '../../../components/TypeKindFields';
 import { PageDataPanel } from '../../../components/PageDataPanel';
+import { NamespaceTypesSection } from '../../../components/NamespaceTypesPane';
 import { PageMethodPanel } from '../../../components/PageMethodPanel';
+import { AnimationPanel } from '../../../components/AnimationPanel';
 import { WidgetEventPanel } from '../../../components/WidgetEventPanel';
 import {
   WidgetStyleBubble,
   type BoxGroup,
   type TableBubbleModel,
 } from '../../../components/WidgetStyleBubble';
-import { WidgetStateList } from '../../../components/WidgetStateList';
+import { WidgetStateList, stateRowKey } from '../../../components/WidgetStateList';
+import { WidgetStateFnModal } from '../../../components/WidgetStateFnModal';
 import { ComponentSlotList, type ComponentSlotListItem } from '../../../components/ComponentSlotList';
 import { setSpacingDragCursor } from '../../../utils/spacingGuides';
 import { patchTableCellStyles, type TableRange } from '../../../utils/tableEdit';
@@ -32,8 +35,6 @@ import {
 import { formatDataLiteral, tryParseDataLiteral } from '../../../utils/dataLiteral';
 import { widgetCanvasLabel, ZOOM_STEP, type CanvasMode, type CenterTab, type ViewTransform } from '../helpers';
 import { drawerStyleForPlace } from '../../../widgets/drawer';
-
-const previewEditorExtensions = [javascript()];
 
 function formatActual(type: string, value: unknown) {
   if (type === 'bool') {
@@ -187,6 +188,7 @@ function PreviewScopeSection({
   const { t } = useTranslation();
   const [editor, setEditor] = useState<ScopeEditor | null>(null);
   const [openArrays, setOpenArrays] = useState<Record<string, boolean>>({});
+  const [codeValid, setCodeValid] = useState(true);
 
   function rowItems(row: ScopeRow): unknown[] {
     const parsed = literalValue(row.source);
@@ -408,7 +410,7 @@ function PreviewScopeSection({
         open={Boolean(editor)}
         onCancel={() => setEditor(null)}
         onOk={confirmEditor}
-        okButtonProps={{ disabled: !editor }}
+        okButtonProps={{ disabled: !editor || !codeValid }}
         destroyOnHidden
         width={640}
       >
@@ -416,7 +418,7 @@ function PreviewScopeSection({
           <ScriptEditor
             value={editor.draft}
             height="240px"
-            extensions={previewEditorExtensions}
+            onValidateChange={setCodeValid}
             onChange={(draft) => setEditor((current) => (current ? { ...current, draft } : current))}
           />
         ) : null}
@@ -461,10 +463,17 @@ type CanvasWorkspaceProps = {
   scrollEditId: string | null;
   swiperEditId: string | null;
   componentEditId: string | null;
+  /** 组件定义编辑器：正在调试的插槽 id（画布只渲染该插槽内部的调试节点）。 */
+  slotDebugId: string | null;
+  /** 组件定义编辑器：插槽调试面板里的插槽清单。 */
+  slotDebugSlots: Array<{ id: string; name: string }>;
+  onToggleSlotDebug: (slotId?: string | null) => void;
   componentEditSelectionKind: 'slot' | 'content' | null;
   componentEditSlotId: string | null;
   componentEditSlots: ComponentSlotListItem[];
   onSelectSlot: (key: string) => void;
+  /** 组件定义编辑器预览态点选的插槽：展示「声明 + 当前实例解析值」。 */
+  previewSlot?: { name: string; params: ComponentProp[]; values: Record<string, unknown> } | null;
   sendPreview: () => void;
   showStyleChrome: boolean;
   selectedWidget: PageWidget | null;
@@ -479,10 +488,15 @@ type CanvasWorkspaceProps = {
   previewQueryEdits?: Readonly<Record<string, string>>;
   commitPreviewTest: (section: 'props' | 'data' | 'query', name: string, type: string, text: string) => boolean;
   componentMode?: boolean;
+  /** 组件定义编辑器的「定义尺寸」：定义态画布上这块区域的大小。 */
+  designSize?: PageDesignSize;
+  onComponentDesignSizeChange?: (size: PageDesignSize | undefined) => void;
   pageQuery: ComponentProp[];
   addPageQuery: () => void;
   commitPageQuery: (next: ComponentProp[], coalesceKey?: string) => void;
   componentProps: ComponentProp[];
+  /** 当前选中控件所在插槽声明的出参（`$slot.名称`）。 */
+  slotProps?: ComponentProp[];
   componentEmits: ComponentEmit[];
   componentEmitsById: Record<string, ComponentEmit[]>;
   commitComponentProps: (next: ComponentProp[], coalesceKey?: string) => void;
@@ -491,6 +505,10 @@ type CanvasWorkspaceProps = {
   commitPageEvents: (next: WidgetEvents | undefined) => void;
   pageMethods: PageMethod[];
   commitPageMethods: (next: PageMethod[]) => void;
+  animations: AnimationDefinitionDto[];
+  onCreateAnimation: (name: string) => Promise<AnimationDefinitionDto | null>;
+  onUpdateAnimation: (id: string, input: UpdateAnimationInput) => Promise<AnimationDefinitionDto | null>;
+  onDeleteAnimation: (id: string) => Promise<void>;
   pageScopeId: string;
   readOnly: boolean;
   openBoxGroup: BoxGroup | null;
@@ -509,8 +527,24 @@ type CanvasWorkspaceProps = {
   setInspectorOpen: Dispatch<SetStateAction<boolean>>;
   widgets: PageWidget[];
   visibleStates: VisibleWidgetState[];
+  /** 状态栏操作宿主：选中控件、组件根控件或合成的页面根（页面全局状态）。 */
+  stateHostWidget: PageWidget | null;
+  /** 状态栏「全局状态」区块：文档级全局状态宿主（组件编辑态为 null，改由右上角下拉框承载）。 */
+  globalStateBarWidget: PageWidget | null;
+  globalVisibleStates: VisibleWidgetState[];
+  commitPageStates: (next: WidgetStateDelta[] | undefined, coalesceKey?: string) => void;
+  /** 顶部「组件全局状态」下拉框（仅组件定义态/组件编辑态显示）。 */
+  showComponentGlobalState: boolean;
+  componentGlobalStates: VisibleWidgetState[];
+  componentGlobalStateId: string | null;
+  onComponentGlobalStateChange: (id: string | null) => void;
+  /** 工具栏「全局状态控制」编辑的宿主：文档级全局状态（与最外层节点自身状态独立）。 */
+  componentGlobalWidget: PageWidget | null;
+  onComponentGlobalStateFnChange: (stateFn: string | undefined, hoverStateId?: string) => void;
   viewingOwnerId: string | null;
   viewingState: string | null;
+  /** 每个宿主当前正在查看的状态（ownerId → stateId）：供状态栏两个区块各自独立高亮选中项。 */
+  viewingByOwner: ViewingByOwner;
   setViewingOwnerId: Dispatch<SetStateAction<string | null>>;
   setViewingState: Dispatch<SetStateAction<string | null>>;
   setViewingByOwner: Dispatch<SetStateAction<ViewingByOwner>>;
@@ -525,6 +559,94 @@ type CanvasWorkspaceProps = {
   commitPageData: (next: PageVariable[], coalesceKey?: string) => void;
   endCoalesce: () => void;
 };
+
+/** 组件定义编辑器的「定义尺寸」工具：只调整定义态画布上这块区域的大小，与组件被使用时的尺寸无关。 */
+function ComponentDesignSizeTool({
+  size,
+  disabled,
+  onChange,
+}: {
+  size: PageDesignSize | undefined;
+  disabled: boolean;
+  onChange: (next: PageDesignSize | undefined) => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [width, setWidth] = useState<number | null>(size?.width ?? DEFAULT_COMPONENT_DESIGN_SIZE.width);
+  const [height, setHeight] = useState<number | null>(size?.height ?? DEFAULT_COMPONENT_DESIGN_SIZE.height);
+  useEffect(() => {
+    if (open) {
+      return;
+    }
+    setWidth(size?.width ?? DEFAULT_COMPONENT_DESIGN_SIZE.width);
+    setHeight(size?.height ?? DEFAULT_COMPONENT_DESIGN_SIZE.height);
+  }, [size, open]);
+  const commit = (nextWidth: number | null, nextHeight: number | null) => {
+    const w = typeof nextWidth === 'number' && nextWidth > 0 ? nextWidth : undefined;
+    const h = typeof nextHeight === 'number' && nextHeight > 0 ? nextHeight : undefined;
+    onChange(
+      w == null && h == null ? undefined : { ...(w != null ? { width: w } : {}), ...(h != null ? { height: h } : {}) },
+    );
+  };
+  return (
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+      trigger="click"
+      placement="bottomRight"
+      destroyOnHidden
+      content={
+        <div className="design-size-panel" onPointerDown={(event) => event.stopPropagation()}>
+          <div className="design-size-panel-row">
+            <span className="design-size-panel-label">{t('lowcode.designSizeWidth')}</span>
+            <InputNumber
+              size="small"
+              min={1}
+              max={4096}
+              suffix="px"
+              value={width}
+              disabled={disabled}
+              onChange={(value) => setWidth(typeof value === 'number' ? value : null)}
+              onBlur={() => commit(width, height)}
+              onPressEnter={() => commit(width, height)}
+            />
+          </div>
+          <div className="design-size-panel-row">
+            <span className="design-size-panel-label">{t('lowcode.designSizeHeight')}</span>
+            <InputNumber
+              size="small"
+              min={1}
+              max={4096}
+              suffix="px"
+              value={height}
+              disabled={disabled}
+              onChange={(value) => setHeight(typeof value === 'number' ? value : null)}
+              onBlur={() => commit(width, height)}
+              onPressEnter={() => commit(width, height)}
+            />
+          </div>
+          <Button
+            size="small"
+            block
+            disabled={disabled}
+            onClick={() => {
+              // 重置 = 清掉文档里的自定义尺寸，显示回默认值。
+              setWidth(DEFAULT_COMPONENT_DESIGN_SIZE.width);
+              setHeight(DEFAULT_COMPONENT_DESIGN_SIZE.height);
+              commit(null, null);
+            }}
+          >
+            {t('lowcode.designSizeReset')}
+          </Button>
+        </div>
+      }
+    >
+      <Tooltip title={t('lowcode.componentDesignSize')}>
+        <Button size="small" type="text" icon={<ColumnWidthOutlined />} disabled={disabled} />
+      </Tooltip>
+    </Popover>
+  );
+}
 
 export function CanvasWorkspace({
   centerTab,
@@ -553,10 +675,14 @@ export function CanvasWorkspace({
   scrollEditId,
   swiperEditId,
   componentEditId,
+  slotDebugId,
+  slotDebugSlots,
+  onToggleSlotDebug,
   componentEditSelectionKind,
   componentEditSlotId,
   componentEditSlots,
   onSelectSlot,
+  previewSlot,
   sendPreview,
   showStyleChrome,
   selectedWidget,
@@ -571,10 +697,13 @@ export function CanvasWorkspace({
   previewQueryEdits,
   commitPreviewTest,
   componentMode,
+  designSize,
+  onComponentDesignSizeChange,
   pageQuery,
   addPageQuery,
   commitPageQuery,
   componentProps,
+  slotProps,
   componentEmits,
   componentEmitsById,
   commitComponentProps,
@@ -583,6 +712,10 @@ export function CanvasWorkspace({
   commitPageEvents,
   pageMethods,
   commitPageMethods,
+  animations,
+  onCreateAnimation,
+  onUpdateAnimation,
+  onDeleteAnimation,
   pageScopeId,
   readOnly,
   openBoxGroup,
@@ -601,8 +734,19 @@ export function CanvasWorkspace({
   setInspectorOpen,
   widgets,
   visibleStates,
+  stateHostWidget,
+  globalStateBarWidget,
+  globalVisibleStates,
+  commitPageStates,
+  showComponentGlobalState,
+  componentGlobalStates,
+  componentGlobalStateId,
+  onComponentGlobalStateChange,
+  componentGlobalWidget,
+  onComponentGlobalStateFnChange,
   viewingOwnerId,
   viewingState,
+  viewingByOwner,
   setViewingOwnerId,
   setViewingState,
   setViewingByOwner,
@@ -619,8 +763,285 @@ export function CanvasWorkspace({
 }: CanvasWorkspaceProps) {
   const { t } = useTranslation();
   const namespaces = useNamespaceCatalog(projectId);
+  const [dataSectionOpen, setDataSectionOpen] = useState({ contract: true, variables: true, types: false });
+  const [componentStateFnOpen, setComponentStateFnOpen] = useState(false);
+  const [nodeStateFnOpen, setNodeStateFnOpen] = useState(false);
+  /** 画布「数据」浮动面板是否展开；折叠后只保留固定标题行。 */
+  const [scopeCardOpen, setScopeCardOpen] = useState(true);
+  const toggleDataSection = (key: keyof typeof dataSectionOpen) =>
+    setDataSectionOpen((prev) => ({ ...prev, [key]: !prev[key] }));
   const typeLabel = (type: string, of?: string) => formatTypeLabel(type, of, (key) => t(`lowcode.propType.${key}`, { defaultValue: key }));
   const selectedCanvasLabel = selectedWidget ? widgetCanvasLabel(selectedWidget, t) : null;
+  const stateUsedIds = collectTreeStateIds(
+    stateHostWidget && !widgets.some((widget) => widget.id === stateHostWidget.id)
+      ? [...widgets, stateHostWidget, ...(globalStateBarWidget ? [globalStateBarWidget] : [])]
+      : [...widgets, ...(globalStateBarWidget ? [globalStateBarWidget] : [])],
+  );
+  // 「全局状态」区块的 id 去重集：除页面控件外还要包含文档级全局状态，避免新建全局状态时 id 冲突。
+  const globalStateUsedIds = globalStateBarWidget
+    ? collectTreeStateIds([...widgets, globalStateBarWidget])
+    : collectTreeStateIds(widgets);
+  // 「状态」区块显隐：组件编辑态仅选中插槽内容时显示；其余模式选中控件时显示。
+  // 「全局状态」区块由 globalStateBarWidget 驱动，始终显示（组件编辑态改由右上角下拉框承载）。
+  const nodeStateBarVisible = componentEditId
+    ? componentEditSelectionKind === 'content'
+    : Boolean(selectedWidget);
+  // 插槽调试入口已改为画布左上角的插槽面板，这里只保留面板自身的显隐条件。
+  const showSlotDebugPanel = componentMode && !readOnly && !previewing && slotDebugSlots.length > 0;
+
+  // 状态栏两个区块各自始终只高亮一行（且必须有且仅有一行高亮）：
+  // 优先按当前查看态精确定位，找不到时回退到该区块的根行（默认态）。
+  function flattenStateRows(rows: VisibleWidgetState[]): VisibleWidgetState[] {
+    return rows.flatMap((row) => [row, ...flattenStateRows(row.children ?? [])]);
+  }
+  function blockRootKey(rows: VisibleWidgetState[]): string | null {
+    const flat = flattenStateRows(rows);
+    const root = flat.find((row) => row.owned && row.id == null && !row.scopeId) ?? flat[0];
+    return root ? stateRowKey(root) : null;
+  }
+  // 「控件状态」区块：查看态宿主可能是该控件自身、祖先（继承）或作用域宿主。
+  const nodeActiveKey = (() => {
+    const flat = flattenStateRows(visibleStates);
+    const exact = flat.find(
+      (row) => !row.scopeId && row.ownerId === viewingOwnerId && (row.id ?? null) === (viewingState ?? null),
+    );
+    const scoped = flat.find(
+      (row) => row.id == null && row.scopeOwnerId === viewingOwnerId && row.scopeId === viewingState,
+    );
+    const fallback = flat.find((row) => row.ownerId === stateHostWidget?.id);
+    const matched = exact ?? scoped ?? fallback;
+    return matched ? stateRowKey(matched) : blockRootKey(visibleStates);
+  })();
+  // 「全局状态」区块：宿主固定为文档级 __page__，查看态直接读 viewingByOwner。
+  const globalActiveKey = (() => {
+    if (globalVisibleStates.length === 0) {
+      return null;
+    }
+    const current = viewingByOwner[PAGE_ROOT_STATE_OWNER_ID] ?? null;
+    const flat = flattenStateRows(globalVisibleStates);
+    const matched = flat.find(
+      (row) => !row.scopeId && row.ownerId === PAGE_ROOT_STATE_OWNER_ID && (row.id ?? null) === current,
+    );
+    return matched ? stateRowKey(matched) : blockRootKey(globalVisibleStates);
+  })();
+
+  function handleStateSelect(row: VisibleWidgetState) {
+    const isContent = componentEditSelectionKind === 'content' && componentEditId && componentEditSlotId;
+    const contentOwnerKey = isContent
+      ? `${componentEditId}__slot-${componentEditSlotId}__${selectedWidget?.id ?? ''}`
+      : selectedWidget?.id ?? null;
+    // 点到继承来的状态：记下拥有者正在看它，当前控件回到基础外观。
+    if (!row.owned && row.id && !row.scopeId) {
+      const inheritedId = row.id;
+      setViewingOwnerId(row.ownerId);
+      setViewingState(inheritedId);
+      setViewingByOwner((prev) => {
+        const next: ViewingByOwner = { ...prev, [row.ownerId]: inheritedId };
+        if (contentOwnerKey) {
+          next[contentOwnerKey] = null;
+        }
+        return next;
+      });
+      return;
+    }
+    // 带作用域的状态要同时记住外层 scope 和这一层正在看的 id。
+    const scopeOwnerId = row.scopeOwnerId;
+    const scopeId = row.scopeId;
+    if (scopeId && scopeOwnerId) {
+      setViewingOwnerId(row.id ? row.ownerId : scopeOwnerId);
+      setViewingState(row.id ?? scopeId);
+      setViewingByOwner((prev) => ({
+        ...prev,
+        [scopeOwnerId]: scopeId,
+        [row.ownerId]: row.id ?? null,
+      }));
+      return;
+    }
+    setViewingOwnerId(row.ownerId);
+    setViewingState(row.id);
+    setViewingByOwner((prev) => {
+      const next: ViewingByOwner = { ...prev, [row.ownerId]: row.id };
+      // 回到基础外观时清掉同一区块内其它拥有者正在看的状态，避免下层仍叠着旧状态。
+      // 「全局状态」与「节点状态」是两个独立区块，互不清理：点全局默认不影响节点选中，反之亦然。
+      if (row.id == null) {
+        const isGlobalRow = row.ownerId === PAGE_ROOT_STATE_OWNER_ID;
+        for (const key of Object.keys(next)) {
+          if (key === row.ownerId) {
+            continue;
+          }
+          if (isGlobalRow || key === PAGE_ROOT_STATE_OWNER_ID) {
+            continue;
+          }
+          next[key] = null;
+        }
+      }
+      return next;
+    });
+  }
+
+  // 状态栏增删改按宿主参数化：同一套逻辑服务「全局状态」区块（宿主为文档级 __page__）与「状态」区块（宿主为选中控件）。
+  function stateListHandlers(host: PageWidget | null) {
+    return {
+      onCreate: (id: string, name: string, from: VisibleWidgetState, transition?: number) => {
+        if (componentEditSelectionKind === 'content' && componentEditId && componentEditSlotId && selectedWidget) {
+          const componentWidget = findWidget(widgets, componentEditId);
+          if (componentWidget?.type === 'component') {
+            const scopeId = from.scopeId ?? (!from.owned ? from.id : null);
+            const scopeOwnerId = from.scopeOwnerId ?? (!from.owned ? from.ownerId : undefined);
+            const contentWidgets = componentWidget.slotContent?.[componentEditSlotId] ?? [];
+            const created = createWidgetState(
+              contentWidgets,
+              selectedWidget.id,
+              id,
+              name,
+              from.id,
+              from.owned && !from.scopeId,
+              transition,
+              scopeId,
+            );
+            const nextComponent = {
+              ...componentWidget,
+              slotContent: { ...componentWidget.slotContent, [componentEditSlotId]: created },
+            };
+            commitWidgets(updateWidgetById(widgets, componentWidget.id, () => nextComponent), selectedWidgetId);
+            const prefixedOwnerId = `${componentEditId}__slot-${componentEditSlotId}__${selectedWidget.id}`;
+            setViewingOwnerId(prefixedOwnerId);
+            setViewingState(id);
+            setViewingByOwner((prev) => {
+              const next: ViewingByOwner = { ...prev, [prefixedOwnerId]: id };
+              if (scopeId && scopeOwnerId) {
+                next[scopeOwnerId] = scopeId;
+              }
+              return next;
+            });
+            return;
+          }
+        }
+        if (!host) {
+          return;
+        }
+        const scopeId = from.scopeId ?? (!from.owned ? from.id : null);
+        const scopeOwnerId = from.scopeOwnerId ?? (!from.owned ? from.ownerId : undefined);
+        if (host.id === PAGE_ROOT_STATE_OWNER_ID) {
+          const created = createWidgetState([host], host.id, id, name, from.id, from.owned && !from.scopeId, transition, scopeId);
+          commitPageStates(created[0].states);
+          setViewingOwnerId(host.id);
+          setViewingState(id);
+          setViewingByOwner((prev) => {
+            const next: ViewingByOwner = { ...prev, [host.id]: id };
+            if (scopeId && scopeOwnerId) {
+              next[scopeOwnerId] = scopeId;
+            }
+            return next;
+          });
+          return;
+        }
+        const created = createWidgetState(widgets, host.id, id, name, from.id, from.owned && !from.scopeId, transition, scopeId);
+        commitWidgets(created, selectedWidgetId);
+        setViewingOwnerId(host.id);
+        setViewingState(id);
+        setViewingByOwner((prev) => {
+          const next: ViewingByOwner = { ...prev, [host.id]: id };
+          if (scopeId && scopeOwnerId) {
+            next[scopeOwnerId] = scopeId;
+          }
+          return next;
+        });
+      },
+      onEdit: (from: VisibleWidgetState, name: string | null, transition?: number) => {
+        if (componentEditSelectionKind === 'content' && componentEditId && componentEditSlotId && selectedWidget) {
+          const componentWidget = findWidget(widgets, componentEditId);
+          if (componentWidget?.type === 'component') {
+            const contentWidgets = componentWidget.slotContent?.[componentEditSlotId] ?? [];
+            let next: PageWidget[];
+            if (from.id == null) {
+              next = updateHostTransition(contentWidgets, selectedWidget.id, transition);
+            } else if (!name) {
+              return;
+            } else {
+              next = updateWidgetState(contentWidgets, selectedWidget.id, from.id, name, transition, from.scopeId);
+            }
+            const nextComponent = {
+              ...componentWidget,
+              slotContent: { ...componentWidget.slotContent, [componentEditSlotId]: next },
+            };
+            commitWidgets(updateWidgetById(widgets, componentWidget.id, () => nextComponent), selectedWidgetId);
+            return;
+          }
+        }
+        if (!host) {
+          return;
+        }
+        if (host.id === PAGE_ROOT_STATE_OWNER_ID) {
+          if (from.id == null || !name) {
+            return;
+          }
+          const next = updateWidgetState([host], host.id, from.id, name, transition, from.scopeId);
+          commitPageStates(next[0].states);
+          return;
+        }
+        if (from.id == null) {
+          commitWidgets(updateHostTransition(widgets, host.id, transition), selectedWidgetId);
+          return;
+        }
+        if (!name) {
+          return;
+        }
+        commitWidgets(
+          updateWidgetState(widgets, host.id, from.id, name, transition, from.scopeId),
+          selectedWidgetId,
+        );
+      },
+      onDelete: (row: VisibleWidgetState) => {
+        if (!row.id) {
+          return;
+        }
+        if (componentEditSelectionKind === 'content' && componentEditId && componentEditSlotId && selectedWidget) {
+          const componentWidget = findWidget(widgets, componentEditId);
+          if (componentWidget?.type === 'component') {
+            const contentWidgets = componentWidget.slotContent?.[componentEditSlotId] ?? [];
+            const next = deleteWidgetState(contentWidgets, selectedWidget.id, row.id, row.scopeId);
+            const nextComponent = {
+              ...componentWidget,
+              slotContent: { ...componentWidget.slotContent, [componentEditSlotId]: next },
+            };
+            commitWidgets(updateWidgetById(widgets, componentWidget.id, () => nextComponent), selectedWidgetId);
+            const prefixedOwnerId = `${componentEditId}__slot-${componentEditSlotId}__${selectedWidget.id}`;
+            if (viewingOwnerId === prefixedOwnerId && viewingState === row.id) {
+              setViewingOwnerId(row.scopeOwnerId ?? prefixedOwnerId);
+              setViewingState(row.scopeId ?? null);
+            }
+            setViewingByOwner((prev) => {
+              if (prev[prefixedOwnerId] !== row.id) {
+                return prev;
+              }
+              return { ...prev, [prefixedOwnerId]: null };
+            });
+            return;
+          }
+        }
+        if (!host) {
+          return;
+        }
+        if (host.id === PAGE_ROOT_STATE_OWNER_ID) {
+          const next = deleteWidgetState([host], host.id, row.id, row.scopeId);
+          commitPageStates(next[0].states);
+          if (viewingOwnerId === host.id && viewingState === row.id) {
+            setViewingOwnerId(host.id);
+            setViewingState(row.scopeId ?? null);
+          }
+          setViewingByOwner((prev) => (prev[host.id] !== row.id ? prev : { ...prev, [host.id]: null }));
+          return;
+        }
+        commitWidgets(deleteWidgetState(widgets, host.id, row.id, row.scopeId), selectedWidgetId);
+        if (viewingOwnerId === host.id && viewingState === row.id) {
+          setViewingOwnerId(row.scopeOwnerId ?? host.id);
+          setViewingState(row.scopeId ?? null);
+        }
+        setViewingByOwner((prev) => (prev[host.id] !== row.id ? prev : { ...prev, [host.id]: null }));
+      },
+    };
+  }
   const schemaProps = buildPropsRecord(componentProps);
   const previewPropScope = buildPropsRecord(applyTestValues(componentProps, {
     ...testData?.props,
@@ -649,6 +1070,7 @@ export function CanvasWorkspace({
         { key: 'data', tab: t('lowcode.tabData') },
         { key: 'events', tab: t('lowcode.tabEvents') },
         { key: 'methods', tab: t('lowcode.tabMethods') },
+        { key: 'animation', tab: t('lowcode.tabAnimation') },
       ]}
       activeTabKey={centerTab}
       onTabChange={(key) => {
@@ -660,6 +1082,21 @@ export function CanvasWorkspace({
       }}
       tabBarExtraContent={
         <div className="canvas-head-extra">
+          {showComponentGlobalState ? (
+            <Select
+              size="small"
+              className="canvas-component-state-select"
+              placeholder={t('lowcode.stateDefault')}
+              value={componentGlobalStateId ?? ''}
+              options={[
+                { value: '', label: t('lowcode.stateDefault') },
+                ...componentGlobalStates
+                  .filter((state) => Boolean(state.id))
+                  .map((state) => ({ value: state.id as string, label: state.name ?? state.id ?? '' })),
+              ]}
+              onChange={(value: string) => onComponentGlobalStateChange(value ? value : null)}
+            />
+          ) : null}
           <Segmented
             size="small"
             value={mode}
@@ -726,11 +1163,23 @@ export function CanvasWorkspace({
           >
             {previewing ? (
               <aside
-                className="preview-scope-card"
+                className={scopeCardOpen ? 'preview-scope-card' : 'preview-scope-card is-collapsed'}
                 onPointerDown={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
               >
-                <div className="preview-scope-card-title">{t('lowcode.tabData')}</div>
+                <div className="preview-scope-card-title">
+                  <span>{t('lowcode.tabData')}</span>
+                  <Button
+                    size="small"
+                    type="text"
+                    className="preview-scope-card-toggle"
+                    icon={scopeCardOpen ? <CaretDownOutlined /> : <CaretRightOutlined />}
+                    aria-label={t(scopeCardOpen ? 'lowcode.dataCardCollapse' : 'lowcode.dataCardExpand')}
+                    title={t(scopeCardOpen ? 'lowcode.dataCardCollapse' : 'lowcode.dataCardExpand')}
+                    onClick={() => setScopeCardOpen((open) => !open)}
+                  />
+                </div>
+                <div className="preview-scope-card-body">
                 {componentMode ? (
                   <PreviewScopeSection
                     title={t('lowcode.propsTitle')}
@@ -785,6 +1234,25 @@ export function CanvasWorkspace({
                   }))}
                   onCommit={(name, type, text) => commitPreviewTest('data', name, type, text)}
                 />
+                {previewSlot ? (
+                  <PreviewScopeSection
+                    title={`${t('lowcode.slotParamsTitle')} · ${previewSlot.name}`}
+                    empty={t('lowcode.slotsParamsEmpty')}
+                    dataScope={previewDataScope}
+                    propScope={previewPropScope}
+                    queryScope={previewQueryScope}
+                    rows={previewSlot.params.map((param) => ({
+                      name: param.name,
+                      type: param.type,
+                      typeLabel: typeLabel(param.type, param.of),
+                      value: previewSlot.values[param.name],
+                      display: formatActual(param.type, previewSlot.values[param.name]),
+                      readOnly: true,
+                    }))}
+                    onCommit={() => false}
+                  />
+                ) : null}
+                </div>
               </aside>
             ) : null}
             {canvasSettling ? (
@@ -843,6 +1311,7 @@ export function CanvasWorkspace({
                     projectId={projectId}
                     variables={pageData}
                     componentProps={componentMode ? componentProps : []}
+                    slotProps={slotProps}
                     scriptEmits={componentMode ? componentEmits : undefined}
                     listenEmits={
                       bubbleWidget.type === 'component' ? componentEmitsById[bubbleWidget.componentId] : undefined
@@ -914,9 +1383,6 @@ export function CanvasWorkspace({
                     onEventsChange={(events) =>
                       updateWidget(bubbleWidget.id, { events }, `events:${bubbleWidget.id}`)
                     }
-                    onStateFnChange={(stateFn, hoverStateId) =>
-                      updateWidget(bubbleWidget.id, { stateFn, hoverStateId }, `stateFn:${bubbleWidget.id}`)
-                    }
                     onPresenceChange={
                       bubbleWidget.type === 'drawer'
                         ? undefined
@@ -925,6 +1391,11 @@ export function CanvasWorkspace({
                     onFlexChange={
                       bubbleWidget.type === 'flex'
                         ? (flex) => updateWidget(bubbleWidget.id, { flex }, `edit:${bubbleWidget.id}:flex`)
+                        : undefined
+                    }
+                    onGridChange={
+                      bubbleWidget.type === 'grid'
+                        ? (grid) => updateWidget(bubbleWidget.id, { grid }, `edit:${bubbleWidget.id}:grid`)
                         : undefined
                     }
                     onScrollChange={
@@ -938,6 +1409,10 @@ export function CanvasWorkspace({
                         ? (size) => updateWidget(bubbleWidget.id, { size }, `edit:${bubbleWidget.id}:size`)
                         : undefined
                     }
+                    animations={animations}
+                    onAnimationChange={(animation) =>
+                      updateWidget(bubbleWidget.id, { animation }, `edit:${bubbleWidget.id}:animation`)
+                    }
                     onOpenInspector={() => setInspectorOpen(true)}
                     onToolbarPopupChange={(open) => {
                       toolbarPopupOpenRef.current = open;
@@ -947,9 +1422,16 @@ export function CanvasWorkspace({
                     }}
                   />
                 ) : (
-                  // 没有可编样式时只留设置按钮。这里强制浅色，不跟检查器的深色主题走。
+                  // 没有可编样式时只留设置按钮（组件定义态再加「调整大小」）。这里强制浅色，不跟检查器的深色主题走。
                   <ConfigProvider theme={{ algorithm: theme.defaultAlgorithm }}>
-                    <div className="widget-style-bubble">
+                    <div className="widget-style-bubble is-minimal">
+                      {componentMode && onComponentDesignSizeChange ? (
+                        <ComponentDesignSizeTool
+                          size={designSize}
+                          disabled={readOnly}
+                          onChange={onComponentDesignSizeChange}
+                        />
+                      ) : null}
                       <Tooltip title={selectedWidget ? t('lowcode.widgetInspector') : t('lowcode.pageInspector')}>
                         <Button
                           size="small"
@@ -964,206 +1446,122 @@ export function CanvasWorkspace({
               </div>
             ) : null}
           </div>
-          {showStyleChrome &&
-          ((selectedWidget || componentEditId) && !readOnly || (componentEditId && componentEditSlots.length > 0)) ? (
-            <div className="canvas-float-panels">
-              {(selectedWidget || componentEditId) && !readOnly ? (
-                <WidgetStateList
-                  items={visibleStates}
-              viewingOwnerId={viewingOwnerId}
-              viewingState={viewingState}
-              usedIds={collectTreeStateIds(widgets)}
-              readOnly={Boolean(componentEditId) && componentEditSelectionKind !== 'content'}
-              onSelect={(row) => {
-                const isContent = componentEditSelectionKind === 'content' && componentEditId && componentEditSlotId;
-                const contentOwnerKey = isContent
-                  ? `${componentEditId}__slot-${componentEditSlotId}__${selectedWidget?.id ?? ''}`
-                  : selectedWidget?.id ?? null;
-                // 点到继承来的状态：记下拥有者正在看它，当前控件回到基础外观。
-                if (!row.owned && row.id && !row.scopeId) {
-                  const inheritedId = row.id;
-                  setViewingOwnerId(row.ownerId);
-                  setViewingState(inheritedId);
-                  setViewingByOwner((prev) => {
-                    const next: ViewingByOwner = { ...prev, [row.ownerId]: inheritedId };
-                    if (contentOwnerKey) {
-                      next[contentOwnerKey] = null;
-                    }
-                    return next;
-                  });
-                  return;
-                }
-                // 带作用域的状态要同时记住外层 scope 和这一层正在看的 id。
-                const scopeOwnerId = row.scopeOwnerId;
-                const scopeId = row.scopeId;
-                if (scopeId && scopeOwnerId) {
-                  setViewingOwnerId(row.id ? row.ownerId : scopeOwnerId);
-                  setViewingState(row.id ?? scopeId);
-                  setViewingByOwner((prev) => ({
-                    ...prev,
-                    [scopeOwnerId]: scopeId,
-                    [row.ownerId]: row.id ?? null,
-                  }));
-                  return;
-                }
-                setViewingOwnerId(row.ownerId);
-                setViewingState(row.id);
-                setViewingByOwner((prev) => {
-                  const next: ViewingByOwner = { ...prev, [row.ownerId]: row.id };
-                  // 回到基础外观时清掉其它拥有者正在看的状态，避免下层仍叠着旧状态。
-                  if (row.id == null) {
-                    for (const key of Object.keys(next)) {
-                      if (key !== row.ownerId) {
-                        next[key] = null;
-                      }
-                    }
-                  }
-                  return next;
-                });
-              }}
-              onCreate={(id, name, from, transition) => {
-                if (!selectedWidget) {
-                  return;
-                }
-                const scopeId = from.scopeId ?? (!from.owned ? from.id : null);
-                const scopeOwnerId = from.scopeOwnerId ?? (!from.owned ? from.ownerId : undefined);
-                if (componentEditSelectionKind === 'content' && componentEditId && componentEditSlotId) {
-                  const componentWidget = findWidget(widgets, componentEditId);
-                  if (componentWidget?.type === 'component') {
-                    const contentWidgets = componentWidget.slotContent?.[componentEditSlotId] ?? [];
-                    const created = createWidgetState(
-                      contentWidgets,
-                      selectedWidget.id,
-                      id,
-                      name,
-                      from.id,
-                      from.owned && !from.scopeId,
-                      transition,
-                      scopeId,
-                    );
-                    const nextComponent = {
-                      ...componentWidget,
-                      slotContent: { ...componentWidget.slotContent, [componentEditSlotId]: created },
-                    };
-                    commitWidgets(updateWidgetById(widgets, componentWidget.id, () => nextComponent), selectedWidgetId);
-                    const prefixedOwnerId = `${componentEditId}__slot-${componentEditSlotId}__${selectedWidget.id}`;
-                    setViewingOwnerId(prefixedOwnerId);
-                    setViewingState(id);
-                    setViewingByOwner((prev) => {
-                      const next: ViewingByOwner = { ...prev, [prefixedOwnerId]: id };
-                      if (scopeId && scopeOwnerId) {
-                        next[scopeOwnerId] = scopeId;
-                      }
-                      return next;
-                    });
-                    return;
-                  }
-                }
-                const created = createWidgetState(
-                  widgets,
-                  selectedWidget.id,
-                  id,
-                  name,
-                  from.id,
-                  from.owned && !from.scopeId,
-                  transition,
-                  scopeId,
-                );
-                commitWidgets(created, selectedWidgetId);
-                setViewingOwnerId(selectedWidget.id);
-                setViewingState(id);
-                setViewingByOwner((prev) => {
-                  const next: ViewingByOwner = { ...prev, [selectedWidget.id]: id };
-                  if (scopeId && scopeOwnerId) {
-                    next[scopeOwnerId] = scopeId;
-                  }
-                  return next;
-                });
-              }}
-              onEdit={(from, name, transition) => {
-                if (!selectedWidget) {
-                  return;
-                }
-                if (componentEditSelectionKind === 'content' && componentEditId && componentEditSlotId) {
-                  const componentWidget = findWidget(widgets, componentEditId);
-                  if (componentWidget?.type === 'component') {
-                    const contentWidgets = componentWidget.slotContent?.[componentEditSlotId] ?? [];
-                    let next: PageWidget[];
-                    if (from.id == null) {
-                      next = updateHostTransition(contentWidgets, selectedWidget.id, transition);
-                    } else if (!name) {
-                      return;
-                    } else {
-                      next = updateWidgetState(contentWidgets, selectedWidget.id, from.id, name, transition, from.scopeId);
-                    }
-                    const nextComponent = {
-                      ...componentWidget,
-                      slotContent: { ...componentWidget.slotContent, [componentEditSlotId]: next },
-                    };
-                    commitWidgets(updateWidgetById(widgets, componentWidget.id, () => nextComponent), selectedWidgetId);
-                    return;
-                  }
-                }
-                if (from.id == null) {
-                  commitWidgets(updateHostTransition(widgets, selectedWidget.id, transition), selectedWidgetId);
-                  return;
-                }
-                if (!name) {
-                  return;
-                }
-                commitWidgets(
-                  updateWidgetState(widgets, selectedWidget.id, from.id, name, transition, from.scopeId),
-                  selectedWidgetId,
-                );
-              }}
-              onDelete={(row) => {
-                if (!selectedWidget) {
-                  return;
-                }
-                if (!row.id) {
-                  return;
-                }
-                if (componentEditSelectionKind === 'content' && componentEditId && componentEditSlotId) {
-                  const componentWidget = findWidget(widgets, componentEditId);
-                  if (componentWidget?.type === 'component') {
-                    const contentWidgets = componentWidget.slotContent?.[componentEditSlotId] ?? [];
-                    const next = deleteWidgetState(contentWidgets, selectedWidget.id, row.id, row.scopeId);
-                    const nextComponent = {
-                      ...componentWidget,
-                      slotContent: { ...componentWidget.slotContent, [componentEditSlotId]: next },
-                    };
-                    commitWidgets(updateWidgetById(widgets, componentWidget.id, () => nextComponent), selectedWidgetId);
-                    const prefixedOwnerId = `${componentEditId}__slot-${componentEditSlotId}__${selectedWidget.id}`;
-                    if (viewingOwnerId === prefixedOwnerId && viewingState === row.id) {
-                      setViewingOwnerId(row.scopeOwnerId ?? prefixedOwnerId);
-                      setViewingState(row.scopeId ?? null);
-                    }
-                    setViewingByOwner((prev) => {
-                      if (prev[prefixedOwnerId] !== row.id) {
-                        return prev;
-                      }
-                      return { ...prev, [prefixedOwnerId]: null };
-                    });
-                    return;
-                  }
-                }
-                commitWidgets(deleteWidgetState(widgets, selectedWidget.id, row.id, row.scopeId), selectedWidgetId);
-                if (viewingOwnerId === selectedWidget.id && viewingState === row.id) {
-                  setViewingOwnerId(row.scopeOwnerId ?? selectedWidget.id);
-                  setViewingState(row.scopeId ?? null);
-                }
-                setViewingByOwner((prev) => {
-                  if (prev[selectedWidget.id] !== row.id) {
-                    return prev;
-                  }
-                  return { ...prev, [selectedWidget.id]: null };
-                });
+          {componentGlobalWidget ? (
+            <WidgetStateFnModal
+              open={componentStateFnOpen}
+              widget={componentGlobalWidget}
+              variables={pageData}
+              props={componentProps}
+              slotProps={slotProps}
+              disabled={readOnly}
+              onCancel={() => setComponentStateFnOpen(false)}
+              onChange={(stateFn, hoverStateId) => {
+                onComponentGlobalStateFnChange(stateFn, hoverStateId);
+                setComponentStateFnOpen(false);
               }}
             />
           ) : null}
-          {showStyleChrome && componentEditId && componentEditSlots.length > 0 ? (
-            <ComponentSlotList items={componentEditSlots} selectedKey={selectedWidgetId} onSelect={onSelectSlot} />
+          {stateHostWidget ? (
+            <WidgetStateFnModal
+              open={nodeStateFnOpen}
+              widget={stateHostWidget}
+              variables={pageData}
+              props={componentProps}
+              slotProps={slotProps}
+              disabled={readOnly}
+              onCancel={() => setNodeStateFnOpen(false)}
+              onChange={(stateFn, hoverStateId) => {
+                updateWidget(stateHostWidget.id, { stateFn, hoverStateId }, `stateFn:${stateHostWidget.id}`);
+                setNodeStateFnOpen(false);
+              }}
+            />
           ) : null}
+          {showStyleChrome && !readOnly && (nodeStateBarVisible || Boolean(globalStateBarWidget) || (componentEditId && componentEditSlots.length > 0)) ? (
+            <div className="canvas-float-panels">
+              {nodeStateBarVisible || globalStateBarWidget ? (
+                <div className="canvas-state-bar">
+                  {nodeStateBarVisible ? (
+                    <WidgetStateList
+                      title={t('lowcode.controlStates')}
+                      titleExtra={
+                        stateHostWidget && !(Boolean(componentEditId) && componentEditSelectionKind !== 'content') ? (
+                          <Tooltip title={t('lowcode.styleState')}>
+                            <Button
+                              size="small"
+                              type="text"
+                              icon={<ControlOutlined />}
+                              onClick={() => setNodeStateFnOpen(true)}
+                            />
+                          </Tooltip>
+                        ) : null
+                      }
+                      items={visibleStates}
+                      viewing={viewingByOwner}
+                      activeKey={nodeActiveKey}
+                      usedIds={stateUsedIds}
+                      readOnly={Boolean(componentEditId) && componentEditSelectionKind !== 'content'}
+                      onSelect={handleStateSelect}
+                      {...stateListHandlers(stateHostWidget)}
+                    />
+                  ) : null}
+                  {globalStateBarWidget && nodeStateBarVisible ? <div className="canvas-state-bar-split" /> : null}
+                  {globalStateBarWidget ? (
+                    <WidgetStateList
+                      title={t('lowcode.globalStates')}
+                      titleExtra={
+                        componentGlobalWidget ? (
+                          <Tooltip title={t('lowcode.styleState')}>
+                            <Button
+                              size="small"
+                              type="text"
+                              icon={<ControlOutlined />}
+                              onClick={() => setComponentStateFnOpen(true)}
+                            />
+                          </Tooltip>
+                        ) : null
+                      }
+                      items={globalVisibleStates}
+                      viewing={viewingByOwner}
+                      activeKey={globalActiveKey}
+                      usedIds={globalStateUsedIds}
+                      onSelect={handleStateSelect}
+                      {...stateListHandlers(globalStateBarWidget)}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+              {componentEditId && componentEditSlots.length > 0 ? (
+                <ComponentSlotList items={componentEditSlots} selectedKey={selectedWidgetId} onSelect={onSelectSlot} />
+              ) : null}
+            </div>
+          ) : null}
+          {showSlotDebugPanel ? (
+            <div
+              className="canvas-slot-debug-panel"
+              onPointerDown={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <div className="canvas-slot-debug-panel-title">{t('lowcode.slotDebugPanelTitle')}</div>
+              {slotDebugSlots.map((slot) => {
+                const active = slot.id === slotDebugId;
+                return (
+                  <div
+                    key={slot.id}
+                    className={active ? 'canvas-slot-debug-row is-active' : 'canvas-slot-debug-row'}
+                  >
+                    <span className="canvas-slot-debug-name" title={slot.name}>
+                      {slot.name}
+                    </span>
+                    <Button
+                      size="small"
+                      type={active ? 'primary' : 'default'}
+                      onClick={() => onToggleSlotDebug(slot.id)}
+                    >
+                      {t(active ? 'lowcode.slotDebugExit' : 'lowcode.slotDebugEnter')}
+                    </Button>
+                  </div>
+                );
+              })}
             </div>
           ) : null}
           <div className="canvas-toolbar">
@@ -1190,6 +1588,9 @@ export function CanvasWorkspace({
                 props={componentProps}
                 namespaces={namespaces}
                 disabled={readOnly}
+                collapsed={!dataSectionOpen.contract}
+                onToggleCollapse={() => toggleDataSection('contract')}
+                collapseIcon={dataSectionOpen.contract ? <DownOutlined /> : <RightOutlined />}
                 onChange={commitComponentProps}
                 onEndCoalesce={endCoalesce}
               />
@@ -1198,6 +1599,9 @@ export function CanvasWorkspace({
                 variant="query"
                 props={pageQuery}
                 disabled={readOnly}
+                collapsed={!dataSectionOpen.contract}
+                onToggleCollapse={() => toggleDataSection('contract')}
+                collapseIcon={dataSectionOpen.contract ? <DownOutlined /> : <RightOutlined />}
                 onChange={commitPageQuery}
                 onEndCoalesce={endCoalesce}
               />
@@ -1210,10 +1614,21 @@ export function CanvasWorkspace({
               queryNames={componentMode ? [] : pageQuery.map((item) => item.name)}
               componentProps={componentMode ? componentProps : []}
               namespaces={namespaces}
-              sectionTitle={componentMode ? t('lowcode.dataSection') : undefined}
+              sectionTitle={t('lowcode.dataSection')}
               disabled={readOnly}
+              collapsed={!dataSectionOpen.variables}
+              onToggleCollapse={() => toggleDataSection('variables')}
+              collapseIcon={dataSectionOpen.variables ? <DownOutlined /> : <RightOutlined />}
               onChange={commitPageData}
               onEndCoalesce={endCoalesce}
+            />
+            <div className="page-section-split" />
+            <NamespaceTypesSection
+              projectId={projectId}
+              disabled={readOnly}
+              collapsed={!dataSectionOpen.types}
+              onToggleCollapse={() => toggleDataSection('types')}
+              collapseIcon={dataSectionOpen.types ? <DownOutlined /> : <RightOutlined />}
             />
           </div>
         ) : null}
@@ -1246,7 +1661,18 @@ export function CanvasWorkspace({
             projectId={projectId}
             disabled={readOnly}
             showExpose={componentMode}
+            dataNames={pageData.map((item) => item.name)}
+            propNames={componentMode ? componentProps.map((item) => item.name) : []}
             onChange={commitPageMethods}
+          />
+        ) : null}
+        {centerTab === 'animation' ? (
+          <AnimationPanel
+            animations={animations}
+            disabled={readOnly}
+            onCreate={onCreateAnimation}
+            onUpdate={onUpdateAnimation}
+            onDelete={onDeleteAnimation}
           />
         ) : null}
       </div>

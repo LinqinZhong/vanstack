@@ -2,11 +2,16 @@ import { createElement, useEffect, useLayoutEffect, useMemo, useRef, useState, t
 import {
   buildPropsRecord,
   resolvePageData,
+  DEFAULT_COMPONENT_DESIGN_SIZE,
   normalizeInputModelValue,
   propModelName,
   validateDataLiteral,
   pageI18nDir,
   pickPageLocale,
+  PAGE_ROOT_STATE_OWNER_ID,
+  pageStateRootWidget,
+  resolvePageStyleWithStates,
+  resolveStateFnId,
   resolveWidgetTree,
   type BindingScope,
   type ComponentProp,
@@ -19,11 +24,13 @@ import {
 } from '@vanstack/xml';
 import { libraryPaintKey, pageCss, pageCssText, pageScrollCss, widgetPaintKey } from './css';
 import { bindDrawerHandles, drawerRailMetrics } from './elements/drawer';
+import { bindComponentInstances, buildSelf, initMethodLocal, runMethodCode, type ComponentInstance } from './methods';
 import { bindOverlayScrollbar } from './overlay-scrollbar';
 import { widgetElement } from './elements';
 import { HOVER_STATE_NAME, resolveRuntimeOwnState, widgetHasHoverState } from './hover';
 import { expandLoopTree, widgetInstanceKey, widgetInstanceMeta } from './loop';
 import { setPageQuery } from './navigate';
+import { installPageAssets } from './asset';
 import { installPageIcons } from './icon';
 import { installPageI18n } from './i18n';
 import { usePageToast } from './toast';
@@ -47,6 +54,8 @@ export type LowcodePageProps = {
   onModelValue?: (name: string, value: string, done?: boolean) => void;
   onQueryValue?: (name: string, value: unknown) => void;
   loadWidgetEvent?: WidgetEventLoader;
+  /** 按 id 取方法体代码：组件「控件」变量通过实例调用暴露方法时使用。 */
+  loadFunction?: (id: string) => Promise<string | null>;
   pageId?: string | null;
   query?: Record<string, unknown>;
   components?: Record<string, PageXmlDocument>;
@@ -54,11 +63,15 @@ export type LowcodePageProps = {
   useComponentTestData?: boolean;
   /** 组件编辑态：仅此时渲染组件实例内的插槽 chrome。 */
   slotChrome?: boolean;
+  /** 组件定义编辑器：正在调试的插槽 id（隔离显示其内部调试节点）。 */
+  slotDebugId?: string | null;
   /** 组件编辑态：实例内部树与数据解耦，显示只由查看状态驱动。 */
   componentEditing?: boolean;
   /** 组件编辑态下正在编辑的组件实例 id。 */
   componentEditId?: string | null;
   icons?: Readonly<Record<string, string>>;
+  assets?: Readonly<Record<string, string>>;
+  animationsKey?: string;
   onCommit?: () => void;
 };
 
@@ -77,13 +90,69 @@ function pagePropsKey(props: ComponentProp[] | undefined) {
     .join('\n');
 }
 
-export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel, onModelValue, onQueryValue, loadWidgetEvent, pageId, query, components, centerContent, useComponentTestData, slotChrome, componentEditing, componentEditId, icons, onCommit }: LowcodePageProps): ReactElement {
+function widgetChildren(widget: PageWidget): PageWidget[] | undefined {
+  return (widget as PageWidget & { children?: PageWidget[] }).children;
+}
+
+/**
+ * 组件定义编辑器的插槽调试态：被调试的插槽必须始终可见。
+ * 插槽本身或它的某个祖先若被状态显隐规则关掉（「存在与显示」落在 existsFn/displayFn/visibleFn 上，
+ * 包括状态叠加得出的 removed/hidden/occupy，例如模板里某个容器 `exists` 为 `return false`），
+ * 整棵子树会直接不进渲染树或被 display:none，调试画布就会全空。
+ * 这里把「根 → 被调试插槽」这条链上所有控件的存在与显示配置剥掉；按 id 收集，
+ * 循环展开出的同 id 多份实例一并覆盖。插槽自身的可见性由 slot.ts 的调试分支强制为 visible。
+ */
+function stripDebugPathPresenceGates(widgets: PageWidget[], slotDebugId: string): void {
+  const pathIds = new Set<string>();
+  let found = false;
+  const visit = (list: PageWidget[], chain: string[]): void => {
+    for (const widget of list) {
+      const next = [...chain, widget.id];
+      if (widget.id === slotDebugId) {
+        found = true;
+        next.forEach((id) => pathIds.add(id));
+        return;
+      }
+      const children = widgetChildren(widget);
+      if (children?.length) {
+        visit(children, next);
+        if (found) {
+          return;
+        }
+      }
+    }
+  };
+  visit(widgets, []);
+  if (!found) {
+    return;
+  }
+  const strip = (list: PageWidget[]): void => {
+    for (const widget of list) {
+      if (pathIds.has(widget.id)) {
+        delete widget.existsFn;
+        delete widget.displayFn;
+        delete widget.visibleFn;
+      }
+      const children = widgetChildren(widget);
+      if (children?.length) {
+        strip(children);
+      }
+    }
+  };
+  strip(widgets);
+}
+
+export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel, onModelValue, onQueryValue, loadWidgetEvent, loadFunction, pageId, query, components, centerContent, useComponentTestData, slotChrome, slotDebugId, componentEditing, componentEditId, icons, assets, animationsKey, onCommit }: LowcodePageProps): ReactElement {
   installPageIcons(icons);
+  installPageAssets(assets);
   const currentLocale = locale || pickPageLocale(catalog);
   installPageI18n(catalog, currentLocale);
   const pageQuery = query ?? EMPTY_QUERY;
   const loaderRef = useRef(loadWidgetEvent);
   loaderRef.current = loadWidgetEvent;
+  const functionLoaderRef = useRef(loadFunction);
+  functionLoaderRef.current = loadFunction;
+  const componentInstancesRef = useRef<Map<string, ComponentInstance>>(new Map());
   const scriptScopeRef = useRef<ScriptScope>({});
   const eventsRef = useRef(page.events);
   eventsRef.current = page.events;
@@ -238,6 +307,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     });
   };
   bindDrawerHandles(dataScope, page.data, page.widgets, (id, method) => setDrawerOpen(id, method === 'show'));
+  bindComponentInstances(dataScope, page.data, page.widgets, components, componentInstancesRef.current);
   const assignScope = (bucket: 'data' | 'props' | 'query', name: string, value: unknown) => {
     if (bucket === 'query') {
       liveQuery[name] = value;
@@ -266,7 +336,50 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     dataScope[name] = value;
     commitModelValue(name, stored, true);
   };
-  scriptScopeRef.current = { data: dataScope, props: propsScope, query: liveQuery, assign: assignScope };
+  // 页面自己的方法：脚本里用 `$this.xxx()` 调用，在页面作用域里执行，`$local` 为方法级单例。
+  const pageMethodLocalRef = useRef<Map<string, Record<string, unknown>>>(new Map());
+  function invokePageMethod(name: string, args: unknown[]): unknown {
+    const method = page.methods?.find((item) => item.name === name);
+    const loader = functionLoaderRef.current;
+    if (!method || !loader) {
+      return undefined;
+    }
+    let local = pageMethodLocalRef.current.get(method.id);
+    if (!local) {
+      local = initMethodLocal(method.data);
+      pageMethodLocalRef.current.set(method.id, local);
+    }
+    const store = local;
+    return (async () => {
+      const code = await loader(method.id);
+      if (!code) {
+        return undefined;
+      }
+      return runMethodCode(
+        code,
+        method.params.map((param) => param.name),
+        { data: dataScope, props: propsScope, local: store, assign: assignScope, self: pageSelf },
+        args,
+      );
+    })();
+  }
+  const pageSelf = buildSelf(page.methods, invokePageMethod);
+  scriptScopeRef.current = { data: dataScope, props: propsScope, query: liveQuery, assign: assignScope, self: pageSelf };
+  const pageViewingStateIds = useMemo(() => {
+    const list = Array.isArray(viewing) ? viewing : viewing ? [viewing] : [];
+    return list.filter((entry) => entry.ownerId === PAGE_ROOT_STATE_OWNER_ID).map((entry) => entry.state);
+  }, [viewing]);
+  // 文档级全局状态：查看态显式选择优先；编辑态不自动求值 stateFn（只按选中状态预览）。
+  const pageGlobalStateId = useMemo(() => {
+    const explicit = pageViewingStateIds.find((id): id is string => Boolean(id));
+    if (explicit) {
+      return explicit;
+    }
+    if (editing) {
+      return null;
+    }
+    return resolveStateFnId(pageStateRootWidget(page), { data: dataScope, props: propsScope, query: liveQuery });
+  }, [pageViewingStateIds, editing, page, dataScope, propsScope, liveQuery]);
   const paintKey = widgetPaintKey(page.widgets);
   const { widgets, stateLayers } = useMemo(() => {
     const sink = new WeakMap<object, WidgetStateLayer[]>();
@@ -276,9 +389,15 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       appliedStateFor: editing ? undefined : (widget) => resolveRuntimeOwnState(widget, hoverInstanceKeys),
       stateLayersSink: sink,
       locale: currentLocale,
+      // 全局状态作为最外层后代层叠加到所有控件，使「全局状态下修改的节点样式」生效（编辑态与发布态一致）。
+      rootGlobalState: pageGlobalStateId,
     });
+    // 插槽调试态：保证被调试插槽及其祖先不被状态显隐规则关掉，否则调试画布会全空。
+    if (editing && slotDebugId) {
+      stripDebugPathPresenceGates(resolved, slotDebugId);
+    }
     return { widgets: resolved, stateLayers: sink };
-  }, [paintKey, page.slots, viewing, dataScope, propsScope, liveQuery, editing, hoverInstanceKeys, currentLocale]);
+  }, [paintKey, page.slots, viewing, dataScope, propsScope, liveQuery, editing, hoverInstanceKeys, currentLocale, pageGlobalStateId, slotDebugId]);
   const drawerBoardIndexes = new Map<string, number>();
   {
     let index = 0;
@@ -291,7 +410,15 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
   }
   const toast = usePageToast();
   const dir = pageI18nDir(catalog, currentLocale);
-  const styleText = useMemo(() => pageCssText(page.widgets), [page.widgets]);
+  const styleText = useMemo(() => pageCssText(page.widgets, currentLocale, { animations: !editing }), [page.widgets, currentLocale, editing, animationsKey]);
+  const pageRootStyle = useMemo(
+    () => resolvePageStyleWithStates(
+      { style: page.style, states: page.states, stateFn: page.stateFn, hoverStateId: page.hoverStateId },
+      [pageGlobalStateId],
+      currentLocale,
+    ),
+    [page.style, page.states, page.stateFn, page.hoverStateId, pageGlobalStateId, currentLocale],
+  );
 
   function hoverFor(widget: PageWidget): WidgetHoverHandlers | undefined {
     if (editing || !widgetHasHoverState(widget)) {
@@ -392,6 +519,10 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       /** 组件被放到别的页面上时，内部按入参求值并展开循环。 */
       instantiate?: boolean;
       emit?: (name: string, ...args: unknown[]) => void;
+      /** 子树脚本的 `$this`：当前文档自己的方法集合。 */
+      self?: Record<string, unknown>;
+      /** 组件编辑态下已出现过 chrome 的插槽 slotId 集合。 */
+      slotChromeSeen?: Set<string>;
     },
   ): ReactElement | null {
     const meta = widgetInstanceMeta(widget);
@@ -418,12 +549,18 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       commitModelValue: commit,
       assignScope: assign,
       emit: options?.emit,
+      self: options?.self ?? pageSelf,
+      slotChromeSeen: options?.slotChromeSeen,
       loadWidgetEvent,
+      loadFunction: functionLoaderRef.current,
+      componentInstances: componentInstancesRef.current,
       components,
       componentStack,
       useComponentTestData: Boolean(useComponentTestData),
       slotChrome: Boolean(slotChrome),
+      slotDebugId: slotDebugId ?? null,
       componentEditing: Boolean(componentEditing),
+      slotDefs: page.slots,
       componentEditId: componentEditId ?? null,
       viewing,
       icons,
@@ -439,6 +576,8 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
           assignScope: childOptions?.assignScope ?? assign,
           instantiate: childOptions?.instantiate ?? instantiate,
           emit: childOptions?.emit ?? options?.emit,
+          self: childOptions?.self ?? options?.self,
+          slotChromeSeen: childOptions?.slotChromeSeen ?? options?.slotChromeSeen,
         }),
       stateLayers,
     });
@@ -496,29 +635,58 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     openDrawerIds.join(','),
     `${editRail.tail}:${editRail.column}`,
     centerContent ? '1' : '0',
+    centerContent ? JSON.stringify(page.designSize ?? null) : '',
     useComponentTestData ? '1' : '0',
     componentEditing ? '1' : '0',
+    slotDebugId ?? '',
     JSON.stringify(viewing),
     JSON.stringify(modelOverrides),
   ].join('\n');
   const cachedTree = treeCache.current?.key === treeKey ? treeCache.current : null;
+  // 页面层（组件定义编辑器把组件文档当页面渲染时）同样按 slotId 去重：同类型插槽只保留第一个 chrome。
+  const rootSlotChromeSeen = slotChrome ? new Set<string>() : undefined;
   const flowNodes = cachedTree
     ? cachedTree.flow
-    : widgets.filter((widget) => widget.type !== 'drawer').map((widget) => render(widget));
-  const drawerNodes = cachedTree ? cachedTree.drawers : rootDrawers.map((widget) => render(widget));
+    : widgets
+        .filter((widget) => widget.type !== 'drawer')
+        .map((widget) => render(widget, rootSlotChromeSeen ? { slotChromeSeen: rootSlotChromeSeen } : undefined));
+  const drawerNodes = cachedTree
+    ? cachedTree.drawers
+    : rootDrawers.map((widget) => render(widget, rootSlotChromeSeen ? { slotChromeSeen: rootSlotChromeSeen } : undefined));
   if (!cachedTree) {
     treeCache.current = { key: treeKey, flow: flowNodes, drawers: drawerNodes };
   }
+  // 组件定义编辑器：文档「定义尺寸」决定定义态画布上这块区域的大小，仅定义态（centerContent）生效；
+  // 组件被使用时的尺寸完全由使用方页面上的控件决定，与此无关。
+  const designSize = centerContent
+    ? {
+        width: page.designSize?.width ?? DEFAULT_COMPONENT_DESIGN_SIZE.width,
+        height: page.designSize?.height ?? DEFAULT_COMPONENT_DESIGN_SIZE.height,
+      }
+    : undefined;
+  const designSizeCss = designSize
+    ? {
+        width: `${designSize.width}px`,
+        height: `${designSize.height}px`,
+        minHeight: `${designSize.height}px`,
+      }
+    : undefined;
   const pageNode = createElement(
     'div',
     {
       ref: pageRef,
-      className: 'lowcode-page',
+      className: designSizeCss ? 'lowcode-page is-design-region' : 'lowcode-page',
       dir,
+      'data-lang': currentLocale || undefined,
       'data-hover-active': hoverInstanceKeys.length > 0 ? HOVER_STATE_NAME : undefined,
       style: {
-        ...pageCss(page.style, editing, bindingOptions),
+        ...pageCss(pageRootStyle, editing, bindingOptions),
+        ...(designSizeCss ?? null),
         direction: dir,
+        // 组件定义编辑器的插槽调试态：整棵组件隐藏，只显示被调试插槽内部的内容。
+        // 用 visibility 而非 display:none——隐藏元素仍参与布局，插槽照旧按真实布局尺寸落位，
+        // 被调试插槽（slot.ts）再以 visibility:visible 覆盖继承值显示其内部调试节点。
+        ...(slotDebugId ? { visibility: 'hidden' as const } : null),
       },
       onTouchStart: editing ? undefined : (event: unknown) => runPageTouch('touchstart', event),
       onTouchMove: editing ? undefined : (event: unknown) => runPageTouch('touchmove', event),
@@ -548,7 +716,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
           ref: pageScrollRef,
           className: 'lowcode-page-scroll',
           style: {
-            ...pageScrollCss(page.style, editing, bindingOptions),
+            ...pageScrollCss(pageRootStyle, editing, bindingOptions),
             scrollbarWidth: 'none',
             position: 'relative',
             zIndex: 0,

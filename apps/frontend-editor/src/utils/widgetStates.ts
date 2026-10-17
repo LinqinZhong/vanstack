@@ -6,10 +6,12 @@ import {
   compactWidgetProps,
   applyWidgetPresence,
   DEFAULT_PAGE_LANG_KEY,
+  PAGE_ROOT_STATE_OWNER_ID,
   type PageWidget,
   type WidgetContentProps,
   type WidgetLangFieldDelta,
   type WidgetLangFields,
+  type WidgetAnimation,
   type WidgetStateDelta,
   type WidgetStateFields,
   type WidgetStateLayer,
@@ -177,87 +179,6 @@ export function collectPrefixedStateTree(
   return collectStateTree(widgets, id).map(mapNode);
 }
 
-/**
- * 组件编辑态：收集插槽内容控件的状态树，并把插槽控件上定义的状态作为继承态纳入，
- * 使插槽内容可以查看/切换/覆盖插槽的状态。宿主 id 加运行时前缀。
- */
-export function collectSlotContentStateTree(
-  contentWidgets: PageWidget[],
-  contentWidgetId: string | null | undefined,
-  contentPrefix: string,
-  slotWidget: PageWidget,
-  slotPrefix: string,
-  templateWidgets: PageWidget[],
-): VisibleWidgetState[] {
-  function mapNode(node: VisibleWidgetState): VisibleWidgetState {
-    return {
-      ...node,
-      ownerId: `${contentPrefix}${node.ownerId}`,
-      ...(node.scopeOwnerId ? { scopeOwnerId: `${contentPrefix}${node.scopeOwnerId}` } : {}),
-      ...(node.children?.length ? { children: node.children.map(mapNode) } : {}),
-    };
-  }
-  const contentTree = collectStateTree(contentWidgets, contentWidgetId).map(mapNode);
-  const selected = findWidget(contentWidgets, contentWidgetId);
-  if (!selected) {
-    return contentTree;
-  }
-  const prefixedContentOwnerId = `${contentPrefix}${selected.id}`;
-  // 插槽在组件模板里的祖先链（组件根控件 → … → 插槽本体）：内容节点应能继承这整条链上定义的
-  // 状态，而不是只继承插槽控件自身定义的状态——组件状态往往定义在根控件上，插槽本身没有自定义状态。
-  const ancestorChain: PageWidget[] = [];
-  let cursor: PageWidget | null = slotWidget;
-  while (cursor) {
-    ancestorChain.unshift(cursor);
-    cursor = findParentWidget(templateWidgets, cursor.id);
-  }
-  const used = new Set<string>();
-  const layerStates: Array<{
-    ownerWidget: PageWidget;
-    state: { id: string; name: string; transition?: number | string };
-  }> = [];
-  for (const widget of ancestorChain) {
-    for (const state of ancestorOwnedStates(widget)) {
-      if (used.has(state.id)) {
-        continue;
-      }
-      used.add(state.id);
-      layerStates.push({ ownerWidget: widget, state });
-    }
-  }
-  const inherited: VisibleWidgetState[] = layerStates.map(({ ownerWidget, state }) => {
-    const ownerId = `${slotPrefix}${ownerWidget.id}`;
-    const override = selected.stateOverrides?.find((item) => item.id === state.id);
-    return {
-      id: state.id,
-      name: state.name,
-      owned: false,
-      ownerId,
-      transition: state.transition,
-      children: [
-        {
-          id: null,
-          name: null,
-          owned: true,
-          ownerId: prefixedContentOwnerId,
-          scopeId: state.id,
-          scopeOwnerId: ownerId,
-        },
-        ...(override?.states ?? []).map((nested) => ({
-          id: nested.id,
-          name: nested.name ?? nested.id,
-          owned: true,
-          ownerId: prefixedContentOwnerId,
-          transition: nested.transition,
-          scopeId: state.id,
-          scopeOwnerId: ownerId,
-        })),
-      ],
-    };
-  });
-  return [...contentTree, ...inherited];
-}
-
 export type ViewingByOwner = Record<string, string | null>;
 
 export function viewingListFromMap(map: ViewingByOwner): Array<{ ownerId: string; state: string | null }> {
@@ -267,7 +188,8 @@ export function viewingListFromMap(map: ViewingByOwner): Array<{ ownerId: string
 export function pruneViewingByOwner(map: ViewingByOwner, widgets: PageWidget[]): ViewingByOwner {
   const next: ViewingByOwner = {};
   for (const [id, state] of Object.entries(map)) {
-    if (findWidget(widgets, id)) {
+    // 页面全局状态的宿主不在 widgets 里，需保留。
+    if (id === PAGE_ROOT_STATE_OWNER_ID || findWidget(widgets, id)) {
       next[id] = state;
     }
   }
@@ -318,6 +240,15 @@ export function stateLayersForWidget(
     return [];
   }
   const layers: WidgetStateLayer[] = [];
+  // 文档级全局状态作为最外层「后代」层：在某个全局状态下编辑节点样式时，增量会写入
+  // 该控件自身的 stateOverrides，从而只在该全局状态下生效并保持；切换全局状态即恢复。
+  // 组件编辑态（带前缀 ownerKey）下组件内部不叠加页面全局状态。
+  if (!ownerKey) {
+    const globalStateId = viewing[PAGE_ROOT_STATE_OWNER_ID] ?? null;
+    if (globalStateId) {
+      layers.push({ id: globalStateId, role: 'descendant' });
+    }
+  }
   for (const widget of ancestorChain(widgets, widgetId)) {
     const key = ownerKey ? `${ownerKey}${widget.id}` : widget.id;
     const stateId = viewing[key] ?? null;
@@ -439,6 +370,13 @@ export function widgetWithStateLayers(widget: PageWidget, layers: WidgetStateLay
       delete next.flex;
     }
   }
+  if (next.type === 'grid') {
+    if (fields.grid) {
+      next.grid = fields.grid;
+    } else {
+      delete next.grid;
+    }
+  }
   if (next.type !== 'swiper-item' && next.type !== 'window' && next.type !== 'th' && next.type !== 'tr' && next.type !== 'td') {
     if (fields.item) {
       next.item = fields.item;
@@ -452,6 +390,11 @@ export function widgetWithStateLayers(widget: PageWidget, layers: WidgetStateLay
     } else {
       delete next.swiper;
     }
+  }
+  if (fields.animation) {
+    next.animation = fields.animation;
+  } else {
+    delete next.animation;
   }
   return fields.presence ? applyWidgetPresence(next, fields.presence) : next;
 }
@@ -489,6 +432,13 @@ export function widgetWithStateLayerDelta(widget: PageWidget, layers: WidgetStat
       delete next.flex;
     }
   }
+  if (next.type === 'grid') {
+    if (delta.grid) {
+      next.grid = delta.grid;
+    } else {
+      delete next.grid;
+    }
+  }
   if (next.type !== 'swiper-item' && next.type !== 'window' && next.type !== 'th' && next.type !== 'tr' && next.type !== 'td') {
     if (delta.item) {
       next.item = delta.item;
@@ -502,6 +452,9 @@ export function widgetWithStateLayerDelta(widget: PageWidget, layers: WidgetStat
     } else {
       delete next.swiper;
     }
+  }
+  if (delta.animation) {
+    next.animation = delta.animation;
   }
   return delta.presence ? applyWidgetPresence(next, delta.presence) : next;
 }
@@ -517,9 +470,11 @@ export function stateOwnKeys(widget: PageWidget, layers: WidgetStateLayer[], loc
   for (const key of Object.keys(delta.props ?? {})) keys.add(key);
   for (const key of Object.keys(delta.style ?? {})) keys.add(key);
   if (widget.type === 'flex') for (const key of Object.keys(delta.flex ?? {})) keys.add(key);
+  if (widget.type === 'grid') for (const key of Object.keys(delta.grid ?? {})) keys.add(key);
   if (widget.type !== 'swiper-item' && widget.type !== 'window' && widget.type !== 'th' && widget.type !== 'tr' && widget.type !== 'td') for (const key of Object.keys(delta.item ?? {})) keys.add(key);
   if (widget.type === 'swiper') for (const key of Object.keys(delta.swiper ?? {})) keys.add(key);
   if (delta.presence) keys.add('presence');
+  if (delta.animation) keys.add('animation');
   return keys;
 }
 
@@ -551,9 +506,19 @@ function cloneDelta(delta: WidgetStateDelta): WidgetStateDelta {
     ...(delta.props ? { props: { ...delta.props } } : {}),
     ...(delta.style ? { style: { ...delta.style } } : {}),
     ...(delta.flex ? { flex: { ...delta.flex } } : {}),
+    ...(delta.grid
+      ? {
+          grid: {
+            ...delta.grid,
+            ...(delta.grid.rows ? { rows: [...delta.grid.rows] } : {}),
+            ...(delta.grid.columns ? { columns: [...delta.grid.columns] } : {}),
+          },
+        }
+      : {}),
     ...(delta.item ? { item: { ...delta.item } } : {}),
     ...(delta.swiper ? { swiper: { ...delta.swiper } } : {}),
     ...(delta.presence ? { presence: delta.presence } : {}),
+    ...(delta.animation ? { animation: { ...delta.animation } } : {}),
     ...(delta.langFields ? { langFields: { ...delta.langFields } } : {}),
     ...(delta.states?.length ? { states: delta.states.map((item) => cloneDelta(item)) } : {}),
   };
@@ -696,9 +661,11 @@ function upsertNestedState(
     !nextParent.props &&
     !nextParent.style &&
     !nextParent.flex &&
+    !nextParent.grid &&
     !nextParent.item &&
     !nextParent.swiper &&
     !nextParent.presence &&
+    !nextParent.animation &&
     !nextParent.langFields &&
     !nextParent.states?.length &&
     !nextParent.appliedState;
@@ -844,7 +811,7 @@ export function setAppliedState(
         delete parent.appliedState;
       }
       const empty =
-          !parent.props && !parent.style && !parent.flex && !parent.item && !parent.swiper && !parent.presence && !parent.langFields && !parent.states?.length && !parent.appliedState;
+          !parent.props && !parent.style && !parent.flex && !parent.item && !parent.swiper && !parent.presence && !parent.animation && !parent.langFields && !parent.states?.length && !parent.appliedState;
       if (empty) {
         return writeOverrideList(
           widget,
@@ -879,6 +846,7 @@ function langFieldFromFields(delta: WidgetStateFields | undefined): WidgetLangFi
   if (delta.props) next.props = delta.props;
   if (delta.style) next.style = delta.style;
   if (delta.flex) next.flex = delta.flex;
+  if (delta.grid) next.grid = delta.grid;
   if (delta.item) next.item = delta.item;
   if (delta.swiper) next.swiper = delta.swiper;
   if (delta.presence) next.presence = delta.presence;
@@ -959,9 +927,11 @@ function writeDelta(
           ...(prev?.props ? { props: prev.props } : {}),
           ...(prev?.style ? { style: prev.style } : {}),
           ...(prev?.flex ? { flex: prev.flex } : {}),
+          ...(prev?.grid ? { grid: prev.grid } : {}),
           ...(prev?.item ? { item: prev.item } : {}),
           ...(prev?.swiper ? { swiper: prev.swiper } : {}),
           ...(prev?.presence ? { presence: prev.presence } : {}),
+          ...(prev?.animation ? { animation: prev.animation } : {}),
         }
       : delta),
     ...(role === 'owner' && prev?.transition != null ? { transition: prev.transition } : {}),
@@ -976,9 +946,11 @@ function writeDelta(
       !entry.props &&
       !entry.style &&
       !entry.flex &&
+      !entry.grid &&
       !entry.item &&
       !entry.swiper &&
       !entry.presence &&
+      !entry.animation &&
       !entry.langFields &&
       !entry.states?.length &&
       !entry.appliedState;
@@ -1069,6 +1041,34 @@ function desiredPropsAfterPatch(
   return compactWidgetProps(next);
 }
 
+/** 动画写入：无状态层写控件基础字段；有状态层写目标状态层的扁平动画增量（只跟随状态，不区分语言）。 */
+function patchAnimationField(
+  widget: PageWidget,
+  layers: WidgetStateLayer[],
+  animation: WidgetAnimation | undefined,
+): PageWidget {
+  if (layers.length === 0) {
+    const next: PageWidget = { ...widget };
+    if (animation && animation.id) {
+      next.animation = { ...animation };
+    } else {
+      delete next.animation;
+    }
+    return next;
+  }
+  const lastLayer = layers[layers.length - 1];
+  const resolved = resolveWidgetStateStack(widget, layers);
+  const desired: WidgetStateFields = { ...resolved, animation };
+  const base = resolveWidgetStateStack(widget, layers.slice(0, -1));
+  return writeDelta(
+    widget,
+    lastLayer.id,
+    lastLayer.role,
+    diffWidgetState(widget, desired, base),
+    lastLayer.role === 'owner' ? nestedOwnerScope(widget, lastLayer.id) : null,
+  );
+}
+
 export function patchResolvedWidget(
   widget: PageWidget,
   patch: WidgetPatch,
@@ -1111,8 +1111,13 @@ export function patchResolvedWidget(
     contentPatch.src != null ||
     contentPatch.size != null ||
     'current' in contentPatch;
-  const hasVisual = 'style' in patch || 'flex' in patch || 'item' in patch || 'swiper' in patch;
+  const hasVisual = 'style' in patch || 'flex' in patch || 'grid' in patch || 'item' in patch || 'swiper' in patch;
   const hasPresence = 'presence' in patch && patch.presence != null;
+  const hasAnimation = 'animation' in patch;
+  // 动画只跟随状态、不区分语言：单独走状态化写入（写进目标状态层的扁平增量）。
+  if (hasAnimation && !hasPropPatch && !hasVisual && !hasPresence) {
+    return patchAnimationField(widget, layers, patch.animation);
+  }
   if ('freezeHeader' in patch) {
     baseContent.freezeHeader = patch.freezeHeader;
   }
@@ -1203,6 +1208,7 @@ export function patchResolvedWidget(
       const visual: WidgetPatch = {
         ...('style' in patch ? { style: patch.style } : {}),
         ...('flex' in patch ? { flex: patch.flex } : {}),
+        ...('grid' in patch ? { grid: patch.grid } : {}),
         ...('item' in patch ? { item: patch.item } : {}),
         ...('swiper' in patch ? { swiper: patch.swiper } : {}),
       };
@@ -1220,6 +1226,7 @@ export function patchResolvedWidget(
       props: hasPropPatch ? desiredPropsAfterPatch(baseLocal.props, contentPatch) : baseLocal.props,
       style: 'style' in patch ? patch.style : baseLocal.style,
       flex: 'flex' in patch ? patch.flex : baseLocal.flex,
+      grid: 'grid' in patch ? patch.grid : baseLocal.grid,
       item: 'item' in patch ? patch.item : baseLocal.item,
       swiper: 'swiper' in patch ? patch.swiper : baseLocal.swiper,
       presence: hasPresence ? patch.presence : existing?.presence,
@@ -1247,6 +1254,7 @@ export function patchResolvedWidget(
       props: hasPropPatch ? desiredPropsAfterPatch(resolvedLocal.props, contentPatch) : resolvedLocal.props,
       style: 'style' in patch ? patch.style : resolvedLocal.style,
       flex: 'flex' in patch ? patch.flex : resolvedLocal.flex,
+      grid: 'grid' in patch ? patch.grid : resolvedLocal.grid,
       item: 'item' in patch ? patch.item : resolvedLocal.item,
       swiper: 'swiper' in patch ? patch.swiper : resolvedLocal.swiper,
       presence: hasPresence ? patch.presence : resolvedLocal.presence,
@@ -1275,6 +1283,7 @@ export function patchResolvedWidget(
     props: hasPropPatch ? desiredPropsAfterPatch(resolved.props, contentPatch) : resolved.props,
     style: 'style' in patch ? patch.style : resolved.style,
     flex: 'flex' in patch ? patch.flex : resolved.flex,
+    grid: 'grid' in patch ? patch.grid : resolved.grid,
     item: 'item' in patch ? patch.item : resolved.item,
     swiper: 'swiper' in patch ? patch.swiper : resolved.swiper,
     presence: hasPresence ? patch.presence : resolved.presence,
@@ -1357,7 +1366,7 @@ export function patchWidgetInState(
   const langKey = langKeyFor(locale);
   const hasPropPatch =
     patch.value != null || patch.text != null || patch.src != null || patch.size != null;
-  const hasVisual = 'style' in patch || 'flex' in patch || 'item' in patch || 'swiper' in patch;
+  const hasVisual = 'style' in patch || 'flex' in patch || 'grid' in patch || 'item' in patch || 'swiper' in patch;
   const hasPresence = 'presence' in patch && patch.presence != null;
 
   if (!stateId) {
@@ -1378,6 +1387,7 @@ export function patchWidgetInState(
         ...('presence' in patch ? { presence: patch.presence } : {}),
         ...('style' in patch ? { style: patch.style } : {}),
         ...('flex' in patch ? { flex: patch.flex } : {}),
+        ...('grid' in patch ? { grid: patch.grid } : {}),
         ...('item' in patch ? { item: patch.item } : {}),
         ...('swiper' in patch ? { swiper: patch.swiper } : {}),
         ...structural,
@@ -1392,6 +1402,7 @@ export function patchWidgetInState(
       props: hasPropPatch ? desiredPropsAfterPatch(baseLocal.props, patch) : baseLocal.props,
       style: 'style' in patch ? patch.style : baseLocal.style,
       flex: 'flex' in patch ? patch.flex : baseLocal.flex,
+      grid: 'grid' in patch ? patch.grid : baseLocal.grid,
       item: 'item' in patch ? patch.item : baseLocal.item,
       swiper: 'swiper' in patch ? patch.swiper : baseLocal.swiper,
       presence: hasPresence ? patch.presence : existing?.presence,
@@ -1430,6 +1441,7 @@ export function patchWidgetInState(
       props: hasPropPatch ? desiredPropsAfterPatch(resolvedLocal.props, patch) : resolvedLocal.props,
       style: 'style' in patch ? patch.style : resolvedLocal.style,
       flex: 'flex' in patch ? patch.flex : resolvedLocal.flex,
+      grid: 'grid' in patch ? patch.grid : resolvedLocal.grid,
       item: 'item' in patch ? patch.item : resolvedLocal.item,
       swiper: 'swiper' in patch ? patch.swiper : resolvedLocal.swiper,
       presence: hasPresence ? patch.presence : resolvedLocal.presence,
@@ -1447,6 +1459,7 @@ export function patchWidgetInState(
     props: hasPropPatch ? desiredPropsAfterPatch(resolved.props, patch) : resolved.props,
     style: 'style' in patch ? patch.style : resolved.style,
     flex: 'flex' in patch ? patch.flex : resolved.flex,
+    grid: 'grid' in patch ? patch.grid : resolved.grid,
     item: 'item' in patch ? patch.item : resolved.item,
     swiper: 'swiper' in patch ? patch.swiper : resolved.swiper,
     presence: hasPresence ? patch.presence : resolved.presence,

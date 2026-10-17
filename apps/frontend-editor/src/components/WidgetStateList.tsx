@@ -1,13 +1,19 @@
 import { CaretRightOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { Button, Dropdown, Form, Input, InputNumber, Modal, type MenuProps } from 'antd';
-import { useState, type MouseEvent } from 'react';
+import { useState, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { nextCopiedStateName, nextStateId, type VisibleWidgetState } from '../utils/widgetStates';
+import { nextCopiedStateName, nextStateId, type ViewingByOwner, type VisibleWidgetState } from '../utils/widgetStates';
 
 type WidgetStateListProps = {
   items: VisibleWidgetState[];
-  viewingOwnerId: string | null;
-  viewingState: string | null;
+  /** 区块标题，默认「状态」。 */
+  title?: string;
+  /** 标题行右侧的附加操作（如「状态控制」按钮）。 */
+  titleExtra?: ReactNode;
+  /** 每个宿主当前正在查看的状态（ownerId → stateId）：各区块按自身宿主独立高亮。 */
+  viewing: ViewingByOwner;
+  /** 区块内当前唯一高亮的行 key；为空时回退到 viewing 推导（兼容旧调用）。 */
+  activeKey?: string | null;
   usedIds: ReadonlySet<string>;
   readOnly?: boolean;
   onSelect: (row: VisibleWidgetState) => void;
@@ -26,6 +32,10 @@ type EditForm = {
   transition?: number | null;
 };
 
+export function stateRowKey(row: VisibleWidgetState) {
+  return rowKey(row);
+}
+
 function rowKey(row: VisibleWidgetState) {
   return `${row.scopeOwnerId ?? ''}:${row.scopeId ?? ''}/${row.ownerId}:${row.id ?? ''}`;
 }
@@ -36,8 +46,10 @@ function isLeaf(row: VisibleWidgetState) {
 
 export function WidgetStateList({
   items,
-  viewingOwnerId,
-  viewingState,
+  title,
+  titleExtra,
+  viewing,
+  activeKey,
   usedIds,
   readOnly,
   onSelect,
@@ -133,7 +145,7 @@ export function WidgetStateList({
   }
 
   function renderNode(row: VisibleWidgetState, depth: number) {
-    const viewingThis = isViewingRow(row, viewingOwnerId, viewingState);
+    const viewingThis = activeKey != null ? rowKey(row) === activeKey : isViewingRow(row, viewing);
     const menuItems = readOnly ? [] : menuFor(row);
     const branch = Boolean(row.children?.length);
     const expanded = branch && !collapsed[rowKey(row)];
@@ -213,7 +225,10 @@ export function WidgetStateList({
         event.stopPropagation();
       }}
     >
-      <div className="canvas-state-list-title">{t('lowcode.states')}</div>
+      <div className="canvas-state-list-title">
+        <span className="canvas-state-list-title-text">{title ?? t('lowcode.states')}</span>
+        {titleExtra ? <span className="canvas-state-list-title-extra">{titleExtra}</span> : null}
+      </div>
       <ul className="canvas-state-list-items">{items.map((row) => renderNode(row, 0))}</ul>
       {!readOnly ? (
         <Button
@@ -299,15 +314,15 @@ export function WidgetStateList({
   );
 }
 
-function isViewingRow(row: VisibleWidgetState, viewingOwnerId: string | null, viewingState: string | null) {
+function isViewingRow(row: VisibleWidgetState, viewing: ViewingByOwner) {
   if (!row.owned && row.id) {
     return false;
   }
   if (row.scopeId && row.scopeOwnerId && row.id == null) {
-    return viewingOwnerId === row.scopeOwnerId && viewingState === row.scopeId;
+    return (viewing[row.scopeOwnerId] ?? null) === row.scopeId;
   }
   if (row.scopeId && row.id) {
-    return viewingOwnerId === row.ownerId && viewingState === row.id;
+    return (viewing[row.ownerId] ?? null) === row.id;
   }
-  return row.ownerId === viewingOwnerId && row.id === viewingState && !row.scopeId;
+  return (viewing[row.ownerId] ?? null) === row.id && !row.scopeId;
 }

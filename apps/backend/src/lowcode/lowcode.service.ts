@@ -31,6 +31,10 @@ import type {
   NamespaceTypeDto,
   NamespaceTypeFieldDto,
   ProjectNamespaceDto,
+  AnimationDefinitionDto,
+  AnimationKeyframe,
+  CreateAnimationInput,
+  UpdateAnimationInput,
   ProjectVersionDto,
   WidgetEventScriptDto,
   RuntimeLangDto,
@@ -183,11 +187,13 @@ export class LowcodeService implements OnApplicationBootstrap {
         icons[`${group.name}.${file.name.replace(/\.svg$/i, '')}`] = this.oss.getPublicUrl(file.key);
       }
     }
+    const animationRecords = await this.mongo.listAnimations(project._id);
     return {
       name: project.name,
       key: project.key,
       pages: runtimePages,
       icons,
+      animations: animationRecords.map((record) => this.toAnimationDto(record)),
     };
   }
 
@@ -1160,6 +1166,105 @@ export class LowcodeService implements OnApplicationBootstrap {
     return this.toNamespaceDocument(found.name, version);
   }
 
+  async listAnimations(projectId: string): Promise<AnimationDefinitionDto[]> {
+    await this.requireProject(projectId);
+    const records = await this.mongo.listAnimations(projectId);
+    return records.map((record) => this.toAnimationDto(record));
+  }
+
+  async createAnimation(projectId: string, name: string): Promise<AnimationDefinitionDto> {
+    const project = await this.requireProject(projectId);
+    const trimmed = this.animationName(name);
+    const now = new Date();
+    const record = {
+      _id: randomUUID(),
+      projectId: project._id,
+      projectKey: project.key,
+      name: trimmed,
+      keyframes: [],
+      uses: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.mongo.saveAnimationVersion(record);
+    return this.toAnimationDto(record);
+  }
+
+  async updateAnimation(projectId: string, id: string, input: UpdateAnimationInput): Promise<AnimationDefinitionDto> {
+    const project = await this.requireProject(projectId);
+    const record = await this.mongo.getAnimationVersion(id);
+    if (!record || record.projectId !== project._id) {
+      throw new NotFoundException();
+    }
+    if (input.name != null) {
+      record.name = this.animationName(input.name);
+    }
+    if (input.keyframes != null) {
+      record.keyframes = this.normalizeAnimationKeyframes(input.keyframes);
+    }
+    record.updatedAt = new Date();
+    await this.mongo.saveAnimationVersion(record);
+    return this.toAnimationDto(record);
+  }
+
+  async deleteAnimation(projectId: string, id: string): Promise<void> {
+    const project = await this.requireProject(projectId);
+    const record = await this.mongo.getAnimationVersion(id);
+    if (!record || record.projectId !== project._id) {
+      throw new NotFoundException();
+    }
+    await this.mongo.deleteAnimationVersion(id);
+  }
+
+  private animationName(name: string): string {
+    const trimmed = (name ?? '').trim();
+    if (!trimmed || trimmed.length > 64) {
+      throw new BadRequestException('invalid animation name');
+    }
+    return trimmed;
+  }
+
+  private normalizeAnimationKeyframes(value: unknown): AnimationKeyframe[] {
+    if (!Array.isArray(value)) {
+      throw new BadRequestException('invalid keyframes');
+    }
+    return value.map((item) => {
+      if (!item || typeof item !== 'object') {
+        throw new BadRequestException('invalid keyframe');
+      }
+      const row = item as Record<string, unknown>;
+      const offsetRaw = typeof row.offset === 'number' ? row.offset : Number(row.offset);
+      if (!Number.isFinite(offsetRaw)) {
+        throw new BadRequestException('invalid keyframe offset');
+      }
+      const offset = Math.min(1000, Math.max(0, Math.round(offsetRaw * 10) / 10));
+      const propsRaw = row.props && typeof row.props === 'object' ? (row.props as Record<string, unknown>) : {};
+      const props: AnimationKeyframe['props'] = {};
+      for (const key of ['translateX', 'translateY', 'rotateX', 'rotateY', 'rotateZ', 'screw', 'opacity', 'scale'] as const) {
+        const raw = propsRaw[key];
+        const num = typeof raw === 'number' ? raw : raw == null || raw === '' ? undefined : Number(raw);
+        if (num != null && Number.isFinite(num)) {
+          props[key] = num;
+        }
+      }
+      return { offset, props };
+    });
+  }
+
+  private toAnimationDto(record: {
+    _id: string;
+    name: string;
+    keyframes: AnimationKeyframe[];
+    updatedAt: Date;
+  }): AnimationDefinitionDto {
+    return {
+      id: record._id,
+      name: record.name,
+      keyframes: record.keyframes ?? [],
+      updatedAt: toIso(record.updatedAt),
+    };
+  }
+
   private namespaceName(name: string): string {
     const trimmed = name.trim();
     if (!trimmed || trimmed.length > 64 || /[\s/\\]/.test(trimmed)) {
@@ -1225,6 +1330,8 @@ export class LowcodeService implements OnApplicationBootstrap {
       name,
       description: typeof row.description === 'string' ? row.description.slice(0, 4000) : '',
       value: row.value === undefined ? null : row.value,
+      ...(row.dynamic === true ? { dynamic: true } : {}),
+      ...(row.computed === true ? { computed: true } : {}),
     };
   }
 
@@ -1264,6 +1371,8 @@ export class LowcodeService implements OnApplicationBootstrap {
       name: item.name,
       description: item.description,
       value: item.value,
+      ...(item.dynamic ? { dynamic: true } : {}),
+      ...(item.computed ? { computed: true } : {}),
     };
   }
 
@@ -2052,10 +2161,38 @@ export class LowcodeService implements OnApplicationBootstrap {
     } else {
       delete version.emits;
     }
+    // 组件文档声明的插槽（含出参 params）必须随文档落盘，否则刷新后出参丢失。
+    if (next.slots && next.slots.length > 0) {
+      version.slots = next.slots;
+    } else {
+      delete version.slots;
+    }
     if (next.testData) {
       version.testData = next.testData;
     } else {
       delete version.testData;
+    }
+    // 文档级全局状态及其状态函数/hover 与控件节点状态相互独立，必须随文档一并落盘。
+    if (next.states && next.states.length > 0) {
+      version.states = next.states;
+    } else {
+      delete version.states;
+    }
+    if (next.stateFn) {
+      version.stateFn = next.stateFn;
+    } else {
+      delete version.stateFn;
+    }
+    if (next.hoverStateId) {
+      version.hoverStateId = next.hoverStateId;
+    } else {
+      delete version.hoverStateId;
+    }
+    // 组件定义编辑器的「定义尺寸」：仅定义态使用，必须随文档落盘否则刷新丢失。
+    if (next.designSize && (next.designSize.width || next.designSize.height)) {
+      version.designSize = next.designSize;
+    } else {
+      delete version.designSize;
     }
   }
 
@@ -2080,7 +2217,14 @@ export class LowcodeService implements OnApplicationBootstrap {
       ...(record.props && record.props.length > 0 ? { props: record.props } : {}),
       ...(record.query && record.query.length > 0 ? { query: record.query } : {}),
       ...(record.emits && record.emits.length > 0 ? { emits: record.emits } : {}),
+      ...(record.slots && record.slots.length > 0 ? { slots: record.slots } : {}),
       ...(record.testData ? { testData: record.testData } : {}),
+      ...(record.states && record.states.length > 0 ? { states: record.states } : {}),
+      ...(record.stateFn ? { stateFn: record.stateFn } : {}),
+      ...(record.hoverStateId ? { hoverStateId: record.hoverStateId } : {}),
+      ...(record.designSize && (record.designSize.width || record.designSize.height)
+        ? { designSize: record.designSize }
+        : {}),
     };
   }
 

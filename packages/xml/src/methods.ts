@@ -14,13 +14,27 @@ export type PageMethodParam = {
   type: MethodParamType;
 };
 
+/**
+ * 方法级私有数据：只有本方法能访问，在方法内以 `$local.xxx` 读写，
+ * 同一个组件实例内保持单例（多次调用共享）。
+ */
+export type PageMethodData = {
+  name: string;
+  type: MethodParamType;
+  /** 初始值，静态字面量字符串。 */
+  value: string;
+};
+
 /** 方法元数据。代码不在这里，按 id 去 function 集合里取。 */
 export type PageMethod = {
   id: string;
   name: string;
   desc?: string;
   params: PageMethodParam[];
-  returns: PageMethodParam[];
+  /** 出参：单个可选类型，缺省表示无出参（void）。 */
+  returns?: MethodParamType;
+  /** 方法级私有数据。 */
+  data?: PageMethodData[];
   /** 暴露后，组件外部可以调用这个方法。 */
   expose?: boolean;
 };

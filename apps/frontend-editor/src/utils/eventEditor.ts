@@ -5,7 +5,7 @@ import {
   type CompletionContext,
   type CompletionResult,
 } from '@codemirror/autocomplete';
-import { javascript } from '@codemirror/lang-javascript';
+import { typescriptLanguage } from '@codemirror/lang-javascript';
 import { EditorView, showTooltip } from '@codemirror/view';
 import { scriptParamType, WIDGET_EVENT_DECLARATIONS } from '@vanstack/xml';
 import ts from 'typescript';
@@ -31,7 +31,7 @@ export type EventEditorCopy = {
 
 const FILE = '/event.ts';
 const SIGNATURE = '(text: string, duration?: 0 | 1): void';
-const RUNTIME_FUNCTIONS = new Set(['$toast', '$navigateTo', '$navigateBack', '$icon', '$emit']);
+const RUNTIME_FUNCTIONS = new Set(['$toast', '$navigateTo', '$navigateBack', '$icon', '$asset', '$emit']);
 const EMIT_NAME_ARG = /\$emit\(\s*(['"])([^'"]*)$/u;
 const EMIT_BARE_ARG = /\$emit\(\s*$/u;
 
@@ -58,11 +58,10 @@ let service: ts.LanguageService | null = null;
 let source = '';
 let version = 0;
 
+/** 语言本身由 ScriptEditor 统一提供（TypeScript），这里只补充补全与签名提示。 */
 export function createEventEditorExtensions(copy: EventEditorCopy, emits: EventEmitOption[] = []) {
-  const language = javascript({ typescript: true });
   return [
-    language,
-    language.language.data.of({
+    typescriptLanguage.data.of({
       autocomplete: (context: CompletionContext) => scriptCompletions(context, copy, emits),
     }),
     openEditorCompletion(),
@@ -158,7 +157,7 @@ function completionOptions(
   const detailed = result.isMemberCompletion && result.entries.length <= 80;
   const options: Completion[] = [];
   for (const entry of result.entries) {
-    if (entry.name === 'handler' || entry.name === '$icon' || entry.isPackageJsonImport || entry.isImportStatementCompletion) {
+    if (entry.name === 'handler' || entry.name === '$icon' || entry.name === '$asset' || entry.isPackageJsonImport || entry.isImportStatementCompletion) {
       continue;
     }
     const spanStart = entry.replacementSpan ? entry.replacementSpan.start - headerLength : -1;
@@ -312,6 +311,8 @@ function virtualHeader(emits: EventEmitOption[]) {
 ${emitDeclarations(emits)}declare function $toast(text: string, duration?: 0 | 1): void
 /** 按「分组.名称」取图标文件地址。 */
 declare function $icon(path: string): string
+/** 按「分组.文件名」取资源库文件地址。 */
+declare function $asset(path: string): string
 /** 返回上一层或多层。1 是上一页，更大的数字继续往前，停在本次打开时的首页。 */
 declare function $navigateBack(times?: number): void
 /** 打开指定页面，并带上查询参数。页面里用 $query.参数名 读取。 */
@@ -322,6 +323,10 @@ declare const $data: Record<string, any>
 declare const $props: Record<string, any>
 /** 查询参数。读取 $query.名称；写入 $query.名称(值)，编译为 React 时是 set名称(值)。 */
 declare const $query: Record<string, any>
+/** 插槽出参。插槽内容里读取 $slot.名称。 */
+declare const $slot: Record<string, any>
+/** 本文档（页面/组件）自己的方法。用 $this.方法名(参数) 调用。 */
+declare const $this: Record<string, any>
 /** 当前循环项。 */
 declare const $item: any
 /** 当前循环序号，从 0 开始。 */

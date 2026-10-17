@@ -6,7 +6,9 @@ import {
   isPageMethodName,
   isPageMethodParamName,
   isPageMethodParamType,
+  type MethodParamType,
   type PageMethod,
+  type PageMethodData,
   type PageMethodParam,
 } from './methods';
 import { XmlParseError } from './errors';
@@ -70,6 +72,11 @@ export type AngleUnit = (typeof ANGLE_UNITS)[number];
 export type AngleValue = { value: number; unit: AngleUnit };
 const ANGLE_PATTERN = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+))(deg|rad|grad|turn)?$/i;
 
+export const TEXT_ALIGNS = ['left', 'center', 'right', 'justify'] as const;
+export type TextAlign = (typeof TEXT_ALIGNS)[number];
+export const WRITING_MODES = ['horizontal-tb', 'vertical-rl', 'vertical-lr'] as const;
+export type WritingMode = (typeof WRITING_MODES)[number];
+
 export type WidgetStyle = {
   color?: string;
   textShadow?: string;
@@ -79,6 +86,8 @@ export type WidgetStyle = {
   fontWeight?: string;
   underline?: boolean | string;
   lineThrough?: boolean | string;
+  textAlign?: TextAlign | string;
+  writingMode?: WritingMode | string;
   background?: string;
   backgroundImage?: string;
   backgroundBlendMode?: BackgroundBlendMode | string;
@@ -175,7 +184,41 @@ export type FlexItemStyle = {
   flexShrink?: number | string;
   flexBasis?: 'auto' | number | string;
   alignSelf?: FlexAlignSelf | string;
+  /** 宫格布局子项的跨行数，缺省为 1。 */
+  gridRowSpan?: number | string;
+  /** 宫格布局子项的跨列数，缺省为 1。 */
+  gridColumnSpan?: number | string;
 };
+
+/** 宫格布局行/列的配置模式：统一配置或逐条独立配置。 */
+export const GRID_TRACK_MODES = ['unified', 'independent'] as const;
+export type GridTrackMode = (typeof GRID_TRACK_MODES)[number];
+
+/** 宫格布局单条轨道尺寸：数字为 px，`auto` 按内容，字符串绑定走 `$()`。 */
+export type GridTrackSize = number | 'auto' | string;
+
+export type GridStyle = {
+  rowMode?: GridTrackMode | string;
+  /** 统一配置：每行高度 px。空为 auto。 */
+  rowSize?: number | string;
+  /** 统一配置：行数。 */
+  rowCount?: number | string;
+  rowGap?: number | string;
+  /** 独立配置：逐行高度。 */
+  rows?: GridTrackSize[];
+  columnMode?: GridTrackMode | string;
+  /** 统一配置：每列宽度 px。空为等分（1fr）。 */
+  columnSize?: number | string;
+  /** 统一配置：列数。 */
+  columnCount?: number | string;
+  columnGap?: number | string;
+  /** 独立配置：逐列宽度。 */
+  columns?: GridTrackSize[];
+};
+
+export const DEFAULT_GRID_ROW_COUNT = 2;
+export const DEFAULT_GRID_COLUMN_COUNT = 2;
+export const DEFAULT_GRID_TRACK_SIZE = 80;
 
 export const SWIPER_EASINGS = [
   'default',
@@ -360,9 +403,12 @@ export type WidgetStateDelta = {
   props?: WidgetContentProps;
   style?: WidgetStyle;
   flex?: FlexContainerStyle;
+  grid?: GridStyle;
   item?: FlexItemStyle;
   swiper?: SwiperStyle;
   presence?: WidgetPresence;
+  /** 该状态下绑定的动画（只跟随状态，不区分语言）。为空表示继承基础动画。 */
+  animation?: WidgetAnimation;
   states?: WidgetStateDelta[];
   /** 按语言维度的字段分支（语言 key → 该语言相对默认语言的增量）。 */
   langFields?: WidgetLangFields;
@@ -380,6 +426,7 @@ export type WidgetLangFieldDelta = {
   props?: WidgetContentProps;
   style?: WidgetStyle;
   flex?: FlexContainerStyle;
+  grid?: GridStyle;
   item?: FlexItemStyle;
   swiper?: SwiperStyle;
   presence?: WidgetPresence;
@@ -420,6 +467,56 @@ export type WidgetLoop = {
 export const WIDGET_PRESENCES = ['visible', 'removed', 'hidden', 'occupy'] as const;
 export type WidgetPresence = (typeof WIDGET_PRESENCES)[number];
 
+export const WIDGET_ANIMATION_MODES = ['once', 'repeat', 'alternate', 'hold'] as const;
+export type WidgetAnimationMode = (typeof WIDGET_ANIMATION_MODES)[number];
+export const WIDGET_ANIMATION_EASINGS = [
+  'linear',
+  'ease',
+  'easeIn',
+  'easeOut',
+  'easeInOut',
+  'cubicIn',
+  'cubicOut',
+  'cubicInOut',
+] as const;
+export type WidgetAnimationEasing = (typeof WIDGET_ANIMATION_EASINGS)[number];
+
+/** 控件绑定的动画：只存动画 id 与播放参数，定义由运行时按 id 查目录。 */
+export type WidgetAnimation = {
+  id: string;
+  /** 播放时长，单位：秒（如 0.3、1、2.5）。 */
+  duration: number;
+  mode: WidgetAnimationMode;
+  easing: WidgetAnimationEasing;
+};
+
+/** 关键帧上的元素变形属性。translate 单位 px，rotate/screw 单位 deg，opacity 0–1，scale 无单位。 */
+export type AnimationProps = {
+  translateX?: number;
+  translateY?: number;
+  rotateX?: number;
+  rotateY?: number;
+  rotateZ?: number;
+  /** skew（倾斜），单位 deg。 */
+  screw?: number;
+  opacity?: number;
+  scale?: number;
+};
+
+/** 动画的关键帧。offset 为 0–100 的百分比，最小粒度 0.1。 */
+export type AnimationKeyframe = {
+  offset: number;
+  props: AnimationProps;
+};
+
+/** 独立的动画资源，存于 animation.version 集合。 */
+export type AnimationDefinition = {
+  id: string;
+  name: string;
+  keyframes: AnimationKeyframe[];
+  updatedAt?: string;
+};
+
 type WidgetCommon = WidgetStates & {
   loop?: WidgetLoop;
   hidden?: boolean;
@@ -431,6 +528,7 @@ type WidgetCommon = WidgetStates & {
   visibleFn?: string;
   alias?: string;
   events?: WidgetEvents;
+  animation?: WidgetAnimation;
 };
 
 export const DRAWER_PLACES = ['top', 'bottom', 'left', 'right'] as const;
@@ -511,6 +609,14 @@ export type PageWidget =
       children: PageWidget[];
       style?: WidgetStyle;
       flex?: FlexContainerStyle;
+      item?: FlexItemStyle;
+    } & WidgetCommon)
+  | ({
+      type: 'grid';
+      id: string;
+      children: PageWidget[];
+      style?: WidgetStyle;
+      grid?: GridStyle;
       item?: FlexItemStyle;
     } & WidgetCommon)
   | ({
@@ -606,7 +712,7 @@ export type PageWidget =
       style?: WidgetStyle;
     } & WidgetCommon);
 
-type WidgetParent = 'page' | 'flex' | 'scroll' | 'swiper' | 'swiper-item' | 'windows' | 'window' | 'drawer' | 'table' | 'tr' | 'th' | 'td' | 'slot';
+type WidgetParent = 'page' | 'flex' | 'grid' | 'scroll' | 'swiper' | 'swiper-item' | 'windows' | 'window' | 'drawer' | 'table' | 'tr' | 'th' | 'td' | 'slot';
 
 function hasFlexItem(
   widget: PageWidget,
@@ -629,6 +735,15 @@ export type PageStyle = {
   /** 预览与 H5 的屏幕溢出。缺省为 auto，不写入 XML。编辑画布始终可见。 */
   overflow?: OverflowMode | string;
 };
+
+/** 组件定义编辑器的「定义尺寸」，仅定义态使用，不影响组件被使用时的尺寸。 */
+export type PageDesignSize = {
+  width?: number;
+  height?: number;
+};
+
+/** 组件定义尺寸的默认值：文档没写 design-width/design-height 时按此渲染。 */
+export const DEFAULT_COMPONENT_DESIGN_SIZE: Required<PageDesignSize> = { width: 375, height: 300 };
 
 export const PAGE_DATA_TYPES = ['num', 'str', 'bool', 'arr', 'obj', 'icon', 'image', 'widget'] as const;
 export type PageDataType = (typeof PAGE_DATA_TYPES)[number];
@@ -663,6 +778,10 @@ export type ComponentProp = {
   bind?: boolean;
   /** 数组的元素类型，或对象引用的命名空间类型名。 */
   of?: string;
+  /** 值用函数表达式生成。缺省按静态字面量编辑。 */
+  dynamic?: boolean;
+  /** 动态值打开后按表达式跟随 `$data` / `$props`，关闭后只在创建时求值一次。 */
+  computed?: boolean;
 };
 
 /** 组件声明的插槽。插槽内用 `$slot.参数名` / `$()` 读取参数。 */
@@ -966,6 +1085,11 @@ export function stripDataDrivenPresenceGates(widgets: PageWidget[]): PageWidget[
     if ('children' in next && next.children && next.children.length > 0) {
       next = { ...next, children: stripDataDrivenPresenceGates(next.children) };
     }
+    // 克隆会切断运行时按对象身份挂载的作用域元数据（loop 的 $item/$index 等），
+    // 控件状态脚本（stateFn）依赖该作用域求值，必须显式复制，否则脚本拿不到循环上下文。
+    if (next !== widget) {
+      copyWidgetRuntimeMeta(widget, next);
+    }
     return next;
   });
 }
@@ -1136,6 +1260,17 @@ export function pageI18nFromSnapshot(snapshot: PageLangSnapshot): PageI18n {
 export type PageXmlDocument = {
   widgets: PageWidget[];
   style?: PageStyle;
+  /** 文档级全局状态：页面作用于（.lowcode-page），组件作用于组件根，与控件状态同一套层叠规则。 */
+  states?: WidgetStateDelta[];
+  /** 全局状态的状态函数：返回当前应激活的全局状态 id。与单个控件的 stateFn 相互独立。 */
+  stateFn?: string;
+  /** 全局状态的 hover 状态 id。与单个控件的 hoverStateId 相互独立。 */
+  hoverStateId?: string;
+  /**
+   * 仅组件定义编辑器使用的「定义尺寸」：定义插槽时画布上的显示区域大小，
+   * 只影响组件定义态的呈现，组件被使用时的尺寸完全由使用方页面上的控件决定。
+   */
+  designSize?: PageDesignSize;
   data?: PageVariable[];
   events?: WidgetEvents;
   methods?: PageMethod[];
@@ -1177,6 +1312,8 @@ const STYLE_KEYS = [
   'fontWeight',
   'underline',
   'lineThrough',
+  'textAlign',
+  'writingMode',
   'background',
   'backgroundImage',
   'backgroundBlendMode',
@@ -1260,6 +1397,48 @@ function parseWidgetAlias(node: OrderedNode): { alias?: string } {
   return raw ? { alias: raw } : {};
 }
 
+/** 归一化动画绑定对象（id/duration/mode/easing），非法输入返回 undefined。 */
+export function normalizeWidgetAnimation(value: unknown): WidgetAnimation | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const row = value as Record<string, unknown>;
+  const id = typeof row.id === 'string' ? row.id.trim() : '';
+  if (!id) {
+    return undefined;
+  }
+  const durationRaw = typeof row.duration === 'number' ? row.duration : Number(row.duration);
+  // duration 单位为「秒」，保留小数（如 0.3s）；非法或非正数回退 0.3。
+  const duration = Number.isFinite(durationRaw) && durationRaw > 0 ? durationRaw : 0.3;
+  const mode = WIDGET_ANIMATION_MODES.includes(row.mode as WidgetAnimationMode)
+    ? (row.mode as WidgetAnimationMode)
+    : 'once';
+  const easing = WIDGET_ANIMATION_EASINGS.includes(row.easing as WidgetAnimationEasing)
+    ? (row.easing as WidgetAnimationEasing)
+    : 'linear';
+  return { id, duration, mode, easing };
+}
+
+/** 读取节点上的 `animation` 属性（JSON 字符串）并归一化。 */
+function parseAnimationAttr(node: OrderedNode): WidgetAnimation | undefined {
+  const raw = attr(node, 'animation')?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  return normalizeWidgetAnimation(parsed);
+}
+
+function parseWidgetAnimation(node: OrderedNode): { animation?: WidgetAnimation } {
+  const animation = parseAnimationAttr(node);
+  return animation ? { animation } : {};
+}
+
 function compactLangFieldDelta(raw: Record<string, unknown> | undefined): WidgetLangFieldDelta | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return undefined;
@@ -1268,6 +1447,7 @@ function compactLangFieldDelta(raw: Record<string, unknown> | undefined): Widget
   const props = compactWidgetProps(row.props as WidgetContentProps | undefined);
   const style = compactWidgetStyle(row.style as WidgetStyle | undefined);
   const flex = compactFlexContainer(row.flex as FlexContainerStyle | undefined);
+  const grid = compactGrid(row.grid as GridStyle | undefined);
   const item = compactFlexItem(row.item as FlexItemStyle | undefined);
   const swiper = compactSwiper(row.swiper as SwiperStyle | undefined);
   const presenceRaw = typeof row.presence === 'string' ? row.presence : undefined;
@@ -1279,6 +1459,7 @@ function compactLangFieldDelta(raw: Record<string, unknown> | undefined): Widget
   if (props) next.props = props;
   if (style) next.style = style;
   if (flex) next.flex = flex;
+  if (grid) next.grid = grid;
   if (item) next.item = item;
   if (swiper) next.swiper = swiper;
   if (presence) next.presence = presence;
@@ -1344,6 +1525,7 @@ const WIDGET_TAGS = [
   'checkbox',
   'switch',
   'flex',
+  'grid',
   'scroll',
   'swiper',
   'swiper-item',
@@ -1969,6 +2151,12 @@ export function compactWidgetStyle(style: WidgetStyle | undefined): WidgetStyle 
     if (key === 'backgroundFit' && !(BACKGROUND_FIT_MODES as readonly string[]).includes(value as string)) {
       continue;
     }
+    if (key === 'textAlign' && !(TEXT_ALIGNS as readonly string[]).includes(value as string)) {
+      continue;
+    }
+    if (key === 'writingMode' && !(WRITING_MODES as readonly string[]).includes(value as string)) {
+      continue;
+    }
     if (
       key === 'top' ||
       key === 'right' ||
@@ -2336,8 +2524,122 @@ export function compactFlexItem(style: FlexItemStyle | undefined): FlexItemStyle
   if (style.alignSelf) {
     next.alignSelf = style.alignSelf;
   }
+  const rowSpan = compactGridSpan(style.gridRowSpan);
+  if (rowSpan != null) {
+    next.gridRowSpan = rowSpan;
+  }
+  const columnSpan = compactGridSpan(style.gridColumnSpan);
+  if (columnSpan != null) {
+    next.gridColumnSpan = columnSpan;
+  }
 
   return Object.keys(next).length > 0 ? next : undefined;
+}
+
+/** 跨行/跨列：正整数或绑定，缺省为 1（不存储）。 */
+function compactGridSpan(value: number | string | undefined): number | string | undefined {
+  if (typeof value === 'string') {
+    return storedBinding(value);
+  }
+  if (typeof value === 'number' && Number.isInteger(value) && value > 1) {
+    return value;
+  }
+  return undefined;
+}
+
+function compactGridTrack(value: GridTrackSize | undefined): GridTrackSize | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (text === 'auto') {
+      return 'auto';
+    }
+    return storedBinding(text);
+  }
+  return undefined;
+}
+
+function compactGridTracks(tracks: GridTrackSize[] | undefined): GridTrackSize[] | undefined {
+  if (!Array.isArray(tracks) || tracks.length === 0) {
+    return undefined;
+  }
+  return tracks.map((value) => compactGridTrack(value) ?? 'auto');
+}
+
+function compactGridCount(value: number | string | undefined): number | string | undefined {
+  if (typeof value === 'string') {
+    return storedBinding(value);
+  }
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+  return undefined;
+}
+
+export function compactGrid(style: GridStyle | undefined): GridStyle | undefined {
+  if (!style) {
+    return undefined;
+  }
+
+  const next: GridStyle = {};
+  if (style.rowMode === 'independent') {
+    next.rowMode = 'independent';
+  }
+  const rowSize = compactGridTrack(style.rowSize);
+  if (rowSize != null) {
+    next.rowSize = rowSize;
+  }
+  const rowCount = compactGridCount(style.rowCount);
+  if (rowCount != null) {
+    next.rowCount = rowCount;
+  }
+  if (typeof style.rowGap === 'string' && storedBinding(style.rowGap)) {
+    next.rowGap = style.rowGap.trim();
+  } else if (typeof style.rowGap === 'number' && style.rowGap >= 0) {
+    next.rowGap = style.rowGap;
+  }
+  const rows = compactGridTracks(style.rows);
+  if (rows) {
+    next.rows = rows;
+  }
+  if (style.columnMode === 'independent') {
+    next.columnMode = 'independent';
+  }
+  const columnSize = compactGridTrack(style.columnSize);
+  if (columnSize != null) {
+    next.columnSize = columnSize;
+  }
+  const columnCount = compactGridCount(style.columnCount);
+  if (columnCount != null) {
+    next.columnCount = columnCount;
+  }
+  if (typeof style.columnGap === 'string' && storedBinding(style.columnGap)) {
+    next.columnGap = style.columnGap.trim();
+  } else if (typeof style.columnGap === 'number' && style.columnGap >= 0) {
+    next.columnGap = style.columnGap;
+  }
+  const columns = compactGridTracks(style.columns);
+  if (columns) {
+    next.columns = columns;
+  }
+
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+/** 宫格布局当前的行数与列数（独立配置看条目数，统一配置看行数/列数），供跨行跨列上限等场景使用。 */
+export function gridTrackCounts(grid: GridStyle | undefined): { rows: number; columns: number } {
+  const compact = compactGrid(grid);
+  const rows =
+    compact?.rowMode === 'independent'
+      ? Math.max(1, compact.rows?.length ?? 0)
+      : Math.max(1, typeof compact?.rowCount === 'number' ? compact.rowCount : DEFAULT_GRID_ROW_COUNT);
+  const columns =
+    compact?.columnMode === 'independent'
+      ? Math.max(1, compact.columns?.length ?? 0)
+      : Math.max(1, typeof compact?.columnCount === 'number' ? compact.columnCount : DEFAULT_GRID_COLUMN_COUNT);
+  return { rows, columns };
 }
 
 export function compactSwiper(style: SwiperStyle | undefined): SwiperStyle | undefined {
@@ -2451,6 +2753,8 @@ function parseStyle(node: OrderedNode): WidgetStyle | undefined {
     fontWeight: attr(node, 'font-weight') || undefined,
     underline: parseBoolAttr(attr(node, 'underline')),
     lineThrough: parseBoolAttr(attr(node, 'line-through')),
+    textAlign: parseBoundEnum(attr(node, 'text-align'), TEXT_ALIGNS),
+    writingMode: parseBoundEnum(attr(node, 'writing-mode'), WRITING_MODES),
     background: attr(node, 'background') || undefined,
     backgroundImage: attr(node, 'background-image') || undefined,
     backgroundBlendMode: parseBoundEnum(attr(node, 'background-blend-mode'), BACKGROUND_BLEND_MODES),
@@ -2521,6 +2825,51 @@ function parseItem(node: OrderedNode): FlexItemStyle | undefined {
     flexShrink: parseNonNegative(attr(node, 'flex-shrink')),
     flexBasis: basisRaw === 'auto' ? 'auto' : parseNonNegative(basisRaw),
     alignSelf: parseBoundEnum(attr(node, 'align-self'), FLEX_ALIGN_SELFS),
+    gridRowSpan: parsePositiveInteger(attr(node, 'grid-row-span')),
+    gridColumnSpan: parsePositiveInteger(attr(node, 'grid-column-span')),
+  });
+}
+
+function parseGridTrackValue(raw: string): GridTrackSize | undefined {
+  const text = raw.trim();
+  if (!text) {
+    return undefined;
+  }
+  if (text === 'auto') {
+    return 'auto';
+  }
+  return parseNonNegative(text);
+}
+
+function parseGridTrackList(raw: string): GridTrackSize[] | undefined {
+  const text = raw.trim();
+  if (!text) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) {
+    return undefined;
+  }
+  return compactGridTracks(parsed as GridTrackSize[]);
+}
+
+function parseGrid(node: OrderedNode): GridStyle | undefined {
+  return compactGrid({
+    rowMode: parseEnum(attr(node, 'row-mode'), GRID_TRACK_MODES),
+    rowSize: parseGridTrackValue(attr(node, 'row-size')),
+    rowCount: parsePositiveInteger(attr(node, 'row-count')),
+    rowGap: parseNonNegative(attr(node, 'row-gap')),
+    rows: parseGridTrackList(attr(node, 'rows')),
+    columnMode: parseEnum(attr(node, 'column-mode'), GRID_TRACK_MODES),
+    columnSize: parseGridTrackValue(attr(node, 'column-size')),
+    columnCount: parsePositiveInteger(attr(node, 'column-count')),
+    columnGap: parseNonNegative(attr(node, 'column-gap')),
+    columns: parseGridTrackList(attr(node, 'columns')),
   });
 }
 
@@ -2660,6 +3009,12 @@ function styleAttrs(style: WidgetStyle | undefined): Record<string, string> {
     attrs['@_line-through'] = compact.lineThrough;
   } else if (compact.lineThrough != null) {
     attrs['@_line-through'] = compact.lineThrough ? 'true' : 'false';
+  }
+  if (compact.textAlign) {
+    attrs['@_text-align'] = compact.textAlign;
+  }
+  if (compact.writingMode) {
+    attrs['@_writing-mode'] = compact.writingMode;
   }
   if (compact.textShadow) {
     attrs['@_text-shadow'] = compact.textShadow;
@@ -2815,6 +3170,52 @@ function itemAttrs(style: FlexItemStyle | undefined): Record<string, string> {
   }
   if (compact.alignSelf) {
     attrs['@_align-self'] = compact.alignSelf;
+  }
+  if (compact.gridRowSpan != null) {
+    attrs['@_grid-row-span'] = String(compact.gridRowSpan);
+  }
+  if (compact.gridColumnSpan != null) {
+    attrs['@_grid-column-span'] = String(compact.gridColumnSpan);
+  }
+  return attrs;
+}
+
+function gridAttrs(style: GridStyle | undefined): Record<string, string> {
+  const compact = compactGrid(style);
+  if (!compact) {
+    return {};
+  }
+
+  const attrs: Record<string, string> = {};
+  if (compact.rowMode) {
+    attrs['@_row-mode'] = compact.rowMode;
+  }
+  if (compact.rowSize != null) {
+    attrs['@_row-size'] = String(compact.rowSize);
+  }
+  if (compact.rowCount != null) {
+    attrs['@_row-count'] = String(compact.rowCount);
+  }
+  if (compact.rowGap != null) {
+    attrs['@_row-gap'] = String(compact.rowGap);
+  }
+  if (compact.rows?.length) {
+    attrs['@_rows'] = JSON.stringify(compact.rows);
+  }
+  if (compact.columnMode) {
+    attrs['@_column-mode'] = compact.columnMode;
+  }
+  if (compact.columnSize != null) {
+    attrs['@_column-size'] = String(compact.columnSize);
+  }
+  if (compact.columnCount != null) {
+    attrs['@_column-count'] = String(compact.columnCount);
+  }
+  if (compact.columnGap != null) {
+    attrs['@_column-gap'] = String(compact.columnGap);
+  }
+  if (compact.columns?.length) {
+    attrs['@_columns'] = JSON.stringify(compact.columns);
   }
   return attrs;
 }
@@ -2984,6 +3385,63 @@ function pageStyleAttrs(style: PageStyle | undefined): Record<string, string> {
   return attrs;
 }
 
+/** 页面根只吃页面级样式字段（背景/内边距/溢出），页面状态也只保留这些。 */
+function compactPageStateStyle(style: WidgetStyle | undefined): PageStyle | undefined {
+  if (!style) {
+    return undefined;
+  }
+  const pad = (value: BoxLength | string | undefined) => (value == null ? undefined : boxLengthCss(value));
+  return compactPageStyle({
+    background: style.background,
+    paddingTop: pad(style.paddingTop),
+    paddingRight: pad(style.paddingRight),
+    paddingBottom: pad(style.paddingBottom),
+    paddingLeft: pad(style.paddingLeft),
+    overflow: style.overflow,
+  });
+}
+
+/** 解析组件定义编辑器的「定义尺寸」，非法或非正数一律忽略。 */
+function parsePageDesignSize(node: OrderedNode): PageDesignSize | undefined {
+  const width = parseNonNegative(attr(node, 'design-width'));
+  const height = parseNonNegative(attr(node, 'design-height'));
+  const w = typeof width === 'number' && width > 0 ? width : undefined;
+  const h = typeof height === 'number' && height > 0 ? height : undefined;
+  if (w == null && h == null) {
+    return undefined;
+  }
+  return {
+    ...(w != null ? { width: w } : {}),
+    ...(h != null ? { height: h } : {}),
+  };
+}
+
+function pageDesignSizeAttrs(size: PageDesignSize | undefined): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  if (size?.width != null && size.width > 0) {
+    attrs['@_design-width'] = String(size.width);
+  }
+  if (size?.height != null && size.height > 0) {
+    attrs['@_design-height'] = String(size.height);
+  }
+  return attrs;
+}
+
+/** 序列化单条页面全局状态为 `<page>` 下的 `<_ .../>` 节点。 */
+function serializePageStateNode(delta: WidgetStateDelta): OrderedNode {
+  const transition = compactTransition(delta.transition);
+  const langFields = serializeWidgetLangFields(delta.langFields);
+  const attrs: Record<string, string> = {
+    '@_id': delta.id,
+    ...(delta.name != null ? { '@_name': delta.name } : {}),
+    ...(transition != null ? { '@_transition': String(transition) } : {}),
+    ...pageStyleAttrs(compactPageStateStyle(delta.style)),
+    ...(delta.presence ? { '@_presence': delta.presence } : {}),
+    ...(langFields ? { '@_lang-fields': langFields } : {}),
+  };
+  return { _: [], ':@': attrs };
+}
+
 function elementText(value: unknown): string {
   if (value == null || value === '') {
     return '';
@@ -3026,11 +3484,11 @@ function parsePageData(nodes: OrderedNode[]): PageVariable[] | undefined {
         return [];
       }
       const raw = elementText(child[type]);
-      const value = type === 'bool' ? (raw === '1' ? '1' : '0') : raw;
       const desc = attr(child, 'desc').trim();
       const watch = type === 'bool' ? attr(child, 'watch') : '';
-      const computed = (type === 'arr' || type === 'obj') && attr(child, 'computed') === '1';
-      const dynamic = (type === 'arr' || type === 'obj') && (attr(child, 'dynamic') === '1' || computed);
+      const computed = attr(child, 'computed') === '1';
+      const dynamic = attr(child, 'dynamic') === '1' || computed;
+      const value = type === 'bool' && !dynamic ? (raw === '1' ? '1' : '0') : raw;
       const of = type === 'arr' || type === 'obj' ? attr(child, 'of').trim() : '';
       const variable: PageVariable = {
         type,
@@ -3050,10 +3508,10 @@ function parsePageData(nodes: OrderedNode[]): PageVariable[] | undefined {
   return variables.length > 0 ? variables : undefined;
 }
 
-function parseMethodParams(nodes: OrderedNode[], tag: 'in' | 'out'): PageMethodParam[] {
+function parseMethodParams(nodes: OrderedNode[]): PageMethodParam[] {
   const params: PageMethodParam[] = [];
   for (const item of nodes) {
-    if (!Object.prototype.hasOwnProperty.call(item, tag)) {
+    if (!Object.prototype.hasOwnProperty.call(item, 'in')) {
       continue;
     }
     const name = attr(item, 'name').trim();
@@ -3064,6 +3522,36 @@ function parseMethodParams(nodes: OrderedNode[], tag: 'in' | 'out'): PageMethodP
     params.push({ name, type });
   }
   return params;
+}
+
+/** 出参只保留单个类型；旧数据里多个 <out> 取第一个合法类型的 type。 */
+function parseMethodReturns(nodes: OrderedNode[]): MethodParamType | undefined {
+  for (const item of nodes) {
+    if (!Object.prototype.hasOwnProperty.call(item, 'out')) {
+      continue;
+    }
+    const type = attr(item, 'type').trim();
+    if (isPageMethodParamType(type)) {
+      return type;
+    }
+  }
+  return undefined;
+}
+
+function parseMethodData(nodes: OrderedNode[]): PageMethodData[] {
+  const data: PageMethodData[] = [];
+  for (const item of nodes) {
+    if (!Object.prototype.hasOwnProperty.call(item, 'local')) {
+      continue;
+    }
+    const name = attr(item, 'name').trim();
+    const type = attr(item, 'type').trim();
+    if (!isPageMethodParamName(name) || !isPageMethodParamType(type)) {
+      continue;
+    }
+    data.push({ name, type, value: elementText(item.local) });
+  }
+  return data;
 }
 
 function parsePageMethods(nodes: OrderedNode[]): PageMethod[] | undefined {
@@ -3086,11 +3574,14 @@ function parsePageMethods(nodes: OrderedNode[]): PageMethod[] | undefined {
     const desc = attr(child, 'desc').trim();
     const expose = attr(child, 'expose') === '1';
     const body = nodeList(child.method);
+    const returns = parseMethodReturns(body);
+    const data = parseMethodData(body);
     const method: PageMethod = {
       id,
       name,
-      params: parseMethodParams(body, 'in'),
-      returns: parseMethodParams(body, 'out'),
+      params: parseMethodParams(body),
+      ...(returns ? { returns } : {}),
+      ...(data.length > 0 ? { data } : {}),
       ...(desc ? { desc } : {}),
       ...(expose ? { expose: true } : {}),
     };
@@ -3125,7 +3616,12 @@ function parseContractProps(nodes: OrderedNode[], tag: 'props' | 'query' | 'para
     }
     seen.add(name);
     const raw = elementText(child[type]);
-    const value = type === 'bool' ? (raw === '1' ? '1' : '0') : raw;
+    const computed = attr(child, 'computed') === '1';
+    const dynamic = attr(child, 'dynamic') === '1' || computed;
+    // 插槽出参（params）的初始值统一存 `$(表达式)` 或字面量，布尔类型不能压缩成 1/0，
+    // 否则 `$(!0)` 这类表达式在序列化往返后会被改写成 `0`，刷新即丢失。
+    // props/query 的布尔仍是 1/0 字面量（由开关控件产生）；动态表达式原样保留。
+    const value = type === 'bool' && tag !== 'params' && !dynamic ? (raw === '1' ? '1' : '0') : raw;
     const desc = attr(child, 'desc').trim();
     const required = tag === 'props' && attr(child, 'required') === '1';
     const bind = tag === 'props' && attr(child, 'bind') === '1';
@@ -3138,6 +3634,8 @@ function parseContractProps(nodes: OrderedNode[], tag: 'props' | 'query' | 'para
       ...(required ? { required: true } : {}),
       ...(bind ? { bind: true } : {}),
       ...(of ? { of } : {}),
+      ...(dynamic ? { dynamic: true } : {}),
+      ...(computed ? { computed: true } : {}),
     });
   }
   return props.length > 0 ? props : undefined;
@@ -3162,7 +3660,7 @@ function parseComponentEmits(nodes: OrderedNode[]): ComponentEmit[] | undefined 
     const desc = attr(child, 'desc').trim();
     emits.push({
       name,
-      params: parseMethodParams(nodeList(child.emit), 'in'),
+      params: parseMethodParams(nodeList(child.emit)),
       ...(desc ? { desc } : {}),
     });
   }
@@ -3208,8 +3706,26 @@ function parseTestData(nodes: OrderedNode[]): PageTestData | undefined {
   };
 }
 
+/** 解析页面全局状态（`<page>` 下的 `<_>` 子节点）。 */
+function parsePageStates(nodes: OrderedNode[]): WidgetStateDelta[] | undefined {
+  const states: WidgetStateDelta[] = [];
+  const seen = new Set<string>();
+  for (const child of nodes) {
+    if (!Object.prototype.hasOwnProperty.call(child, '_')) {
+      continue;
+    }
+    const delta = parseStateDelta(child);
+    if (delta && !seen.has(delta.id)) {
+      seen.add(delta.id);
+      states.push(delta);
+    }
+  }
+  return states.length > 0 ? states : undefined;
+}
+
 function splitPageChildren(nodes: OrderedNode[]): {
   widgets: OrderedNode[];
+  states?: WidgetStateDelta[];
   data?: PageVariable[];
   methods?: PageMethod[];
   props?: ComponentProp[];
@@ -3225,8 +3741,10 @@ function splitPageChildren(nodes: OrderedNode[]): {
   const emits = parseComponentEmits(nodes);
   const slots = parseComponentSlots(nodes);
   const testData = compactPageTestData(parseTestData(nodes), props, data, query);
+  const states = parsePageStates(nodes);
   const widgets = nodes.filter(
     (child) =>
+      !Object.prototype.hasOwnProperty.call(child, '_') &&
       !Object.prototype.hasOwnProperty.call(child, 'data') &&
       !Object.prototype.hasOwnProperty.call(child, 'i18n') &&
       !Object.prototype.hasOwnProperty.call(child, 'methods') &&
@@ -3238,6 +3756,7 @@ function splitPageChildren(nodes: OrderedNode[]): {
   );
   return {
     widgets,
+    ...(states ? { states } : {}),
     ...(data ? { data } : {}),
     ...(methods ? { methods } : {}),
     ...(props ? { props } : {}),
@@ -3282,7 +3801,11 @@ function parseComponentSlotArgs(nodes: OrderedNode[]): Record<string, Record<str
   return compactComponentSlotArgs(slotArgs);
 }
 
-function parseComponentSlotContent(nodes: OrderedNode[], ids: { n: number }): Record<string, PageWidget[]> | undefined {
+function parseComponentSlotContent(
+  nodes: OrderedNode[],
+  ids: { n: number },
+  ancestorIds: string[] = [],
+): Record<string, PageWidget[]> | undefined {
   const content: Record<string, PageWidget[]> = {};
   for (const child of nodes) {
     if (!Object.prototype.hasOwnProperty.call(child, 'slot-content')) {
@@ -3292,7 +3815,7 @@ function parseComponentSlotContent(nodes: OrderedNode[], ids: { n: number }): Re
     if (!slotId || Object.prototype.hasOwnProperty.call(content, slotId)) {
       continue;
     }
-    const widgets = parseWidgets(nodeList(child['slot-content']), ids, 'slot');
+    const widgets = parseWidgets(nodeList(child['slot-content']), ids, 'slot', ancestorIds);
     if (widgets.length > 0) {
       content[slotId] = widgets;
     }
@@ -3405,6 +3928,12 @@ function serializeContractProps(tag: 'props' | 'query' | 'params', props: Compon
       if (tag === 'props' && prop.of && (prop.type === 'arr' || prop.type === 'obj')) {
         attrs['@_of'] = prop.of;
       }
+      if (prop.dynamic && !prop.computed) {
+        attrs['@_dynamic'] = '1';
+      }
+      if (prop.computed) {
+        attrs['@_computed'] = '1';
+      }
       return {
         [prop.type]: [{ '#text': prop.value }],
         ':@': attrs,
@@ -3422,17 +3951,31 @@ function serializeComponentEmits(emits: ComponentEmit[]): OrderedNode {
         attrs['@_desc'] = desc;
       }
       return {
-        emit: emit.params.map((param) => serializeMethodParam('in', param)),
+        emit: emit.params.map((param) => serializeMethodParam(param)),
         ':@': attrs,
       };
     }),
   };
 }
 
-function serializeMethodParam(tag: 'in' | 'out', param: PageMethodParam): OrderedNode {
+function serializeMethodParam(param: PageMethodParam): OrderedNode {
   return {
-    [tag]: [],
+    in: [],
     ':@': { '@_name': param.name, '@_type': param.type },
+  };
+}
+
+function serializeMethodReturn(type: MethodParamType): OrderedNode {
+  return {
+    out: [],
+    ':@': { '@_type': type },
+  };
+}
+
+function serializeMethodData(data: PageMethodData): OrderedNode {
+  return {
+    local: [{ '#text': data.value }],
+    ':@': { '@_name': data.name, '@_type': data.type },
   };
 }
 
@@ -3449,8 +3992,9 @@ function serializePageMethods(methods: PageMethod[]): OrderedNode {
       }
       return {
         method: [
-          ...method.params.map((param) => serializeMethodParam('in', param)),
-          ...method.returns.map((param) => serializeMethodParam('out', param)),
+          ...method.params.map((param) => serializeMethodParam(param)),
+          ...(method.returns ? [serializeMethodReturn(method.returns)] : []),
+          ...(method.data ?? []).map((item) => serializeMethodData(item)),
         ],
         ':@': attrs,
       };
@@ -3516,10 +4060,10 @@ function serializePageData(variables: PageVariable[]): OrderedNode {
       if (variable.type === 'bool' && variable.watch) {
         attrs['@_watch'] = variable.watch;
       }
-      if ((variable.type === 'arr' || variable.type === 'obj') && variable.dynamic) {
+      if (variable.dynamic && !variable.computed) {
         attrs['@_dynamic'] = '1';
       }
-      if ((variable.type === 'arr' || variable.type === 'obj') && variable.computed) {
+      if (variable.computed) {
         attrs['@_computed'] = '1';
       }
       if ((variable.type === 'arr' || variable.type === 'obj') && variable.of) {
@@ -3539,6 +4083,15 @@ function stateFieldEqual(left: unknown, right: unknown): boolean {
   }
   if (left == null || right == null) {
     return left == null && right == null;
+  }
+  // 宫格布局的 rows / columns 是原始值数组，逐元素比较。
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => Object.is(value, right[index]))
+    );
   }
   if (typeof left !== 'object' || typeof right !== 'object') {
     return false;
@@ -3580,9 +4133,11 @@ export type WidgetStateFields = {
   props?: WidgetContentProps;
   style?: WidgetStyle;
   flex?: FlexContainerStyle;
+  grid?: GridStyle;
   item?: FlexItemStyle;
   swiper?: SwiperStyle;
   presence?: WidgetPresence;
+  animation?: WidgetAnimation;
 };
 
 export function nestedOwnedStates(widget: PageWidget): WidgetStateDelta[] {
@@ -3650,6 +4205,13 @@ function mergeFlex(base?: FlexContainerStyle, overlay?: FlexContainerStyle): Fle
   return compactFlexContainer({ ...base, ...overlay });
 }
 
+function mergeGrid(base?: GridStyle, overlay?: GridStyle): GridStyle | undefined {
+  if (!overlay) {
+    return compactGrid(base);
+  }
+  return compactGrid({ ...base, ...overlay });
+}
+
 function mergeItem(base?: FlexItemStyle, overlay?: FlexItemStyle): FlexItemStyle | undefined {
   if (!overlay) {
     return compactFlexItem(base);
@@ -3688,6 +4250,24 @@ function mergePresence(base: WidgetPresence | undefined, overlay: WidgetPresence
   return overlay ?? base;
 }
 
+function mergeAnimation(
+  base: WidgetAnimation | undefined,
+  overlay: WidgetAnimation | undefined,
+): WidgetAnimation | undefined {
+  return overlay ?? base;
+}
+
+/** 动画绑定整体替换语义，浅比较四个字段即可判定是否变化。 */
+export function sameWidgetAnimation(
+  a: WidgetAnimation | undefined,
+  b: WidgetAnimation | undefined,
+): boolean {
+  if (!a || !b) {
+    return a === b;
+  }
+  return a.id === b.id && a.duration === b.duration && a.mode === b.mode && a.easing === b.easing;
+}
+
 function widgetBaseProps(widget: PageWidget): WidgetContentProps | undefined {
   return compactWidgetProps({
     ...('value' in widget && widget.type !== 'checkbox' && widget.type !== 'switch' ? { value: widget.value } : {}),
@@ -3716,9 +4296,11 @@ function widgetFieldBase(widget: PageWidget): WidgetStateFields {
     props: widgetBaseProps(widget),
     style: compactWidgetStyle(widget.style),
     flex: widget.type === 'flex' ? compactFlexContainer(widget.flex) : undefined,
+    grid: widget.type === 'grid' ? compactGrid(widget.grid) : undefined,
     item: hasFlexItem(widget) ? compactFlexItem(widget.item) : undefined,
     swiper: widget.type === 'swiper' ? compactSwiper(widget.swiper) : undefined,
     presence: presenceFromWidget(widget),
+    animation: widget.animation,
   };
 }
 
@@ -3736,6 +4318,7 @@ function localizedFieldDelta(delta: WidgetStateDelta | undefined, locale: string
     props: mergeProps(delta.props, lang.props),
     style: mergeStyle(delta.style, lang.style),
     flex: mergeFlex(delta.flex, lang.flex),
+    grid: mergeGrid(delta.grid, lang.grid),
     item: mergeItem(delta.item, lang.item),
     swiper: mergeSwiper(delta.swiper, lang.swiper),
     presence: mergePresence(delta.presence, lang.presence),
@@ -3746,15 +4329,18 @@ export function resolveWidgetStateStack(widget: PageWidget, layers: WidgetStateL
   let props = widgetBaseProps(widget);
   let style = compactWidgetStyle(widget.style);
   let flex = widget.type === 'flex' ? compactFlexContainer(widget.flex) : undefined;
+  let grid = widget.type === 'grid' ? compactGrid(widget.grid) : undefined;
   let item = hasFlexItem(widget) ? compactFlexItem(widget.item) : undefined;
   let swiper = widget.type === 'swiper' ? compactSwiper(widget.swiper) : undefined;
   let presence: WidgetPresence | undefined = undefined;
+  let animation = widget.animation;
   if (locale) {
     const lang = widget.langFields?.[locale];
     if (lang) {
       props = mergeProps(props, lang.props);
       style = mergeStyle(style, lang.style);
       flex = widget.type === 'flex' ? mergeFlex(flex, lang.flex) : undefined;
+      grid = widget.type === 'grid' ? mergeGrid(grid, lang.grid) : undefined;
       item = hasFlexItem(widget) ? mergeItem(item, lang.item) : undefined;
       swiper = widget.type === 'swiper' ? mergeSwiper(swiper, lang.swiper) : undefined;
     }
@@ -3772,32 +4358,73 @@ export function resolveWidgetStateStack(widget: PageWidget, layers: WidgetStateL
     props = mergeProps(props, delta?.props);
     style = mergeStyle(style, delta?.style);
     flex = widget.type === 'flex' ? mergeFlex(flex, delta?.flex) : undefined;
+    grid = widget.type === 'grid' ? mergeGrid(grid, delta?.grid) : undefined;
     item = hasFlexItem(widget) ? mergeItem(item, delta?.item) : undefined;
     swiper = widget.type === 'swiper' ? mergeSwiper(swiper, delta?.swiper) : undefined;
     presence = mergePresence(presence, delta?.presence);
+    animation = mergeAnimation(animation, delta?.animation);
   }
-  return { props, style, flex, item, swiper, presence };
+  return { props, style, flex, grid, item, swiper, presence, animation };
+}
+
+/** 文档级全局状态的宿主 id：页面/组件根没有独立控件，用固定 id 参与查看/切换。 */
+export const PAGE_ROOT_STATE_OWNER_ID = '__page__';
+
+/** 用文档合成一个「文档根控件」，复用控件状态层叠逻辑（只关心 style/presence）。 */
+export function pageStateRootWidget(
+  page: Pick<PageXmlDocument, 'style' | 'states' | 'stateFn' | 'hoverStateId'>,
+): PageWidget {
+  return {
+    type: 'flex',
+    id: PAGE_ROOT_STATE_OWNER_ID,
+    children: [],
+    ...(page.style ? { style: page.style } : {}),
+    ...(page.states ? { states: page.states } : {}),
+    ...(page.stateFn ? { stateFn: page.stateFn } : {}),
+    ...(page.hoverStateId ? { hoverStateId: page.hoverStateId } : {}),
+  } as PageWidget;
+}
+
+/** 按给定全局状态求值文档根样式（含基准 page.style）。 */
+export function resolvePageStyleWithStates(
+  page: Pick<PageXmlDocument, 'style' | 'states' | 'stateFn' | 'hoverStateId'>,
+  stateIds: Array<string | null | undefined>,
+  locale?: string,
+): PageStyle | undefined {
+  const layers: WidgetStateLayer[] = stateIds
+    .filter((id): id is string => Boolean(id))
+    .map((id) => ({ id, role: 'owner' }));
+  if (layers.length === 0) {
+    return page.style;
+  }
+  return compactPageStateStyle(resolveWidgetStateStack(pageStateRootWidget(page), layers, locale).style);
 }
 
 export function diffWidgetState(
   widget: PageWidget,
   next: WidgetStateFields,
   base?: WidgetStateFields,
-): WidgetStateDelta | Pick<WidgetStateDelta, 'props' | 'style' | 'flex' | 'item' | 'swiper' | 'presence'> {
+): WidgetStateDelta | Pick<WidgetStateDelta, 'props' | 'style' | 'flex' | 'grid' | 'item' | 'swiper' | 'presence' | 'animation'> {
   const origin = base ?? widgetFieldBase(widget);
   const props = diffRecord(origin.props, next.props, compactWidgetProps);
   const style = diffRecord(origin.style, next.style, compactWidgetStyle);
   const flex = widget.type === 'flex' ? diffRecord(origin.flex, next.flex, compactFlexContainer) : undefined;
+  const grid = widget.type === 'grid' ? diffRecord(origin.grid, next.grid, compactGrid) : undefined;
   const item = hasFlexItem(widget) ? diffRecord(origin.item, next.item, compactFlexItem) : undefined;
   const swiper = widget.type === 'swiper' ? diffRecord(origin.swiper, next.swiper, compactSwiper) : undefined;
   const presence = next.presence !== undefined && next.presence !== origin.presence ? next.presence : undefined;
+  // 动画为整体替换语义：仅当明确给出且与基准不同才写入增量；清除（undefined）在状态层不可表达，视为继承。
+  const animation =
+    next.animation !== undefined && !sameWidgetAnimation(next.animation, origin.animation) ? next.animation : undefined;
   return {
     ...(props ? { props } : {}),
     ...(style ? { style } : {}),
     ...(flex ? { flex } : {}),
+    ...(grid ? { grid } : {}),
     ...(item ? { item } : {}),
     ...(swiper ? { swiper } : {}),
     ...(presence ? { presence } : {}),
+    ...(animation ? { animation } : {}),
   };
 }
 
@@ -3870,6 +4497,13 @@ function withResolvedFields(
       delete next.flex;
     }
   }
+  if (next.type === 'grid') {
+    if (fields.grid) {
+      next.grid = fields.grid;
+    } else {
+      delete next.grid;
+    }
+  }
   if (hasFlexItem(next)) {
     if (fields.item) {
       next.item = fields.item;
@@ -3883,6 +4517,11 @@ function withResolvedFields(
     } else {
       delete next.swiper;
     }
+  }
+  if (fields.animation) {
+    next.animation = fields.animation;
+  } else {
+    delete next.animation;
   }
   if (fields.presence) {
     next = applyWidgetPresence(next, fields.presence);
@@ -3917,6 +4556,8 @@ export type ResolveWidgetTreeOptions = {
   stateLayersSink?: WeakMap<object, WidgetStateLayer[]>;
   /** 当前语言 key，用于按语言分支解析状态字段。 */
   locale?: string;
+  /** 文档级全局状态 id：作为最外层「后代」状态层叠加到所有控件，使全局状态能承载节点样式增量。 */
+  rootGlobalState?: string | null;
 };
 
 function ownerActiveState(
@@ -4007,8 +4648,12 @@ export function resolveWidgetTree(
   options?: ResolveWidgetTreeOptions,
 ): PageWidget[] {
   const list = normalizeViewing(viewing);
+  // 文档级全局状态作为最外层继承层：所有控件都以「后代」角色叠加它，
+  // 从而应用各自 stateOverrides 中记录的该全局状态下的样式增量。
+  const rootGlobalState = options?.rootGlobalState ?? null;
+  const inheritedIds = rootGlobalState ? [rootGlobalState] : [];
   return widgets.map((widget) =>
-    resolveWidgetNode(widget, [], list, undefined, options?.appliedStateFor, options?.stateLayersSink, options?.locale),
+    resolveWidgetNode(widget, inheritedIds, list, undefined, options?.appliedStateFor, options?.stateLayersSink, options?.locale),
   );
 }
 
@@ -4048,9 +4693,11 @@ function parseStateDelta(node: OrderedNode): WidgetStateDelta | undefined {
   const props = parseStateProps(node);
   const style = parseStyle(node);
   const flex = parseFlex(node);
+  const grid = parseGrid(node);
   const item = parseItem(node);
   const swiper = parseSwiper(node);
   const presence = parseWidgetPresence(attr(node, 'presence'));
+  const animation = parseAnimationAttr(node);
   const transition = tag === '_' ? compactTransition(parseNonNegativeInteger(attr(node, 'transition'))) : undefined;
   const langFields = parseWidgetLangFields(attr(node, 'lang-fields'));
   const nested: WidgetStateDelta[] = [];
@@ -4075,9 +4722,11 @@ function parseStateDelta(node: OrderedNode): WidgetStateDelta | undefined {
     ...(props ? { props } : {}),
     ...(style ? { style } : {}),
     ...(flex ? { flex } : {}),
+    ...(grid ? { grid } : {}),
     ...(item ? { item } : {}),
     ...(swiper ? { swiper } : {}),
     ...(presence ? { presence } : {}),
+    ...(animation ? { animation } : {}),
     ...(langFields ? { langFields } : {}),
     ...(nested.length > 0 ? { states: nested } : {}),
   };
@@ -4142,9 +4791,11 @@ function compactDeltaForWrite(widget: PageWidget, delta: WidgetStateDelta, base?
     props: compactWidgetProps({ ...origin.props, ...delta.props }),
     style: compactWidgetStyle({ ...origin.style, ...delta.style }),
     flex: widget.type === 'flex' ? compactFlexContainer({ ...origin.flex, ...delta.flex }) : undefined,
+    grid: widget.type === 'grid' ? compactGrid({ ...origin.grid, ...delta.grid }) : undefined,
     item: hasFlexItem(widget) ? compactFlexItem({ ...origin.item, ...delta.item }) : undefined,
     swiper: widget.type === 'swiper' ? compactSwiper({ ...origin.swiper, ...delta.swiper }) : undefined,
     presence: mergePresence(origin.presence, delta.presence),
+    animation: mergeAnimation(origin.animation, delta.animation),
   };
   return {
     id: delta.id,
@@ -4170,15 +4821,18 @@ function serializeDeltaNode(
     ...propsAttrs(compact.props),
     ...styleAttrs(compact.style),
     ...(widget.type === 'flex' ? flexAttrs(compact.flex) : {}),
+    ...(widget.type === 'grid' ? gridAttrs(compact.grid) : {}),
     ...(asItem && hasFlexItem(widget) ? itemAttrs(compact.item) : {}),
     ...(widget.type === 'swiper' ? swiperAttrs(compact.swiper) : {}),
     ...(compact.presence ? { '@_presence': compact.presence } : {}),
+    ...(compact.animation ? { '@_animation': JSON.stringify(compact.animation) } : {}),
     ...(langFields ? { '@_lang-fields': langFields } : {}),
   };
   const nestedBase: WidgetStateFields = {
     props: compactWidgetProps({ ...((base ?? widgetFieldBase(widget)).props ?? {}), ...(compact.props ?? {}) }),
     style: compactWidgetStyle({ ...((base ?? widgetFieldBase(widget)).style ?? {}), ...(compact.style ?? {}) }),
     flex: widget.type === 'flex' ? compactFlexContainer({ ...((base ?? widgetFieldBase(widget)).flex ?? {}), ...(compact.flex ?? {}) }) : undefined,
+    grid: widget.type === 'grid' ? compactGrid({ ...((base ?? widgetFieldBase(widget)).grid ?? {}), ...(compact.grid ?? {}) }) : undefined,
     item: hasFlexItem(widget)
       ? compactFlexItem({ ...((base ?? widgetFieldBase(widget)).item ?? {}), ...(compact.item ?? {}) })
       : undefined,
@@ -4187,6 +4841,7 @@ function serializeDeltaNode(
         ? compactSwiper({ ...((base ?? widgetFieldBase(widget)).swiper ?? {}), ...(compact.swiper ?? {}) })
         : undefined,
     presence: mergePresence((base ?? widgetFieldBase(widget)).presence, compact.presence),
+    animation: mergeAnimation((base ?? widgetFieldBase(widget)).animation, compact.animation),
   };
   const nested =
     tag === '__'
@@ -4221,7 +4876,7 @@ function uniqueOverrideStates(widget: PageWidget): WidgetStateDelta[] {
 }
 
 function serializeStateChildren(widget: PageWidget, ids: { n: number }, parent: WidgetParent): OrderedNode[] {
-  const asItem = parent === 'flex';
+  const asItem = parent === 'flex' || parent === 'grid';
   const owned = (widget.states ?? [])
     .map((delta) => serializeDeltaNode('_', delta, widget, asItem))
     .filter((node): node is OrderedNode => Boolean(node));
@@ -4231,7 +4886,9 @@ function serializeStateChildren(widget: PageWidget, ids: { n: number }, parent: 
   const childParent: WidgetParent =
     widget.type === 'flex'
       ? 'flex'
-      : widget.type === 'scroll'
+      : widget.type === 'grid'
+        ? 'grid'
+        : widget.type === 'scroll'
         ? 'scroll'
         : widget.type === 'swiper'
         ? 'swiper'
@@ -4257,6 +4914,7 @@ function serializeStateChildren(widget: PageWidget, ids: { n: number }, parent: 
   const childSource = widget.type === 'table' ? orderTableChildren(widget.children) : undefined;
   const children =
     widget.type === 'flex' ||
+    widget.type === 'grid' ||
     widget.type === 'scroll' ||
     widget.type === 'swiper' ||
     widget.type === 'swiper-item' ||
@@ -4336,7 +4994,7 @@ function parseWidgets(
   ancestorIds: string[] = [],
 ): PageWidget[] {
   const widgets: PageWidget[] = [];
-  const asItem = parent === 'flex';
+  const asItem = parent === 'flex' || parent === 'grid';
   const allowSwiperItem = parent === 'swiper';
   const allowTableSection = parent === 'table';
   const allowTableCell = parent === 'tr';
@@ -4359,6 +5017,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4388,6 +5047,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4406,7 +5066,7 @@ function parseWidgets(
       const extra = widgetStateSpread(child, componentNodes, ancestorIds);
       const args = parseComponentArgs(componentNodes);
       const slotArgs = parseComponentSlotArgs(componentNodes);
-      const slotContent = parseComponentSlotContent(componentNodes, ids);
+      const slotContent = parseComponentSlotContent(componentNodes, ids, ancestorIds);
       const name = attr(child, 'name').trim();
       widgets.push({
         type: 'component',
@@ -4423,6 +5083,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4447,6 +5108,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4477,6 +5139,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4509,6 +5172,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4539,6 +5203,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4563,6 +5228,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4593,6 +5259,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4620,6 +5287,35 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
+        ...parseWidgetEvents(child),
+        ...(extra.states ? { states: extra.states } : {}),
+        ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
+        ...(extra.stateFn ? { stateFn: extra.stateFn } : {}),
+        ...(extra.hoverStateId ? { hoverStateId: extra.hoverStateId } : {}),
+        ...(extra.langFields ? { langFields: extra.langFields } : {}),
+        ...(extra.transition ? { transition: extra.transition } : {}),
+      });
+      continue;
+    }
+    if (allowContent && Object.prototype.hasOwnProperty.call(child, 'grid')) {
+      ids.n += 1;
+      const style = parseStyle(child);
+      const grid = parseGrid(child);
+      const item = asItem ? parseItem(child) : undefined;
+      const extra = widgetStateSpread(child, nodeList(child.grid), ancestorIds);
+      const nextIds = [...ancestorIds, ...extraDeclaredIds(extra)];
+      widgets.push({
+        type: 'grid',
+        id: attr(child, 'id') || `n${ids.n}`,
+        children: parseWidgets(extra.rest, ids, 'grid', nextIds),
+        ...(style ? { style } : {}),
+        ...(grid ? { grid } : {}),
+        ...(item ? { item } : {}),
+        ...parseWidgetLoop(child),
+        ...parseWidgetHost(child),
+        ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4649,6 +5345,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4676,6 +5373,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4709,6 +5407,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4736,6 +5435,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4766,6 +5466,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4792,6 +5493,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4815,6 +5517,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4847,6 +5550,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4872,6 +5576,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4902,6 +5607,7 @@ function parseWidgets(
         ...parseWidgetLoop(child),
         ...parseWidgetHost(child),
         ...parseWidgetAlias(child),
+        ...parseWidgetAnimation(child),
         ...parseWidgetEvents(child),
         ...(extra.states ? { states: extra.states } : {}),
         ...(extra.stateOverrides ? { stateOverrides: extra.stateOverrides } : {}),
@@ -4945,11 +5651,14 @@ function widgetHostAttrs(
     ...(hoverValid ? { '@_hover': hoverValid } : {}),
     ...(transition ? { '@_transition': String(transition) } : {}),
     ...(langFields ? { '@_lang-fields': langFields } : {}),
+    ...(widget.animation && widget.animation.id
+      ? { '@_animation': JSON.stringify(widget.animation) }
+      : {}),
   };
 }
 
 function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: WidgetParent): OrderedNode[] {
-  const asItem = parent === 'flex';
+  const asItem = parent === 'flex' || parent === 'grid';
   return widgets.map((widget) => {
     ids.n += 1;
     const id = widget.id || `n${ids.n}`;
@@ -5057,6 +5766,12 @@ function serializeWidgets(widgets: PageWidget[], ids: { n: number }, parent: Wid
         ':@': widgetHostAttrs(widget, id, style, { ...flexAttrs(widget.flex), ...item }),
       };
     }
+    if (widget.type === 'grid') {
+      return {
+        grid: inner,
+        ':@': widgetHostAttrs(widget, id, style, { ...gridAttrs(widget.grid), ...item }),
+      };
+    }
     if (widget.type === 'scroll') {
       return {
         scroll: inner,
@@ -5158,10 +5873,22 @@ export function parsePageXml(xml: string): PageXmlDocument {
   const pageNode = findPageRoot(pageParser.parse(xml));
   const style = parsePageStyle(pageNode);
   const events = parsePageEvents(pageNode);
-  const { widgets, data, methods, props, query, emits, slots, testData } = splitPageChildren(nodeList(pageNode.page));
+  const { widgets, states, data, methods, props, query, emits, slots, testData } = splitPageChildren(nodeList(pageNode.page));
+  const docStateIds = (states ?? []).map((state) => state.id);
+  const rawStateFn = attr(pageNode, 'state');
+  const stateFn = rawStateFn ? parseHostStateFn(rawStateFn, docStateIds) : undefined;
+  const rawHover = attr(pageNode, 'hover');
+  const hoverStateId = rawHover && docStateIds.includes(rawHover) ? rawHover : undefined;
+  const designSize = parsePageDesignSize(pageNode);
   return {
-    widgets: parseWidgets(widgets, { n: 0 }, 'page'),
+    // 文档级全局状态同样作为「可被后代覆盖」的祖先状态：把其 id 并入祖先集，
+    // 否则控件上针对全局状态的 stateOverrides 会在解析时被丢弃（刷新后节点样式丢失）。
+    widgets: parseWidgets(widgets, { n: 0 }, 'page', docStateIds),
     ...(style ? { style } : {}),
+    ...(states ? { states } : {}),
+    ...(stateFn ? { stateFn } : {}),
+    ...(hoverStateId ? { hoverStateId } : {}),
+    ...(designSize ? { designSize } : {}),
     ...(data ? { data } : {}),
     ...(events ? { events } : {}),
     ...(methods ? { methods } : {}),
@@ -5238,6 +5965,10 @@ export function normalizePageDocument(input: unknown): PageXmlDocument {
     serializePageXml({
       widgets: page.widgets,
       ...(page.style ? { style: page.style } : {}),
+      ...(page.states && page.states.length > 0 ? { states: page.states } : {}),
+      ...(page.stateFn ? { stateFn: page.stateFn } : {}),
+      ...(page.hoverStateId ? { hoverStateId: page.hoverStateId } : {}),
+      ...(page.designSize ? { designSize: page.designSize } : {}),
       ...(page.data && page.data.length > 0 ? { data: page.data } : {}),
       ...(page.events ? { events: page.events } : {}),
       ...(page.methods && page.methods.length > 0 ? { methods: page.methods } : {}),
@@ -5251,7 +5982,17 @@ export function normalizePageDocument(input: unknown): PageXmlDocument {
 }
 
 export function serializePageXml(page: PageXmlDocument): string {
-  const attrs = { ...pageStyleAttrs(page.style), ...pageEventAttrs(page.events) };
+  // 文档级全局状态的状态函数/hover 与控件级独立，挂在 <page> 根属性上（@_state / @_hover）。
+  const docStateIds = (page.states ?? []).map((state) => state.id);
+  const docStateFn = compactStateFn(page.stateFn);
+  const docHover = page.hoverStateId && docStateIds.includes(page.hoverStateId) ? page.hoverStateId : undefined;
+  const attrs = {
+    ...pageStyleAttrs(page.style),
+    ...pageEventAttrs(page.events),
+    ...(docStateFn ? { '@_state': docStateFn } : {}),
+    ...(docHover ? { '@_hover': docHover } : {}),
+    ...pageDesignSizeAttrs(page.designSize),
+  };
   const testData = page.testData ? serializeTestData(page.testData, page.props, page.data, page.query) : undefined;
   const children = [
     ...(page.props && page.props.length > 0 ? [serializeComponentProps(page.props)] : []),
@@ -5261,6 +6002,7 @@ export function serializePageXml(page: PageXmlDocument): string {
     ...(page.data && page.data.length > 0 ? [serializePageData(page.data)] : []),
     ...(testData ? [testData] : []),
     ...(page.methods && page.methods.length > 0 ? [serializePageMethods(page.methods)] : []),
+    ...(page.states && page.states.length > 0 ? page.states.map(serializePageStateNode) : []),
     ...serializeWidgets(page.widgets, { n: 0 }, 'page'),
   ];
   return pageBuilder.build([

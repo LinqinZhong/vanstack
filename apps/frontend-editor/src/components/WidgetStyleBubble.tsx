@@ -1,10 +1,11 @@
 import {
+  AppstoreOutlined,
   BoldOutlined,
+  DeleteOutlined,
   BorderInnerOutlined,
   BorderOutlined,
   BorderOuterOutlined,
   ColumnWidthOutlined,
-  ControlOutlined,
   CodeOutlined,
   DragOutlined,
   EditOutlined,
@@ -12,6 +13,7 @@ import {
   BgColorsOutlined,
   ItalicOutlined,
   PictureOutlined,
+  PlayCircleOutlined,
   BoxPlotOutlined,
   RadiusSettingOutlined,
   RotateRightOutlined,
@@ -24,6 +26,8 @@ import { Button, ColorPicker, ConfigProvider, Dropdown, Input, InputNumber, Moda
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  WIDGET_ANIMATION_EASINGS,
+  WIDGET_ANIMATION_MODES,
   DEFAULT_DRAWER_PLACE,
   DRAWER_PLACES,
   DEFAULT_SCROLL_HEIGHT,
@@ -45,11 +49,15 @@ import {
   TABLE_ALIGNS,
   TABLE_VALIGNS,
   compactFlexContainer,
+  compactGrid,
+  GRID_TRACK_MODES,
+  DEFAULT_GRID_COLUMN_COUNT,
+  DEFAULT_GRID_ROW_COUNT,
+  DEFAULT_GRID_TRACK_SIZE,
   componentEmitSpecs,
   isCopyBinding,
   hasWidgetEvents,
   isLoopConfigured,
-  isStateFnConfigured,
   widgetEventSpecs,
   sanitizeWidgetStyle,
   type ComponentEmit,
@@ -59,6 +67,9 @@ import {
   type FlexContainerStyle,
   type FlexDirection,
   type FlexJustifyContent,
+  type GridStyle,
+  type GridTrackMode,
+  type GridTrackSize,
   type OverflowMode,
   type PageI18n,
   type PageVariable,
@@ -69,9 +80,13 @@ import {
   type TableLineStyle,
   type TableLines,
   type TableValign,
+  type WidgetAnimation,
+  type WidgetAnimationEasing,
+  type WidgetAnimationMode,
   type WidgetLoop,
   type WidgetStyle,
 } from '@vanstack/xml';
+import type { AnimationDefinitionDto } from '@vanstack/shared';
 import { AssetImagePicker } from './AssetLibraryPanel';
 import { IconPicker } from './IconLibraryPanel';
 import { CopyDataPicker } from './CopyDataPicker';
@@ -88,7 +103,6 @@ import {
   presenceFromWidget,
   type WidgetPresence,
 } from './WidgetPresence';
-import { WidgetStateFnModal } from './WidgetStateFnModal';
 import { compactDrawerStyle, drawerRadiusKeys, drawerRadiusValue, drawerSizeAxis } from '../widgets/drawer';
 import { modifierShortcutLabel } from '../utils/widgetShortcuts';
 
@@ -102,7 +116,7 @@ type ShadowValue = {
 const DEFAULT_SHADOW: ShadowValue = { x: 0, y: 0, blur: 4, color: '' };
 const DEFAULT_BUTTON_BACKGROUND = '#ffffff';
 
-export type BoxGroup = 'content' | 'margin' | 'padding' | 'radius' | 'border' | 'size' | 'overflow' | 'position' | 'rotate' | 'loop' | 'events' | 'flex' | 'background';
+export type BoxGroup = 'content' | 'margin' | 'padding' | 'radius' | 'border' | 'size' | 'overflow' | 'position' | 'rotate' | 'loop' | 'events' | 'flex' | 'grid' | 'background' | 'animation';
 
 export type TableCommand =
   | 'add-column'
@@ -126,6 +140,7 @@ export type TableBubbleModel = {
 
 const BACKGROUND_TOOL_TYPES: ReadonlyArray<PageWidget['type']> = [
   'flex',
+  'grid',
   'scroll',
   'swiper',
   'swiper-item',
@@ -462,6 +477,212 @@ function FlexControlPanel({
   );
 }
 
+/** 轨道尺寸输入：数字转 px，`auto` 原样，其余（含 `$()` 绑定）按字符串保留；失焦或回车提交。 */
+function parseTrackInput(raw: string): GridTrackSize | undefined {
+  const text = raw.trim();
+  if (!text) {
+    return undefined;
+  }
+  if (text === 'auto') {
+    return 'auto';
+  }
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    return Number(text);
+  }
+  return text;
+}
+
+function trackInputText(value: GridTrackSize | undefined): string {
+  if (value == null) {
+    return '';
+  }
+  return typeof value === 'number' ? String(value) : value;
+}
+
+function TrackSizeInput({
+  value,
+  disabled,
+  onCommit,
+}: {
+  value: GridTrackSize | undefined;
+  disabled?: boolean;
+  onCommit: (value: GridTrackSize | undefined) => void;
+}) {
+  return (
+    <Input
+      key={trackInputText(value)}
+      size="small"
+      disabled={disabled}
+      defaultValue={trackInputText(value)}
+      onMouseDown={(event) => event.stopPropagation()}
+      onBlur={(event) => onCommit(parseTrackInput(event.target.value))}
+      onPressEnter={(event) => {
+        const target = event.target as HTMLInputElement;
+        onCommit(parseTrackInput(target.value));
+        target.blur();
+      }}
+    />
+  );
+}
+
+function GridControlPanel({
+  grid,
+  disabled,
+  popupContainer,
+  onChange,
+}: {
+  grid?: GridStyle;
+  disabled?: boolean;
+  popupContainer: () => HTMLElement;
+  onChange: (next: Partial<GridStyle>) => void;
+}) {
+  const { t } = useTranslation();
+  const current = grid ?? {};
+
+  function modeRow(axis: 'row' | 'column', mode: GridTrackMode) {
+    return (
+      <div className="flex-control-row is-select">
+        <span className="style-box-row-label">{t('lowcode.gridTrackMode')}</span>
+        <Select
+          size="small"
+          disabled={disabled}
+          value={mode}
+          popupMatchSelectWidth={false}
+          getPopupContainer={popupContainer}
+          onMouseDown={(event) => event.stopPropagation()}
+          onChange={(next: GridTrackMode) => onChange(axis === 'row' ? { rowMode: next } : { columnMode: next })}
+          options={GRID_TRACK_MODES.map((item) => ({
+            value: item,
+            label: t(item === 'unified' ? 'lowcode.gridModeUnified' : 'lowcode.gridModeIndependent'),
+          }))}
+        />
+      </div>
+    );
+  }
+
+  function countRow(axis: 'row' | 'column') {
+    const value = axis === 'row' ? (current.rowCount ?? DEFAULT_GRID_ROW_COUNT) : (current.columnCount ?? DEFAULT_GRID_COLUMN_COUNT);
+    return (
+      <div className="flex-control-row">
+        <span className="style-box-row-label">{axis === 'row' ? t('lowcode.gridRowCount') : t('lowcode.gridColumnCount')}</span>
+        <InputNumber
+          size="small"
+          min={1}
+          precision={0}
+          disabled={disabled}
+          value={value}
+          onMouseDown={(event) => event.stopPropagation()}
+          onChange={(next) => onChange(axis === 'row' ? { rowCount: next ?? undefined } : { columnCount: next ?? undefined })}
+        />
+      </div>
+    );
+  }
+
+  function gapRow(axis: 'row' | 'column') {
+    const value = axis === 'row' ? current.rowGap : current.columnGap;
+    return (
+      <div className="flex-control-row">
+        <span className="style-box-row-label">{axis === 'row' ? t('lowcode.gridRowGap') : t('lowcode.gridColumnGap')}</span>
+        <InputNumber
+          size="small"
+          min={0}
+          disabled={disabled}
+          value={gapAmount(value)}
+          onMouseDown={(event) => event.stopPropagation()}
+          onChange={(next) => onChange(axis === 'row' ? { rowGap: next ?? undefined } : { columnGap: next ?? undefined })}
+        />
+        <Select
+          size="small"
+          disabled={disabled}
+          value="px"
+          popupMatchSelectWidth={false}
+          getPopupContainer={popupContainer}
+          onMouseDown={(event) => event.stopPropagation()}
+          options={[{ value: 'px', label: 'px' }]}
+        />
+      </div>
+    );
+  }
+
+  function trackList(axis: 'row' | 'column') {
+    const list = (axis === 'row' ? current.rows : current.columns) ?? [];
+    const writeTracks = (next: GridTrackSize[] | undefined) => onChange(axis === 'row' ? { rows: next } : { columns: next });
+    return (
+      <>
+        <div className="flex-control-row">
+          <span className="style-box-row-label">{axis === 'row' ? t('lowcode.gridRowsList') : t('lowcode.gridColumnsList')}</span>
+        </div>
+        {list.map((track, index) => (
+          <div className="flex-control-row" key={`${axis}-${index}`}>
+            <TrackSizeInput
+              value={track}
+              disabled={disabled}
+              onCommit={(value) => {
+                const next = [...list];
+                next[index] = value ?? 'auto';
+                writeTracks(next);
+              }}
+            />
+            <Button
+              size="small"
+              type="text"
+              disabled={disabled}
+              icon={<DeleteOutlined />}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={() => {
+                const next = list.filter((_, itemIndex) => itemIndex !== index);
+                writeTracks(next.length > 0 ? next : undefined);
+              }}
+            />
+          </div>
+        ))}
+        <div className="flex-control-row">
+          <Button
+            size="small"
+            type="text"
+            disabled={disabled}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={() => writeTracks([...list, DEFAULT_GRID_TRACK_SIZE])}
+          >
+            {axis === 'row' ? t('lowcode.gridAddRow') : t('lowcode.gridAddColumn')}
+          </Button>
+        </div>
+      </>
+    );
+  }
+
+  function section(axis: 'row' | 'column') {
+    const rawMode = axis === 'row' ? current.rowMode : current.columnMode;
+    const mode: GridTrackMode = rawMode === 'independent' ? 'independent' : 'unified';
+    return (
+      <div className="grid-control-section">
+        <div className="flex-control-row">
+          <span className="style-box-row-label">{axis === 'row' ? t('lowcode.gridRows') : t('lowcode.gridColumns')}</span>
+        </div>
+        {modeRow(axis, mode)}
+        {mode === 'unified' ? (
+          <>
+            {countRow(axis)}
+            {gapRow(axis)}
+          </>
+        ) : (
+          <>
+            {gapRow(axis)}
+            {trackList(axis)}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-control-panel grid-control-panel">
+      {section('row')}
+      {section('column')}
+    </div>
+  );
+}
+
 export function WidgetStyleBubble({
   widget,
   style,
@@ -473,7 +694,6 @@ export function WidgetStyleBubble({
   onLoopChange,
   onPlaceChange,
   onEventsChange,
-  onStateFnChange,
   onPresenceChange,
   onOpenInspector,
   onScrollChange,
@@ -481,6 +701,7 @@ export function WidgetStyleBubble({
   projectId,
   variables,
   componentProps,
+  slotProps,
   scriptEmits,
   listenEmits,
   disabled,
@@ -490,7 +711,10 @@ export function WidgetStyleBubble({
   onTableLines,
   onStyleDelta,
   onFlexChange,
+  onGridChange,
   onSizeChange,
+  animations,
+  onAnimationChange,
 }: {
   widget: PageWidget;
   style?: WidgetStyle;
@@ -504,13 +728,14 @@ export function WidgetStyleBubble({
   onLoopChange?: (loop: WidgetLoop | undefined) => void;
   onPlaceChange?: (place: DrawerPlace) => void;
   onEventsChange?: (events: PageWidget['events']) => void;
-  onStateFnChange?: (stateFn: string | undefined, hoverStateId?: string) => void;
   onPresenceChange?: (next: WidgetPresence) => void;
   onOpenInspector: () => void;
   onScrollChange?: (axis: 'scrollX' | 'scrollY', enabled: boolean) => void;
   i18nCatalog?: PageI18n;
   variables?: PageVariable[];
   componentProps?: ComponentProp[];
+  /** 当前控件所在插槽声明的出参（`$slot.名称`）。 */
+  slotProps?: ComponentProp[];
   /** 当前正在编辑的组件的自定义事件，供脚本里的 `$emit` 补全。 */
   scriptEmits?: ComponentEmit[];
   /** 选中的组件实例对外声明的自定义事件，可以在这里绑定处理函数。 */
@@ -521,7 +746,12 @@ export function WidgetStyleBubble({
   table?: TableBubbleModel;
   onTableLines?: (lines: TableLines | undefined) => void;
   onFlexChange?: (flex: FlexContainerStyle | undefined) => void;
+  onGridChange?: (grid: GridStyle | undefined) => void;
   onSizeChange?: (size: number | string) => void;
+  /** 工程动画库，供「动画」配置面板选择。 */
+  animations?: AnimationDefinitionDto[];
+  /** 回写控件绑定的动画（含时长/模式/缓动）；undefined 表示清除。 */
+  onAnimationChange?: (animation: WidgetAnimation | undefined) => void;
 }) {
   const { t, i18n } = useTranslation();
   const eventSpecs = useMemo(() => {
@@ -568,9 +798,11 @@ export function WidgetStyleBubble({
   const presenceInheritedClass = Boolean(ownKeys && !ownKeys.has('presence') && presenceFromWidget(widget) !== 'visible')
     ? 'widget-style-inherited'
     : undefined;
+  const animationInheritedClass = Boolean(ownKeys && !ownKeys.has('animation') && widget.animation?.id)
+    ? 'widget-style-inherited'
+    : undefined;
   const [textShadow, setTextShadow] = useState(() => parseCssShadow(display.textShadow));
   const [openPopup, setOpenPopup] = useState<string | null>(null);
-  const [stateFnOpen, setStateFnOpen] = useState(false);
   const [fontEntries, setFontEntries] = useState<FontCatalogEntry[]>([]);
 
   const onToolbarPopupChangeRef = useRef(onToolbarPopupChange);
@@ -633,6 +865,13 @@ export function WidgetStyleBubble({
       return;
     }
     onFlexChange(compactFlexContainer({ ...(widget.flex ?? {}), ...next }));
+  }
+
+  function patchGrid(next: Partial<GridStyle>) {
+    if (disabled || !onGridChange || widget.type !== 'grid') {
+      return;
+    }
+    onGridChange(compactGrid({ ...(widget.grid ?? {}), ...next }));
   }
 
   function patchTableLine(kind: keyof TableLines, partial: Partial<TableLine>) {
@@ -992,16 +1231,6 @@ export function WidgetStyleBubble({
               />
             </Dropdown>
           ) : null}
-          {onStateFnChange ? (
-            <Tooltip title={t('lowcode.styleState')}>
-              <Button
-                size="small"
-                type={isStateFnConfigured(widget.stateFn) || widget.hoverStateId ? 'primary' : 'text'}
-                icon={<ControlOutlined />}
-                onClick={() => setStateFnOpen(true)}
-              />
-            </Tooltip>
-          ) : null}
           <Tooltip title={t('lowcode.styleEvents')}>
             <Button
               size="small"
@@ -1020,6 +1249,17 @@ export function WidgetStyleBubble({
               />
             </Tooltip>
           ) : null}
+          {onAnimationChange && widget.type !== 'tr' ? (
+            <Tooltip title={t('lowcode.animationConfig')}>
+              <Button
+                size="small"
+                type={openGroup === 'animation' || Boolean(widget.animation?.id) ? 'primary' : 'text'}
+                className={animationInheritedClass}
+                icon={<PlayCircleOutlined />}
+                onClick={() => toggleGroup('animation')}
+              />
+            </Tooltip>
+          ) : null}
           {isBoxGroupAllowed(widget.type, 'overflow') ? (
             <Tooltip title={t('lowcode.styleOverflow')}>
               <Button
@@ -1031,12 +1271,22 @@ export function WidgetStyleBubble({
             </Tooltip>
           ) : null}
           {
-            // 弹性盒控制
+            // 弹性布局控制
             widget.type === 'flex' ? <Tooltip title={t('lowcode.iconsFlexControl')}>
               <Button size="small"
                 type={openGroup === 'flex' ? 'primary' : 'text'}
                 icon={<BoxPlotOutlined />}
                 onClick={() => toggleGroup('flex')}
+              />
+            </Tooltip> : null
+          }
+          {
+            // 宫格布局控制
+            widget.type === 'grid' ? <Tooltip title={t('lowcode.iconsGridControl')}>
+              <Button size="small"
+                type={openGroup === 'grid' ? 'primary' : 'text'}
+                icon={<AppstoreOutlined />}
+                onClick={() => toggleGroup('grid')}
               />
             </Tooltip> : null
           }
@@ -1067,7 +1317,7 @@ export function WidgetStyleBubble({
                     onTextChange(event.target.value);
                   }}
                 />
-                <CopyDataPicker variables={variables} componentProps={componentProps} disabled={disabled} onPick={onTextChange} />
+                <CopyDataPicker variables={variables} componentProps={componentProps} slotProps={slotProps} disabled={disabled} onPick={onTextChange} />
                 <CopyI18nPicker catalog={i18nCatalog} disabled={disabled} onPick={onTextChange} />
               </div>
             ) : null}
@@ -1565,10 +1815,113 @@ export function WidgetStyleBubble({
                 widget={widget}
                 variables={variables ?? []}
                 props={componentProps}
+                slotProps={slotProps}
                 disabled={disabled}
                 popupContainer={popupContainer}
                 onChange={onLoopChange}
               />
+            ) : null}
+            {openGroup === 'animation' && onAnimationChange ? (
+              <div className="style-size-panel">
+                <div className="style-size-row">
+                  <span className="style-size-label">{t('lowcode.animationConfig')}</span>
+                  <Select
+                    size="small"
+                    allowClear
+                    value={widget.animation?.id}
+                    placeholder={t('lowcode.animationSelect')}
+                    popupMatchSelectWidth={false}
+                    getPopupContainer={popupContainer}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    options={(animations ?? []).map((item) => ({ value: item.id, label: item.name }))}
+                    onChange={(id: string | undefined) => {
+                      if (!id) {
+                        onAnimationChange(undefined);
+                        return;
+                      }
+                      onAnimationChange({
+                        id,
+                        duration: widget.animation?.duration ?? 0.3,
+                        mode: widget.animation?.mode ?? 'once',
+                        easing: widget.animation?.easing ?? 'linear',
+                      });
+                    }}
+                  />
+                </div>
+                <div className="style-size-row">
+                  <span className="style-size-label">{t('lowcode.animationDuration')}</span>
+                  <InputNumber
+                    size="small"
+                    min={0.1}
+                    step={0.1}
+                    controls
+                    suffix="s"
+                    disabled={disabled || !widget.animation?.id}
+                    value={widget.animation?.duration ?? 0.3}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onChange={(value) => {
+                      if (!widget.animation?.id) {
+                        return;
+                      }
+                      onAnimationChange({
+                        ...widget.animation,
+                        duration: typeof value === 'number' ? value : 0.3,
+                      });
+                    }}
+                  />
+                </div>
+                <div className="style-size-row">
+                  <span className="style-size-label">{t('lowcode.animationMode')}</span>
+                  <Select
+                    size="small"
+                    disabled={disabled || !widget.animation?.id}
+                    value={widget.animation?.mode ?? 'once'}
+                    popupMatchSelectWidth={false}
+                    getPopupContainer={popupContainer}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    options={WIDGET_ANIMATION_MODES.map((mode) => ({
+                      value: mode,
+                      label: t(`lowcode.animationMode${mode.charAt(0).toUpperCase()}${mode.slice(1)}`),
+                    }))}
+                    onChange={(mode: WidgetAnimationMode) => {
+                      if (!widget.animation?.id) {
+                        return;
+                      }
+                      onAnimationChange({ ...widget.animation, mode });
+                    }}
+                  />
+                </div>
+                <div className="style-size-row">
+                  <span className="style-size-label">{t('lowcode.animationEasing')}</span>
+                  <Select
+                    size="small"
+                    disabled={disabled || !widget.animation?.id}
+                    value={widget.animation?.easing ?? 'linear'}
+                    popupMatchSelectWidth={false}
+                    getPopupContainer={popupContainer}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    options={WIDGET_ANIMATION_EASINGS.map((easing) => ({
+                      value: easing,
+                      label: t(`lowcode.animationEasing${easing.charAt(0).toUpperCase()}${easing.slice(1)}`),
+                    }))}
+                    onChange={(easing: WidgetAnimationEasing) => {
+                      if (!widget.animation?.id) {
+                        return;
+                      }
+                      onAnimationChange({ ...widget.animation, easing });
+                    }}
+                  />
+                </div>
+                <div className="style-size-row">
+                  <Button
+                    size="small"
+                    disabled={disabled || !widget.animation?.id}
+                    onClick={() => onAnimationChange(undefined)}
+                  >
+                    {t('lowcode.animationClear')}
+                  </Button>
+                </div>
+              </div>
             ) : null}
             {openGroup === 'flex' && widget.type === 'flex' ? (
               <FlexControlPanel
@@ -1576,6 +1929,14 @@ export function WidgetStyleBubble({
                 disabled={disabled}
                 popupContainer={popupContainer}
                 onChange={patchFlex}
+              />
+            ) : null}
+            {openGroup === 'grid' && widget.type === 'grid' ? (
+              <GridControlPanel
+                grid={widget.grid}
+                disabled={disabled}
+                popupContainer={popupContainer}
+                onChange={patchGrid}
               />
             ) : null}
             {openGroup === 'background' ? (
@@ -1664,20 +2025,6 @@ export function WidgetStyleBubble({
               </div>
             ) : null}
           </div>
-        ) : null}
-        {onStateFnChange ? (
-          <WidgetStateFnModal
-            open={stateFnOpen}
-            widget={widget}
-            variables={variables ?? []}
-            props={componentProps}
-            disabled={disabled}
-            onCancel={() => setStateFnOpen(false)}
-            onChange={(stateFn, hoverStateId) => {
-              onStateFnChange(stateFn, hoverStateId);
-              setStateFnOpen(false);
-            }}
-          />
         ) : null}
       </div>
     </ConfigProvider>

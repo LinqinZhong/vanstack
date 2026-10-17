@@ -116,9 +116,11 @@ export type ScriptScope = {
   assign?: ScopeAssign;
   /** 触发外层组件实例上的自定义事件。 */
   emit?: (name: string, ...args: unknown[]) => void;
+  /** 当前文档（页面/组件）自己的方法集合，脚本里用 `$this.xxx()` 调用。 */
+  self?: Record<string, unknown>;
 };
 
-const SCRIPT_RESERVED = new Set(['$data', '$props', '$query', '$item', '$index', '$emit', 'data', 'props', 'query']);
+const SCRIPT_RESERVED = new Set(['$data', '$props', '$query', '$item', '$index', '$emit', '$this', 'data', 'props', 'query']);
 
 export async function runEventIds(
   load: WidgetEventLoader,
@@ -166,6 +168,7 @@ export async function runEventIds(
       }
       scope?.emit?.(name, ...args);
     });
+    add('$this', scope?.self ?? {});
     for (const [name, value] of Object.entries(scope?.aliases ?? {})) {
       if (!SCRIPT_RESERVED.has(name)) {
         add(name, value);
@@ -184,7 +187,7 @@ export async function runEventIds(
   }
 }
 
-function setterTargets(calls: ScopeAssignCall[]): Map<string, ScopeAssignCall[]> {
+export function setterTargets(calls: ScopeAssignCall[]): Map<string, ScopeAssignCall[]> {
   const grouped = new Map<string, ScopeAssignCall[]>();
   for (const call of calls) {
     const list = grouped.get(call.setter) ?? [];

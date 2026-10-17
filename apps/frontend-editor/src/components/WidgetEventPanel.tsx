@@ -52,6 +52,7 @@ export function WidgetEventPanel({
   const [editingName, setEditingName] = useState<string | null>(null);
   const [editingDescription, setEditingDescription] = useState('');
   const [body, setBody] = useState('');
+  const [codeValid, setCodeValid] = useState(true);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const editorExtensions = useMemo(
@@ -312,7 +313,7 @@ export function WidgetEventPanel({
         open={editingId != null}
         width={720}
         confirmLoading={saving}
-        okButtonProps={{ disabled: disabled || !editingName }}
+        okButtonProps={{ disabled: disabled || !editingName || !codeValid }}
         onCancel={() => {
           setEditingId(null);
           setEditingName(null);
@@ -346,6 +347,7 @@ export function WidgetEventPanel({
             suffix="}"
             extensions={editorExtensions}
             editable={!disabled}
+            onValidateChange={setCodeValid}
             onChange={setBody}
           />
         ) : null}

@@ -33,6 +33,28 @@ function preventNonInputSelection(event: Event) {
   }
 }
 
+/**
+ * 弹窗守卫：任何弹窗不允许通过 ESC 或点击空白/遮罩关闭，只能显式确认或取消。
+ * antd 弹窗的 ESC 与遮罩点击走 React 合成事件（挂在根容器），在 document 捕获阶段
+ * stopPropagation 后事件到不了根容器，antd 的关闭处理收不到事件。
+ */
+function blockModalDismiss(event: Event) {
+  if (event.type === 'keydown') {
+    if ((event as KeyboardEvent).key === 'Escape' && document.querySelector('.ant-modal-wrap')) {
+      event.stopPropagation();
+    }
+    return;
+  }
+  const target = event.target;
+  if (
+    target instanceof Element &&
+    target.closest('.ant-modal-wrap') &&
+    !target.closest('.ant-modal')
+  ) {
+    event.stopPropagation();
+  }
+}
+
 export default function App() {
   const [user, setUser] = useState<AuthUserDto | null>(null);
   const [booting, setBooting] = useState(true);
@@ -42,11 +64,17 @@ export default function App() {
     document.addEventListener('copy', preventNonInputSelection);
     document.addEventListener('cut', preventNonInputSelection);
     document.addEventListener('dragstart', preventNonInputSelection);
+    document.addEventListener('keydown', blockModalDismiss, true);
+    document.addEventListener('mousedown', blockModalDismiss, true);
+    document.addEventListener('click', blockModalDismiss, true);
     return () => {
       document.removeEventListener('selectstart', preventNonInputSelection);
       document.removeEventListener('copy', preventNonInputSelection);
       document.removeEventListener('cut', preventNonInputSelection);
       document.removeEventListener('dragstart', preventNonInputSelection);
+      document.removeEventListener('keydown', blockModalDismiss, true);
+      document.removeEventListener('mousedown', blockModalDismiss, true);
+      document.removeEventListener('click', blockModalDismiss, true);
     };
   }, []);
 

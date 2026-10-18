@@ -29,18 +29,37 @@ export function renderSlot(
   let children: Array<ReactElement | null>;
   if (override) {
     // 外层页面覆盖了插槽内容：用外层作用域（叠加插槽参数）展开并渲染。
+    // 状态链：页面侧祖先（含实例自身）激活状态（override.inheritedStateIds，较浅）
+    // + 模板侧插槽节点自身层（含插槽自身状态，较深），一并作为插槽内容的继承作用域，
+    // 否则页面祖先（如按钮「激活」）作用域下的嵌套状态在插槽内容里永不激活。
+    const chain: string[] = [];
+    for (const id of override.inheritedStateIds ?? []) {
+      if (!chain.includes(id)) {
+        chain.push(id);
+      }
+    }
+    for (const layer of ctx.stateLayers?.get(widget) ?? []) {
+      if (!chain.includes(layer.id)) {
+        chain.push(layer.id);
+      }
+    }
     const expanded = expandLoopTree(override.content, override.scope, false, widgetInstanceKey(widget));
     const resolved = resolveWidgetTree(expanded, ctx.viewing ?? null, {
-      appliedStateFor: (child) => resolveRuntimeOwnState(child, ctx.editing ? [] : (ctx.hoverInstanceKeys ?? [])),
+      appliedStateFor: (child, inheritedIds) =>
+        resolveRuntimeOwnState(child, ctx.editing ? [] : (ctx.hoverInstanceKeys ?? []), inheritedIds),
       stateLayersSink: ctx.stateLayers,
       locale: ctx.locale,
+      ...(chain.length > 0 ? { inheritedStateIds: chain } : {}),
     });
     children = resolved.map((child) =>
       ctx.render(child, {
         componentStack: ctx.componentStack,
         commitModelValue: override.outer.commitModelValue,
         assignScope: override.outer.assignScope,
-        instantiate: true,
+        // 编辑态不实例化插槽内容：与页面其它控件一致地「不求值绑定」，动态文案才会收成
+        // 「动态文本」占位标签，否则绑定求值为空（如 $slot.prize 依赖组件内部循环，编辑态
+        // 循环不展开）会渲染成一片空白。预览态（!editing）行为保持不变。
+        instantiate: !ctx.editing,
         emit: override.outer.emit,
       }),
     );
@@ -54,7 +73,10 @@ export function renderSlot(
   // 插槽 chrome 仅由 slotChrome 驱动：组件编辑态画布与组件定义编辑器（含其「预览」tab）
   // 显示占位/名称；外部页面使用组件实例时 slotChrome=false，不渲染占位符。
   // 组件定义预览态 editing=false，因此不能依赖 ctx.editing。
-  const showChrome = Boolean(ctx.slotChrome);
+  // 例外：插槽使用编辑中被聚焦的插槽必须渲染（隔离 CSS 需要真实节点才能只露出它），
+  // 即使它当前还没有内容，也以空占位的形式显示出来。
+  const focusTarget = ctx.slotFocusId === widget.id;
+  const showChrome = Boolean(ctx.slotChrome) || focusTarget;
   // 组件定义编辑器的预览态（slotChrome 且非编辑态）：把当前实例解析后的插槽入参挂到 DOM 上，
   // 供编辑器点击插槽时在「数据」面板里展示「声明 + 当前实例解析值」。
   const slotParamValues =

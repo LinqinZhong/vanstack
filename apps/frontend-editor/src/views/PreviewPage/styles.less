@@ -1091,32 +1091,31 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
   visibility: visible;
 }
 
-/* 进入组件编辑后，页面壳与其它控件全部隐藏，只把编辑主体组件留在屏幕正中间。 */
-.preview-host.is-editing.is-component-editing .lowcode-page,
-.preview-host.is-editing.is-component-editing [data-widget-id] {
+/* 插槽使用编辑：页面壳与其它控件全部隐藏（保留布局），只露出被编辑插槽的内容。
+   只藏 .lowcode-page：visibility 会被后代继承，页面里其它控件跟着页面壳一起变成 hidden；
+   被聚焦插槽再以自己的 visibility:visible 覆盖继承值，其内部内容随继承显示。
+   不能在这里对 [data-widget-id] 逐个置 hidden / visible——那样插槽内的节点会拿到自己的
+   visibility 声明，压过继承关系：容器被隐藏（内联 visibility:hidden）时子控件仍被
+   `.is-slot-focus [data-widget-id]{visibility:visible}` 拉成可见，于是「点眼睛藏不住」。 */
+.preview-host.is-editing.is-component-editing .lowcode-page {
   visibility: hidden;
 }
 
-/* 多窗口红色框等页面 chrome 一并藏掉。 */
+/* 多窗口红色框等页面 chrome 一并藏掉。窗口在编辑态带 visibility:visible !important，
+   需要同优先级的 !important 才压得住（后代仍可用自己的 visible 覆盖继承值）。 */
 .preview-host.is-editing.is-component-editing .lowcode-window {
   outline: none;
+  visibility: hidden !important;
 }
 
-.preview-host.is-component-editing .lowcode-component.is-component-host,
-.preview-host.is-component-editing .lowcode-component.is-component-host [data-widget-id] {
+.preview-host.is-editing.is-component-editing .lowcode-slot.is-slot-focus {
   visibility: visible;
 }
 
-/* fixed 相对带 transform 的 .preview-mount（即手机屏幕）定位，组件脱离原布局并居中。 */
-.preview-host.is-component-editing .lowcode-component.is-component-host {
-  position: fixed !important;
-  top: 50% !important;
-  right: auto !important;
-  bottom: auto !important;
-  left: 50% !important;
-  margin: 0 !important;
-  transform: translate(-50%, -50%) !important;
-  z-index: 10;
+/* 聚焦插槽的祖先若是滚动/裁切容器（例如商品列表的滚动区），插槽内容会被 overflow 裁掉，
+   看起来就是「选中了但画布全空」。隔离态下页面其它内容本就不可见，直接放开祖先裁切。 */
+.preview-host.is-editing.is-component-editing :has(.lowcode-slot.is-slot-focus) {
+  overflow: visible !important;
 }
 
 /* 编辑态插槽名称：空插槽跟在插头图标下方；有内容时用左上角浮标显示，不挡内容点击。 */

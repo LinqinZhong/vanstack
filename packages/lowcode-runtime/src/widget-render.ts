@@ -85,6 +85,8 @@ export type WidgetRenderContext = {
   slotDefs?: ComponentSlot[];
   /** 组件编辑态下正在编辑的组件实例 id：该实例直接使用组件自身 testData 并忽略入参。 */
   componentEditId?: string | null;
+  /** 插槽使用编辑：被聚焦插槽的运行时节点 id（`${实例id}__${模板插槽id}`）。 */
+  slotFocusId?: string | null;
   /** 状态查看/切换（含组件内部 prefixed 宿主）。组件/slot 内部求值会透传它。 */
   viewing?: WidgetViewing;
   /** 图标路径 `分组.名称` 到文件地址。 */

@@ -93,6 +93,7 @@ export {
   applyWidgetPresence,
   hasDataDrivenPresenceGates,
   stripDataDrivenPresenceGates,
+  stripPathPresenceGates,
   loopItemName,
   loopIndexName,
   pageI18nDir,

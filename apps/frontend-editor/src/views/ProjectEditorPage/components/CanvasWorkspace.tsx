@@ -20,7 +20,6 @@ import {
 } from '../../../components/WidgetStyleBubble';
 import { WidgetStateList, stateRowKey } from '../../../components/WidgetStateList';
 import { WidgetStateFnModal } from '../../../components/WidgetStateFnModal';
-import { ComponentSlotList, type ComponentSlotListItem } from '../../../components/ComponentSlotList';
 import { setSpacingDragCursor } from '../../../utils/spacingGuides';
 import { patchTableCellStyles, type TableRange } from '../../../utils/tableEdit';
 import { collectTreeStateIds, findWidget, updateWidgetById, type WidgetPatch } from '../../../utils/widgetTree';
@@ -470,8 +469,11 @@ type CanvasWorkspaceProps = {
   onToggleSlotDebug: (slotId?: string | null) => void;
   componentEditSelectionKind: 'slot' | 'content' | null;
   componentEditSlotId: string | null;
-  componentEditSlots: ComponentSlotListItem[];
-  onSelectSlot: (key: string) => void;
+  /** 插槽使用编辑：选中组件实例时的插槽清单（画布左上角面板）。 */
+  slotUseSlots: Array<{ id: string; name: string }>;
+  /** 插槽使用编辑：正在编辑的插槽控件 id（为空表示未进入插槽编辑）。 */
+  slotUseActiveId: string | null;
+  onToggleSlotUse: (slotWidgetId: string) => void;
   /** 组件定义编辑器预览态点选的插槽：展示「声明 + 当前实例解析值」。 */
   previewSlot?: { name: string; params: ComponentProp[]; values: Record<string, unknown> } | null;
   sendPreview: () => void;
@@ -533,11 +535,6 @@ type CanvasWorkspaceProps = {
   globalStateBarWidget: PageWidget | null;
   globalVisibleStates: VisibleWidgetState[];
   commitPageStates: (next: WidgetStateDelta[] | undefined, coalesceKey?: string) => void;
-  /** 顶部「组件全局状态」下拉框（仅组件定义态/组件编辑态显示）。 */
-  showComponentGlobalState: boolean;
-  componentGlobalStates: VisibleWidgetState[];
-  componentGlobalStateId: string | null;
-  onComponentGlobalStateChange: (id: string | null) => void;
   /** 工具栏「全局状态控制」编辑的宿主：文档级全局状态（与最外层节点自身状态独立）。 */
   componentGlobalWidget: PageWidget | null;
   onComponentGlobalStateFnChange: (stateFn: string | undefined, hoverStateId?: string) => void;
@@ -680,8 +677,9 @@ export function CanvasWorkspace({
   onToggleSlotDebug,
   componentEditSelectionKind,
   componentEditSlotId,
-  componentEditSlots,
-  onSelectSlot,
+  slotUseSlots,
+  slotUseActiveId,
+  onToggleSlotUse,
   previewSlot,
   sendPreview,
   showStyleChrome,
@@ -738,10 +736,6 @@ export function CanvasWorkspace({
   globalStateBarWidget,
   globalVisibleStates,
   commitPageStates,
-  showComponentGlobalState,
-  componentGlobalStates,
-  componentGlobalStateId,
-  onComponentGlobalStateChange,
   componentGlobalWidget,
   onComponentGlobalStateFnChange,
   viewingOwnerId,
@@ -788,6 +782,8 @@ export function CanvasWorkspace({
     : Boolean(selectedWidget);
   // 插槽调试入口已改为画布左上角的插槽面板，这里只保留面板自身的显隐条件。
   const showSlotDebugPanel = componentMode && !readOnly && !previewing && slotDebugSlots.length > 0;
+  // 插槽使用编辑：页面编辑态选中组件实例时，在画布左上角显示插槽清单面板。
+  const showSlotUsePanel = !componentMode && !readOnly && !previewing && slotUseSlots.length > 0;
 
   // 状态栏两个区块各自始终只高亮一行（且必须有且仅有一行高亮）：
   // 优先按当前查看态精确定位，找不到时回退到该区块的根行（默认态）。
@@ -1082,21 +1078,6 @@ export function CanvasWorkspace({
       }}
       tabBarExtraContent={
         <div className="canvas-head-extra">
-          {showComponentGlobalState ? (
-            <Select
-              size="small"
-              className="canvas-component-state-select"
-              placeholder={t('lowcode.stateDefault')}
-              value={componentGlobalStateId ?? ''}
-              options={[
-                { value: '', label: t('lowcode.stateDefault') },
-                ...componentGlobalStates
-                  .filter((state) => Boolean(state.id))
-                  .map((state) => ({ value: state.id as string, label: state.name ?? state.id ?? '' })),
-              ]}
-              onChange={(value: string) => onComponentGlobalStateChange(value ? value : null)}
-            />
-          ) : null}
           <Segmented
             size="small"
             value={mode}
@@ -1476,7 +1457,7 @@ export function CanvasWorkspace({
               }}
             />
           ) : null}
-          {showStyleChrome && !readOnly && (nodeStateBarVisible || Boolean(globalStateBarWidget) || (componentEditId && componentEditSlots.length > 0)) ? (
+          {showStyleChrome && !readOnly && (nodeStateBarVisible || Boolean(globalStateBarWidget)) ? (
             <div className="canvas-float-panels">
               {nodeStateBarVisible || globalStateBarWidget ? (
                 <div className="canvas-state-bar">
@@ -1530,9 +1511,35 @@ export function CanvasWorkspace({
                   ) : null}
                 </div>
               ) : null}
-              {componentEditId && componentEditSlots.length > 0 ? (
-                <ComponentSlotList items={componentEditSlots} selectedKey={selectedWidgetId} onSelect={onSelectSlot} />
-              ) : null}
+            </div>
+          ) : null}
+          {showSlotUsePanel ? (
+            <div
+              className="canvas-slot-debug-panel"
+              onPointerDown={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <div className="canvas-slot-debug-panel-title">{t('lowcode.slotUsePanelTitle')}</div>
+              {slotUseSlots.map((slot) => {
+                const active = slot.id === slotUseActiveId;
+                return (
+                  <div
+                    key={slot.id}
+                    className={active ? 'canvas-slot-debug-row is-active' : 'canvas-slot-debug-row'}
+                  >
+                    <span className="canvas-slot-debug-name" title={slot.name}>
+                      {slot.name}
+                    </span>
+                    <Button
+                      size="small"
+                      type={active ? 'primary' : 'default'}
+                      onClick={() => onToggleSlotUse(slot.id)}
+                    >
+                      {t(active ? 'lowcode.slotUseExit' : 'lowcode.slotUseEnter')}
+                    </Button>
+                  </div>
+                );
+              })}
             </div>
           ) : null}
           {showSlotDebugPanel ? (

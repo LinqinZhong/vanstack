@@ -13,7 +13,7 @@ import { isBoxDragKind, isSpacingNudgeKey, isSpacingValueKey, SPACING_EDGES } fr
 import { pointerAngleDeg, type RotateAxis } from '../../utils/rotateDrag';
 import { applyEditorChromeScale, applyLiveWidgetCss, applyViewport, applyWidgetState, clearLiveInlineStyles, FOCUS_DBLCLICK_MS, focusModifier, paintPreviewCamera, paintWidgetChrome, parentWidgetId, postCanvasPointer, postToParent, postWidgetHover, resolveWidgetNode, setSelectFaded, toRawWidgetId } from './helpers';
 import { applyLiveTableTrack, readTableTrackPair, syncTableChrome, syncTableReveal, type TableChromeLabels } from './tableChrome';
-import { leafOpenEditor, paintComponentModeButton, paintScrollModeButton, paintSwiperModeButton, syncComponentReveal, syncScrollReveal, syncSwiperReveal, type ComponentChromeLabels, type ScrollChromeLabels, type SwiperChromeLabels } from './scrollChrome';
+import { leafOpenEditor, paintScrollModeButton, paintSwiperModeButton, syncComponentSlotFocus, syncScrollReveal, syncSwiperReveal, type ScrollChromeLabels, type SwiperChromeLabels } from './scrollChrome';
 
 const FONT_FACES_ID = 'vanstack-preview-fonts';
 
@@ -97,6 +97,8 @@ export function PreviewPage() {
   const swiperEditingRef = useRef(false);
   const componentEditingRef = useRef(false);
   const componentEditIdRef = useRef<string | null>(null);
+  /** 插槽使用编辑：正在编辑的插槽在 DOM 上的 id（`实例id__模板插槽id`），为空表示不隔离。 */
+  const slotFocusIdRef = useRef<string | null>(null);
   const slotDebugIdRef = useRef<string | null>(null);
   const centerContentRef = useRef(false);
   const useComponentTestDataRef = useRef(false);
@@ -138,11 +140,6 @@ export function PreviewPage() {
     editSwiper: t('lowcode.swiperEdit'),
     exitSwiper: t('lowcode.tableExitEdit'),
   };
-  const componentLabelsRef = useRef<ComponentChromeLabels>({ editComponent: '', exitComponent: '' });
-  componentLabelsRef.current = {
-    editComponent: t('lowcode.componentEdit'),
-    exitComponent: t('lowcode.tableExitEdit'),
-  };
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(true);
   const [hostTableEditing, setHostTableEditing] = useState(false);
@@ -151,7 +148,7 @@ export function PreviewPage() {
   const [hostComponentEditing, setHostComponentEditing] = useState(false);
   const editLeafIdRef = useRef<string | null | undefined>(undefined);
 
-  /** componentEditTargetOk：组件编辑态下仅插槽及插槽内容节点允许悬停/选中。 */
+  /** componentEditTargetOk：插槽使用编辑下仅被聚焦插槽内的内容允许悬停/选中。 */
   function componentEditTargetOk(target: EventTarget | null): boolean {
     if (!componentEditingRef.current) {
       return true;
@@ -159,16 +156,16 @@ export function PreviewPage() {
     if (!(target instanceof Element)) {
       return false;
     }
-    const host = target.closest<HTMLElement>('.lowcode-component.is-component-host');
+    const host = target.closest<HTMLElement>('.lowcode-component');
     if (!host) {
       return false;
     }
     if (host === target) {
       return false;
     }
-    // 不依赖 id 格式：只放行位于插槽元素内（含插槽自身及其内容）的节点；
-    // 模板非插槽节点与本体一律排除。
-    return Boolean(target.closest<HTMLElement>('[data-widget-type="slot"]'));
+    // 不依赖 id 格式：只放行位于本次聚焦插槽内（含插槽自身及其内容）的节点；
+    // 组件模板与其它插槽一律排除。
+    return Boolean(target.closest<HTMLElement>('.lowcode-slot.is-slot-focus'));
   }
 
   /** hoverSafeTarget：所有画布 chrome 重绘入口统一走白名单，避免缩放等重绘把非插槽节点画成 hover 框。 */
@@ -217,32 +214,23 @@ export function PreviewPage() {
     syncTableReveal(hostRef.current, mountRef.current, editingRef.current, tableEditingRef.current);
     syncScrollReveal(hostRef.current, mountRef.current, editingRef.current, scrollEditingRef.current);
     syncSwiperReveal(hostRef.current, mountRef.current, editingRef.current, swiperEditingRef.current);
-    syncComponentReveal(hostRef.current, mountRef.current, editingRef.current, componentEditingRef.current, componentEditIdRef.current);
-    paintScrollModeButton(
-      hostRef.current,
-      mountRef.current,
-      viewScaleRef.current,
-      editingRef.current,
-      scrollEditingRef.current,
-      scrollLabelsRef.current,
-    );
-    paintSwiperModeButton(
-      hostRef.current,
-      mountRef.current,
-      viewScaleRef.current,
-      editingRef.current,
-      swiperEditingRef.current,
-      swiperLabelsRef.current,
-    );
-    paintComponentModeButton(
-      hostRef.current,
-      mountRef.current,
-      viewScaleRef.current,
-      editingRef.current,
-      componentEditingRef.current,
-      componentLabelsRef.current,
-      componentEditIdRef.current,
-    );
+    syncComponentSlotFocus(hostRef.current, mountRef.current, editingRef.current, componentEditingRef.current, slotFocusIdRef.current);
+  paintScrollModeButton(
+    hostRef.current,
+    mountRef.current,
+    viewScaleRef.current,
+    editingRef.current,
+    scrollEditingRef.current,
+    scrollLabelsRef.current,
+  );
+  paintSwiperModeButton(
+    hostRef.current,
+    mountRef.current,
+    viewScaleRef.current,
+    editingRef.current,
+    swiperEditingRef.current,
+    swiperLabelsRef.current,
+  );
     syncTableChrome(
       hostRef.current,
       mountRef.current,
@@ -429,6 +417,7 @@ export function PreviewPage() {
         componentEditing,
         componentEditId,
         slotDebugId,
+        slotFocusId,
         settle,
         components,
         centerContent,
@@ -473,6 +462,7 @@ export function PreviewPage() {
       const nextComponentEditing = nextEditing && Boolean(componentEditing);
       const nextComponentEditId = nextComponentEditing ? componentEditId ?? null : null;
       const nextSlotDebugId = nextEditing ? slotDebugId ?? null : null;
+      const nextSlotFocusId = nextComponentEditing ? slotFocusId ?? null : null;
       const shouldRender =
         nextDocumentKey !== documentKeyRef.current ||
         nextComponentsKey !== componentsKeyRef.current ||
@@ -493,6 +483,7 @@ export function PreviewPage() {
         nextPreviewEpoch !== previewEpochRef.current ||
         nextComponentEditing !== componentEditingRef.current ||
         nextComponentEditId !== componentEditIdRef.current ||
+        nextSlotFocusId !== slotFocusIdRef.current ||
         nextSlotDebugId !== slotDebugIdRef.current ||
         nextAnimationsKey !== animationsKeyRef.current;
       editingRef.current = nextEditing;
@@ -506,6 +497,7 @@ export function PreviewPage() {
       setHostComponentEditing(nextComponentEditing);
       componentEditIdRef.current = nextComponentEditing ? componentEditId ?? null : null;
       slotDebugIdRef.current = nextSlotDebugId;
+      slotFocusIdRef.current = nextSlotFocusId;
       tableChromeRef.current = nextEditing ? (tableChrome ?? null) : null;
       tableLayoutRef.current = nextTableLayout;
       localeRef.current = nextLocale;
@@ -654,6 +646,7 @@ export function PreviewPage() {
           // 组件编辑态（非组件定义编辑器）：实例内部树与数据解耦，显示只由状态栏选择驱动。
           componentEditing: componentEditingRef.current,
           componentEditId: componentEditIdRef.current,
+          slotFocusId: slotFocusIdRef.current,
           slotDebugId: nextSlotDebugId,
           icons: nextIcons,
           assets: nextAssets,
@@ -1072,14 +1065,6 @@ export function PreviewPage() {
         event.preventDefault();
         event.stopPropagation();
         postToParent({ type: 'scroll-mode', action: scrollMode });
-        return;
-      }
-      const componentModeNode = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-component-mode]') : null;
-      const componentMode = componentModeNode?.dataset.componentMode;
-      if (componentMode === 'enter' || componentMode === 'exit') {
-        event.preventDefault();
-        event.stopPropagation();
-        postToParent({ type: 'component-mode', action: componentMode });
         return;
       }
       const modeNode = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-table-mode]') : null;

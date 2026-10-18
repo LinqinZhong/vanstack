@@ -39,6 +39,8 @@ export type SlotExpandContext = {
   args?: Record<string, Record<string, unknown>>;
   /** 外层覆盖的插槽内容（已加前缀）。 */
   content?: Record<string, PageWidget[]>;
+  /** 页面侧祖先链（含组件实例自身）激活的状态 id：作为插槽内容状态解析的基础继承链。 */
+  inheritedStateIds?: string[];
   /** 覆盖内容渲染时使用的外层上下文。 */
   outer?: {
     scope: BindingScope;
@@ -131,6 +133,7 @@ function materialize(
   key: string,
   editing: boolean,
   slotCtx?: SlotExpandContext,
+  loopCtx?: { item: unknown; index: unknown },
 ): PageWidget {
   const next = { ...widget };
   let finalScope = scope;
@@ -139,13 +142,17 @@ function materialize(
     const def = slotCtx.defs?.find((item) => item.id === next.slotId);
     const defaults = resolveSlotParamDefaults(def?.params, scope);
     const overrides = slotCtx.args?.[next.slotId];
-    const params: Record<string, unknown> = { ...defaults, ...(overrides ?? {}) };
+    // 循环内的插槽：把最内层循环上下文（index/item）作为隐式出参注入 $slot，
+    // 声明的出参与外层覆盖优先。插槽内容里的 `$slot.index` 这类引用才成立。
+    const implicit: Record<string, unknown> = loopCtx ? { index: loopCtx.index, item: loopCtx.item } : {};
+    const params: Record<string, unknown> = { ...implicit, ...defaults, ...(overrides ?? {}) };
     finalScope = { ...scope, slot: params };
     const content = slotCtx.content?.[next.slotId];
     if (content && content.length > 0 && slotCtx.outer) {
       slotOverride = {
         content,
         scope: { ...slotCtx.outer.scope, slot: params },
+        ...(slotCtx.inheritedStateIds?.length ? { inheritedStateIds: slotCtx.inheritedStateIds } : {}),
         outer: slotCtx.outer,
       };
     }
@@ -154,7 +161,7 @@ function materialize(
     // 默认态删除的插槽不应在实例中被强制显示。
   }
   if ('children' in next && Array.isArray(next.children)) {
-    next.children = expandLoopTree(next.children, finalScope, editing, key, slotCtx);
+    next.children = expandLoopTree(next.children, finalScope, editing, key, slotCtx, loopCtx);
   }
   setWidgetRuntimeMeta(next, { scope: finalScope, key, ...(slotOverride ? { slotOverride } : {}) });
   return next;
@@ -178,6 +185,7 @@ export function expandLoopTree(
   editing: boolean,
   keyPrefix = '',
   slotCtx?: SlotExpandContext,
+  loopCtx?: { item: unknown; index: unknown },
 ): PageWidget[] {
   const result: PageWidget[] = [];
   for (const widget of widgets) {
@@ -185,7 +193,7 @@ export function expandLoopTree(
     if (loop) {
       const items = resolveLoopItems(loop, scope);
       if (items.length === 0 && editing) {
-        result.push(materialize(widget, scope, joinInstanceKey(keyPrefix, widget.id), editing, slotCtx));
+        result.push(materialize(widget, scope, joinInstanceKey(keyPrefix, widget.id), editing, slotCtx, loopCtx));
         continue;
       }
       items.forEach((item, index) => {
@@ -204,11 +212,13 @@ export function expandLoopTree(
             $index: index,
           },
         };
-        result.push(materialize(widget, nextScope, joinInstanceKey(keyPrefix, widget.id, token), editing, slotCtx));
+        result.push(
+          materialize(widget, nextScope, joinInstanceKey(keyPrefix, widget.id, token), editing, slotCtx, { item, index }),
+        );
       });
       continue;
     }
-    result.push(materialize(widget, scope, joinInstanceKey(keyPrefix, widget.id), editing, slotCtx));
+    result.push(materialize(widget, scope, joinInstanceKey(keyPrefix, widget.id), editing, slotCtx, loopCtx));
   }
   return result;
 }

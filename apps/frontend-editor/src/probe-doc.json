@@ -1,0 +1,336 @@
+{
+  "_id": "47bf2300-ab55-4306-8e64-98b46b053d07",
+  "projectId": "579da1f2-be3e-4ca4-b14a-0f4eadbabf9a",
+  "projectKey": "war",
+  "componentId": "ab4e1eb9-b444-4e49-8feb-8a4551a54554",
+  "componentKey": "lucky-draw-panel",
+  "versionNo": 1,
+  "description": "",
+  "createdAt": "2026-10-12T10:44:43.964Z",
+  "updatedAt": "2026-10-18T09:05:25.231Z",
+  "widgets": [
+    {
+      "type": "grid",
+      "id": "nmv59dp3c-1",
+      "children": [
+        {
+          "type": "flex",
+          "id": "nmv54lbbf-1",
+          "children": [
+            {
+              "type": "flex",
+              "id": "nmv54njwl-1",
+              "children": [
+                {
+                  "type": "slot",
+                  "id": "nmv54p6k0-1",
+                  "slotId": "s8ii1dgieib",
+                  "name": "奖品",
+                  "children": [
+                    {
+                      "type": "flex",
+                      "id": "nmv7ot5dr-2",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "nmv7otg4f-3",
+                          "value": "$index",
+                          "stateOverrides": [
+                            {
+                              "id": "siftls7lmvl",
+                              "style": {
+                                "color": "rgb(255,255,255)",
+                                "fontWeight": "700"
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "style": {
+                        "background": "rgb(255,255,255)",
+                        "width": {
+                          "mode": "%",
+                          "value": 100
+                        },
+                        "height": {
+                          "mode": "%",
+                          "value": 100
+                        }
+                      },
+                      "flex": {
+                        "justifyContent": "center",
+                        "alignItems": "center"
+                      },
+                      "states": [
+                        {
+                          "id": "siftls7lmvl",
+                          "name": "激活",
+                          "style": {
+                            "background": "rgb(220,192,13)"
+                          }
+                        }
+                      ],
+                      "stateFn": "if($slot.active) return 'siftls7lmvl'"
+                    }
+                  ],
+                  "style": {
+                    "width": {
+                      "mode": "%",
+                      "value": 100
+                    },
+                    "height": {
+                      "mode": "%",
+                      "value": 100
+                    }
+                  },
+                  "stateFn": "if($index === $data.currentActive) return 'symmv2c7d7c'"
+                }
+              ],
+              "style": {
+                "width": {
+                  "mode": "%",
+                  "value": 100
+                },
+                "height": {
+                  "mode": "%",
+                  "value": 100
+                }
+              },
+              "alias": "奖品",
+              "stateOverrides": [
+                {
+                  "id": "sy24uztkr04",
+                  "presence": "removed"
+                }
+              ]
+            },
+            {
+              "type": "flex",
+              "id": "nmv54ogjb-2",
+              "children": [
+                {
+                  "type": "slot",
+                  "id": "nmv54q37d-2",
+                  "slotId": "sdeqy68oo6k",
+                  "name": "按钮",
+                  "children": [
+                    {
+                      "type": "flex",
+                      "id": "nmv7q04au-1",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "nmvc6t4sx-2",
+                          "value": "文本1",
+                          "stateOverrides": [
+                            {
+                              "id": "sy24uztkr04",
+                              "props": {
+                                "value": "Play"
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "style": {
+                        "background": "rgb(255,255,255)",
+                        "width": {
+                          "mode": "%",
+                          "value": 100
+                        },
+                        "height": {
+                          "mode": "%",
+                          "value": 100
+                        }
+                      },
+                      "events": {
+                        "click": [
+                          "d90c3ec8-bb49-4b71-9539-348a17954f64"
+                        ]
+                      },
+                      "stateOverrides": [
+                        {
+                          "id": "sy24uztkr04",
+                          "style": {
+                            "background": "rgb(221,221,221)"
+                          },
+                          "flex": {
+                            "justifyContent": "center",
+                            "alignItems": "center"
+                          }
+                        }
+                      ]
+                    }
+                  ],
+                  "stateOverrides": [
+                    {
+                      "id": "sy24uztkr04",
+                      "style": {
+                        "width": {
+                          "mode": "%",
+                          "value": 100
+                        },
+                        "height": {
+                          "mode": "%",
+                          "value": 100
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "style": {
+                "width": {
+                  "mode": "%",
+                  "value": 100
+                },
+                "height": {
+                  "mode": "%",
+                  "value": 100
+                }
+              },
+              "existsFn": "return false",
+              "alias": "按钮",
+              "events": {
+                "click": [
+                  "9245b983-6fc2-418d-a2d8-f238cf17a9b2"
+                ]
+              },
+              "stateOverrides": [
+                {
+                  "id": "sy24uztkr04",
+                  "presence": "visible"
+                }
+              ]
+            }
+          ],
+          "style": {
+            "width": {
+              "mode": "%",
+              "value": 100
+            },
+            "height": {
+              "mode": "%",
+              "value": 100
+            }
+          },
+          "loop": {
+            "from": "data",
+            "source": "prizes",
+            "key": "id"
+          },
+          "states": [
+            {
+              "id": "sy24uztkr04",
+              "name": "按钮"
+            }
+          ],
+          "stateFn": "if($index === 4) return 'sy24uztkr04'"
+        }
+      ],
+      "style": {
+        "width": {
+          "mode": "%",
+          "value": 100
+        },
+        "height": {
+          "mode": "%",
+          "value": 100
+        }
+      },
+      "grid": {
+        "rowSize": 100,
+        "rowCount": 3,
+        "rowGap": "$props.gap",
+        "columnSize": 100,
+        "columnCount": 3,
+        "columnGap": "$props.gap"
+      }
+    }
+  ],
+  "props": [
+    {
+      "name": "prizes",
+      "type": "arr",
+      "value": "[]",
+      "required": true,
+      "of": "obj"
+    },
+    {
+      "name": "gap",
+      "type": "num",
+      "value": "0",
+      "desc": "间距"
+    }
+  ],
+  "data": [
+    {
+      "type": "arr",
+      "name": "prizes",
+      "value": "const list = []\n$props.prizes.forEach ((p, i) => {\n  if (i === 4){\n    list.push ({})\n  }\n  list.push (p)\n})\nreturn list",
+      "dynamic": true,
+      "computed": true
+    },
+    {
+      "type": "num",
+      "name": "currentActive",
+      "value": "0"
+    }
+  ],
+  "testData": {
+    "props": {
+      "prizes": "[{\"id\":1},{\"id\":2},{\"id\":3},{\"id\":4},{\"id\":5},{\"id\":6},{\"id\":7},{\"id\":8}]"
+    }
+  },
+  "slots": [
+    {
+      "id": "s8ii1dgieib",
+      "name": "奖品",
+      "params": [
+        {
+          "name": "active",
+          "type": "bool",
+          "value": "$(index === data.currentActive)"
+        },
+        {
+          "name": "prize",
+          "type": "obj",
+          "value": "$(item)"
+        }
+      ]
+    },
+    {
+      "id": "sdeqy68oo6k",
+      "name": "按钮"
+    }
+  ],
+  "methods": [
+    {
+      "id": "1d7f2e53-2a9c-465a-a478-5305374408ae",
+      "name": "play",
+      "params": [
+        {
+          "name": "target",
+          "type": "number"
+        },
+        {
+          "name": "turn",
+          "type": "number"
+        }
+      ],
+      "returns": "any",
+      "data": [
+        {
+          "name": "task",
+          "type": "number",
+          "value": "-1"
+        }
+      ],
+      "expose": true
+    }
+  ],
+  "designSize": {
+    "width": 300,
+    "height": 300
+  }
+}

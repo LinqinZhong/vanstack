@@ -89,26 +89,27 @@ export function widgetTypeName(type: PageWidget['type'], t: WidgetTranslate): st
   return t(widgetHelpers[type].nameKey);
 }
 
-function treeSuffix(widget: PageWidget, t: WidgetTranslate): string | undefined {
+/** treeLabelParts：节点名与后缀。文本控件若绑定动态表达式，节点名直接用「动态文本」。 */
+function treeLabelParts(widget: PageWidget, t: WidgetTranslate): { name: string; suffix?: string } {
+  const typeName = widgetTypeName(widget.type, t);
   const raw = helperFor(widget.type).treeSuffix?.(widget);
   if (widget.type !== 'text' || !raw) {
-    return raw;
+    return { name: typeName, suffix: raw };
   }
   const described = describeCopyBinding(raw);
   if (described.kind === 'expr') {
-    return t('lowcode.dynamicText');
+    return { name: t('lowcode.dynamicText') };
   }
   if (described.kind === 'path') {
-    return described.field;
+    return { name: typeName, suffix: described.field };
   }
   if (isI18nCopyExpr(raw)) {
-    return resolveI18nCopy(raw, undefined, undefined);
+    return { name: typeName, suffix: resolveI18nCopy(raw, undefined, undefined) };
   }
-  return raw;
+  return { name: typeName, suffix: raw };
 }
 
 export function widgetTreeLabel(widget: PageWidget, t: WidgetTranslate): string {
-  const typeName = widgetTypeName(widget.type, t);
-  const suffix = treeSuffix(widget, t);
-  return suffix ? `${typeName} · ${suffix}` : typeName;
+  const { name, suffix } = treeLabelParts(widget, t);
+  return suffix ? `${name} · ${suffix}` : name;
 }

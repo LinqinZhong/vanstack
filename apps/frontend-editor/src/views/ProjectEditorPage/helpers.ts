@@ -111,6 +111,43 @@ export function computeFitView(stageWidth: number, stageHeight: number, screenWi
   };
 }
 
+/**
+ * 插槽本体被内容替换后是 display:contents，自身不生成盒子（rect 为 0），
+ * 因此用插槽内部控件的并集当作「插槽内容」的可视盒，用于把相机对准它。
+ *
+ * 只统计真正看得见的节点：隔离态是靠 visibility 隐藏页面其余部分的，插槽内部
+ * 一样会有 visibility:hidden 的节点（状态切换留下的分支、隐藏控件），它们仍占布局、
+ * rect 非 0，混进并集会把盒子撑大，相机就会对着「内容 + 看不见的东西」居中，看起来偏。
+ */
+export function slotContentBox(slot: HTMLElement) {
+  const own = slot.getBoundingClientRect();
+  if (own.width > 0 && own.height > 0) {
+    return { left: own.left, top: own.top, width: own.width, height: own.height };
+  }
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+  for (const node of slot.querySelectorAll<HTMLElement>('[data-widget-id]')) {
+    const rect = node.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      continue;
+    }
+    // 自身被隐藏的节点不算可视内容（其可见子节点是独立节点，仍会被统计）。
+    if (node.ownerDocument.defaultView?.getComputedStyle(node).visibility === 'hidden') {
+      continue;
+    }
+    left = Math.min(left, rect.left);
+    top = Math.min(top, rect.top);
+    right = Math.max(right, rect.right);
+    bottom = Math.max(bottom, rect.bottom);
+  }
+  if (right <= left || bottom <= top) {
+    return null;
+  }
+  return { left, top, width: right - left, height: bottom - top };
+}
+
 export function mapIframePoint(iframe: HTMLIFrameElement | null, localX: number, localY: number) {
   if (!iframe) {
     return { x: localX, y: localY };

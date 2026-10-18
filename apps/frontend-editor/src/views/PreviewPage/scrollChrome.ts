@@ -307,171 +307,39 @@ export function paintSwiperModeButton(
   clampButtonInView(button, host, zoom);
 }
 
-const COMPONENT_MODE_ATTR = 'data-component-mode';
-
-export type ComponentChromeLabels = {
-  editComponent: string;
-  exitComponent: string;
-};
-
 /**
- * 组件编辑态下真正作为编辑主体的那个组件。
- * 选中节点可能是插槽内容里的嵌套组件，因此要沿组件外壳上溯到最外层——
- * 组件编辑态保持期间，选中节点必定落在被编辑组件内部。
+ * 插槽使用编辑：只露出被编辑插槽的内容。
+ * host 加 .is-component-editing（CSS 据此藏掉页面壳与所有 [data-widget-id]），
+ * 目标插槽元素加 .is-slot-focus（CSS 据此让该插槽及其内部内容可见、并放开祖先裁切）。
+ * 隔离完全由 CSS 完成，控件仍在真实布局位置，不改运行时渲染。
  */
-/**
- * 定位当前正在编辑的组件主体：
- * 优先取已标记的 .is-component-host；其次从当前选中项上钻；
- * 最后按编辑根 id 兜底（组件编辑态下可能没有任何选中项）。
- */
-export function editingComponentHost(
-  root: HTMLElement,
-  componentEditId: string | null,
-): HTMLElement | null {
-  const marked = root.querySelector<HTMLElement>('.lowcode-component.is-component-host');
-  if (marked) {
-    return marked;
-  }
-  const selected = root.querySelector<HTMLElement>('.is-widget-selected');
-  if (selected) {
-    let host: HTMLElement | null =
-      selected.dataset.widgetType === 'component'
-        ? selected
-        : selected.closest<HTMLElement>('.lowcode-component');
-    while (host) {
-      const outer = host.parentElement?.closest<HTMLElement>('.lowcode-component');
-      if (!outer) {
-        break;
-      }
-      host = outer;
-    }
-    return host;
-  }
-  if (componentEditId) {
-    const byId = resolveWidgetNode(root, componentEditId);
-    if (byId instanceof HTMLElement && byId.classList.contains('lowcode-component')) {
-      return byId;
-    }
-  }
-  return null;
-}
-
-/**
- * 进入组件编辑后藏起页面上的其它控件，并给编辑主体组件打上 is-component-host：
- * CSS 据此把组件脱到屏幕中间，只露出它的内部内容（含插槽）。
- */
-export function syncComponentReveal(
+export function syncComponentSlotFocus(
   host: HTMLElement | null,
   root: HTMLElement | null,
   editing: boolean,
   componentEditing: boolean,
-  componentEditId: string | null,
+  slotFocusId: string | null,
 ) {
-  if (!host || !root || !editing) {
+  const clear = () => {
     host?.classList.remove('is-component-editing');
-    root?.querySelectorAll('.lowcode-component.is-component-host').forEach((node) => {
-      node.classList.remove('is-component-host');
+    root?.querySelectorAll('.lowcode-slot.is-slot-focus').forEach((node) => {
+      node.classList.remove('is-slot-focus');
     });
-    return;
-  }
-  if (componentEditing) {
-    host.classList.add('is-component-editing');
-    const componentHost = editingComponentHost(root, componentEditId);
-    root.querySelectorAll<HTMLElement>('.lowcode-component.is-component-host').forEach((node) => {
-      if (node !== componentHost) {
-        node.classList.remove('is-component-host');
-      }
-    });
-    componentHost?.classList.add('is-component-host');
-  } else {
-    host.classList.remove('is-component-editing');
-    root.querySelectorAll('.lowcode-component.is-component-host').forEach((node) => {
-      node.classList.remove('is-component-host');
-    });
-  }
-}
-
-/** 组件右上角：未进入时显示「编辑组件」，编辑中显示「退出编辑」。 */
-export function paintComponentModeButton(
-  host: HTMLElement | null,
-  root: HTMLElement | null,
-  zoom: number,
-  editing: boolean,
-  componentEditing: boolean,
-  labels: ComponentChromeLabels,
-  componentEditId: string | null,
-) {
-  const remove = () => host?.querySelector(`[${COMPONENT_MODE_ATTR}]`)?.remove();
-  if (!host || !root || !editing) {
-    remove();
-    return;
-  }
-  const selected = root.querySelector<HTMLElement>('.is-widget-selected');
-  const isComponent = selected?.dataset.widgetType === 'component';
-  if (componentEditing) {
-    // 编辑中（即使选中了插槽/插槽内容/嵌套组件，或没有任何选中项）：
-    // 退出按钮始终跟随最外层编辑主体
-    const hostWidget = editingComponentHost(root, componentEditId);
-    if (!hostWidget) {
-      remove();
-      return;
-    }
-    let button = host.querySelector<HTMLButtonElement>(`[${COMPONENT_MODE_ATTR}]`);
-    if (!button) {
-      button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'table-mode-button';
-      button.setAttribute(COMPONENT_MODE_ATTR, '');
-      host.append(button);
-    }
-    button.dataset.componentMode = 'exit';
-    button.classList.add('is-exit');
-    button.textContent = labels.exitComponent || '退出编辑';
-    button.title = 'Esc';
-    button.onclick = (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      window.parent.postMessage(
-        { source: LOWCODE_MESSAGE_SOURCE, type: 'component-mode', action: 'exit' },
-        window.location.origin,
-      );
-    };
-    const box = hostBox(host, hostWidget, zoom);
-    // 与「编辑组件」按钮及 scroll/swiper/table 模式按钮一致：固定在右上角，避免切换时跳位。
-    button.style.left = `${box.left + box.width}px`;
-    button.style.top = `${box.top - 4}px`;
-    button.style.transform = 'translate(-100%, -100%)';
-    clampButtonInView(button, host, zoom);
-    return;
-  }
-  if (!isComponent || !selected) {
-    remove();
-    return;
-  }
-  // 未进入：在组件右上角显示「编辑组件」
-  let button = host.querySelector<HTMLButtonElement>(`[${COMPONENT_MODE_ATTR}]`);
-  if (!button) {
-    button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'table-mode-button';
-    button.setAttribute(COMPONENT_MODE_ATTR, '');
-    host.append(button);
-  }
-  button.dataset.componentMode = 'enter';
-  button.classList.remove('is-exit');
-  button.textContent = labels.editComponent || '编辑组件';
-  button.title = 'Enter';
-  button.onclick = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    window.parent.postMessage(
-      { source: LOWCODE_MESSAGE_SOURCE, type: 'component-mode', action: 'enter' },
-      window.location.origin,
-    );
   };
-  const box = hostBox(host, selected!, zoom);
-  button.style.left = `${box.left + box.width}px`;
-  button.style.top = `${box.top - 4}px`;
-  button.style.transform = 'translate(-100%, -100%)';
-  clampButtonInView(button, host, zoom);
+  if (!host || !root || !editing || !componentEditing || !slotFocusId) {
+    clear();
+    return;
+  }
+  const slot = resolveWidgetNode(root, slotFocusId);
+  if (!(slot instanceof HTMLElement) || !slot.classList.contains('lowcode-slot')) {
+    clear();
+    return;
+  }
+  host.classList.add('is-component-editing');
+  root.querySelectorAll<HTMLElement>('.lowcode-slot.is-slot-focus').forEach((node) => {
+    if (node !== slot) {
+      node.classList.remove('is-slot-focus');
+    }
+  });
+  slot.classList.add('is-slot-focus');
 }

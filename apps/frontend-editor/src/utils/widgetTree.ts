@@ -516,6 +516,17 @@ export function collectAncestorKeys(widgets: PageWidget[], id: string | null | u
   return [];
 }
 
+export function collectWidgetIds(widgets: PageWidget[]): string[] {
+  const ids: string[] = [];
+  for (const widget of widgets) {
+    ids.push(widget.id);
+    if (hasChildren(widget)) {
+      ids.push(...collectWidgetIds(widget.children));
+    }
+  }
+  return ids;
+}
+
 export function nextExpandedKeys(
   prevExpanded: readonly string[],
   previousWidgets: PageWidget[],
@@ -523,9 +534,14 @@ export function nextExpandedKeys(
   revealId?: string | null,
 ): string[] {
   const expandable = collectExpandableKeys(nextWidgets);
-  const expandableSet = new Set(expandable);
   const previouslyExpandable = new Set(collectExpandableKeys(previousWidgets));
-  const next = new Set(prevExpanded.filter((key) => expandableSet.has(key)));
+  // 控件树里除了页面控件模型，还挂着组件实例的虚拟节点（`实例id__模板插槽id`）与插槽内容
+  // 控件（存在组件实例的 slotContent 里，不属于 page.widgets）。只按页面模型的可展开键过滤
+  // 会把它们整片剪掉，于是「组件编辑 / 插槽使用编辑」下任何一次提交（点眼睛、改样式）都会
+  // 让控件树折叠。这里改为只裁掉「上一份模型里存在、新模型里已被删除」的控件键。
+  const aliveIds = new Set(collectWidgetIds(nextWidgets));
+  const removedIds = new Set(collectWidgetIds(previousWidgets).filter((id) => !aliveIds.has(id)));
+  const next = new Set(prevExpanded.filter((key) => !removedIds.has(key)));
   for (const key of expandable) {
     if (!previouslyExpandable.has(key)) {
       next.add(key);
@@ -914,13 +930,17 @@ export function removeSlotContentWidget(component: ComponentWidget, widgetId: st
   if (!findInSlotContent(component, widgetId)) {
     return null;
   }
-  return mapContentGroups(component, (_slotId, widgets) => {
-    const index = widgets.findIndex((item) => item.id === widgetId);
-    if (index < 0) {
-      return widgets;
-    }
-    return widgets.filter((_, i) => i !== index);
-  });
+  // 递归删除：目标可能嵌套在插槽内容的容器里（如 弹性布局 > 动态文本），
+  // 只按顶层下标过滤会静默删不掉，画布与控件树都不会有变化。
+  const prune = (list: PageWidget[]): PageWidget[] =>
+    list
+      .filter((widget) => widget.id !== widgetId)
+      .map((widget) =>
+        hasChildren(widget) && widget.children.some((child) => containsWidget(child, widgetId))
+          ? ({ ...widget, children: prune(widget.children) } as PageWidget)
+          : widget,
+      );
+  return mapContentGroups(component, (_slotId, widgets) => prune(widgets));
 }
 
 /** 更新插槽内容控件（含其子树内的控件）。 */
@@ -996,8 +1016,12 @@ function virtualSlotsTreeData(
   slotContent: Record<string, PageWidget[]>,
   slotNameMap: Map<string, string>,
   labelOf: (widget: PageWidget) => string,
+  onlySlotWidgetId?: string,
 ): WidgetTreeNode[] {
-  return collectTemplateSlots(template).map((widget) => {
+  const slots = collectTemplateSlots(template).filter(
+    (widget) => !onlySlotWidgetId || widget.id === onlySlotWidgetId,
+  );
+  return slots.map((widget) => {
     let title = labelOf(widget);
     if (!widget.name?.trim()) {
       const declarationName = slotNameMap.get(widget.slotId)?.trim();
@@ -1013,6 +1037,28 @@ function virtualSlotsTreeData(
       children: contentTreeData(slotContent[widget.slotId] ?? [], labelOf),
     };
   });
+}
+
+/**
+ * 插槽使用编辑：控件树只剩被编辑插槽的虚拟节点及其内容（隔离页面其它控件）。
+ */
+export function componentSlotSubtree(
+  componentId: string,
+  template: PageWidget[],
+  slotContent: Record<string, PageWidget[]>,
+  slots: ComponentSlot[],
+  labelOf: (widget: PageWidget) => string,
+  slotWidgetId: string,
+): WidgetTreeNode[] {
+  const slotNameMap = new Map(slots.map((slot) => [slot.id, slot.name ?? '']));
+  return virtualSlotsTreeData(
+    template,
+    componentId,
+    slotContent,
+    slotNameMap,
+    labelOf,
+    slotWidgetId,
+  );
 }
 
 /**
@@ -1032,13 +1078,26 @@ export function withComponentVirtualTree(
     if (node.key === componentId) {
       return {
         ...node,
-        children: virtualSlotsTreeData(template, componentId, slotContent, slotNameMap, labelOf),
+        children: virtualSlotsTreeData(
+          template,
+          componentId,
+          slotContent,
+          slotNameMap,
+          labelOf,
+        ),
       };
     }
     if (node.children) {
       return {
         ...node,
-        children: withComponentVirtualTree(node.children, componentId, template, slotContent, slots, labelOf),
+        children: withComponentVirtualTree(
+          node.children,
+          componentId,
+          template,
+          slotContent,
+          slots,
+          labelOf,
+        ),
       };
     }
     return node;

@@ -146,6 +146,7 @@ import {
   patchWidget,
   removeSlotContentWidget,
   removeWidget,
+  componentSlotSubtree,
   definitionTreeWidgets,
   toWidgetTreeData,
   updateSlotContentWidget,
@@ -195,7 +196,7 @@ import { refreshIconCatalog, subscribeIconCatalog } from '../../utils/iconCatalo
 import { refreshAssetCatalog, subscribeAssetCatalog } from '../../utils/assetCatalog';
 import { refreshFontCatalog, subscribeFontCatalog, type FontCatalogEntry } from '../../utils/fontCatalog';
 import { publishEditorI18n } from '../../utils/i18nRuntime';
-import { CANVAS_RASTER_SCALE, canEditPositionInsets, clampScale, closeStyleToolbarPopups, computeFitView, dragLengthPx, edgeBoxLength, EDIT_OVERFLOW_X, EDIT_OVERFLOW_Y, ENTER_DOUBLE_MS, FOCUS_PADDING, HISTORY_LIMIT, iframePointToClient, isAutoLength, isBoxDragGroup, isSpacingNudgeGroup, liveWidgetCss, mapIframePoint, MAX_SCALE, paintCanvasView, SCREEN_HEIGHT, SCREEN_WIDTH, sizeLock, snapDevicePixel, spacingAllowsNegative, styleBoxQuad, styleFromBoxQuad, zoomViewAt, ZOOM_IDLE_MS, ZOOM_STEP, type CanvasMode, type CenterTab, type HistoryEntry, type SaveStatus, type ViewTransform } from './helpers';
+import { CANVAS_RASTER_SCALE, canEditPositionInsets, clampScale, closeStyleToolbarPopups, computeFitView, dragLengthPx, edgeBoxLength, EDIT_OVERFLOW_X, EDIT_OVERFLOW_Y, ENTER_DOUBLE_MS, FOCUS_PADDING, HISTORY_LIMIT, iframePointToClient, isAutoLength, isBoxDragGroup, isSpacingNudgeGroup, liveWidgetCss, mapIframePoint, MAX_SCALE, paintCanvasView, SCREEN_HEIGHT, SCREEN_WIDTH, sizeLock, slotContentBox, snapDevicePixel, spacingAllowsNegative, styleBoxQuad, styleFromBoxQuad, zoomViewAt, ZOOM_IDLE_MS, ZOOM_STEP, type CanvasMode, type CenterTab, type HistoryEntry, type SaveStatus, type ViewTransform } from './helpers';
 import {
   AddWidgetModal,
   AliasModal,
@@ -317,7 +318,10 @@ export function ProjectEditorPage() {
   const [tableEditId, setTableEditId] = useState<string | null>(null);
   const [scrollEditId, setScrollEditId] = useState<string | null>(null);
   const [swiperEditId, setSwiperEditId] = useState<string | null>(null);
+  // 插槽使用编辑：正在编辑插槽内容的组件实例 id（为空表示未进入）。
   const [componentEditId, setComponentEditId] = useState<string | null>(null);
+  // 插槽使用编辑：正在被编辑的插槽控件 id（组件定义文档里的插槽节点）。
+  const [slotUseEditId, setSlotUseEditId] = useState<string | null>(null);
   // 组件定义编辑器：正在调试的插槽 id（隔离显示该插槽内部的调试节点）。
   const [slotDebugId, setSlotDebugId] = useState<string | null>(null);
   // 组件定义编辑器预览态下选中的插槽：widgetId + 该实例解析后的入参值。
@@ -351,10 +355,19 @@ export function ProjectEditorPage() {
   const viewRef = useRef(view);
   const editViewRef = useRef<ViewTransform>({ x: 0, y: 0, scale: 1 });
   const previewViewRef = useRef<ViewTransform>({ x: 0, y: 0, scale: 1 });
-  const componentEditViewSnapshotRef = useRef<ViewTransform | null>(null);
   const userAdjustedRef = useRef(false);
   const editUserAdjustedRef = useRef(false);
   const previewUserAdjustedRef = useRef(false);
+  /**
+   * 插槽使用编辑前的画布视图。插槽会话期间画布的缩放/平移只服务插槽内容，
+   * 与页面编辑视图互不影响：退出插槽时原样还原这里存下的视图。
+   * `userAdjusted` 一并快照，避免插槽内的聚焦被当成「用户手动调过视图」而让画布不再自动适配。
+   */
+  const slotReturnViewRef = useRef<{
+    view: ViewTransform;
+    userAdjusted: boolean;
+    editAdjusted: boolean;
+  } | null>(null);
   const [panning, setPanning] = useState(false);
   const panningRef = useRef(false);
   const panRafRef = useRef(0);
@@ -450,6 +463,7 @@ export function ProjectEditorPage() {
   const scrollEditIdRef = useRef<string | null>(null);
   const swiperEditIdRef = useRef<string | null>(null);
   const componentEditIdRef = useRef<string | null>(null);
+  const slotUseEditIdRef = useRef<string | null>(null);
   const slotDebugIdRef = useRef<string | null>(null);
   const editOriginViewRef = useRef<ViewTransform | null>(null);
   const centeredEditIdRef = useRef<string | null>(null);
@@ -461,8 +475,6 @@ export function ProjectEditorPage() {
   const exitScrollEditRef = useRef<() => boolean>(() => false);
   const enterSwiperEditRef = useRef<() => void>(() => undefined);
   const exitSwiperEditRef = useRef<() => boolean>(() => false);
-  const enterComponentEditRef = useRef<() => void>(() => undefined);
-  const exitComponentEditRef = useRef<() => boolean>(() => false);
   const selectTableRangeRef = useRef<(message: { tableId: string; target: 'column' | 'row' | 'header'; index?: number; rowId?: string }) => void>(() => undefined);
   const runTableCommandRef = useRef<(command: TableCommand) => void>(() => undefined);
   const freezeTableRef = useRef<(target: 'header' | 'footer') => void>(() => undefined);
@@ -1053,6 +1065,12 @@ export function ProjectEditorPage() {
         }
         return;
       }
+      // 退化盒子（display:contents 的插槽本体等 0×0 节点）没有可聚焦的面积。里面按 1px
+      // 反算缩放会得出极大倍率、被夹到 MAX_SCALE，中心点又落在一个空点上，相机被甩到页面
+      // 之外，画布看起来「什么都没了」。这种盒子直接不动作。
+      if (box.width <= 0 || box.height <= 0) {
+        return;
+      }
       if (current.scale < MAX_SCALE) {
         preFocusViewRef.current = { scale: current.scale, x: current.x, y: current.y };
       }
@@ -1114,6 +1132,73 @@ export function ProjectEditorPage() {
   useEffect(() => subscribeIconCatalog(setIconCatalog), []);
   useEffect(() => subscribeAssetCatalog(setAssetCatalog), []);
   useEffect(() => subscribeFontCatalog(setFontCatalog), []);
+
+  /**
+   * 插槽使用编辑 / 组件定义编辑器插槽调试：进入/切换插槽后把相机对准该插槽的内容。
+   * 隔离态下画布只剩这一块内容，若仍按整页适配，内容会被缩到看不清（长页面尤甚）。
+   *
+   * 这里必须「对准到稳定」而不是对准一次：插槽子树要等预览侧应用 slotFocusId / slotDebugId
+   * 后才进入渲染树（模板上可能有存在闸门），内容自身还会二次变化（图片/字体加载、嵌套组件挂载）。
+   * 只对准第一次量到的盒子会停在半成品尺寸上（表现为有的插槽不居中、相机被夹到最大缩放）；
+   * 相机也可能在随后被别的写入者（预览回传视图等）改掉。因此持续观察：盒子变了重新对准，
+   * 相机被动过也重新对准，直到盒子与相机都稳定；用户一动画布立刻收手。
+   * 用 setTimeout 而不是 rAF：预览在后台标签页时 rAF 不推进，轮询会永远等不到。
+   */
+  useEffect(() => {
+    const targetId =
+      componentEditId && slotUseEditId
+        ? `${componentEditId}__${slotUseEditId}`
+        : slotDebugId || null;
+    if (!targetId) {
+      return;
+    }
+    const cameraTransform = () =>
+      iframeRef.current?.contentDocument?.querySelector<HTMLElement>('.preview-camera')?.style
+        .transform ?? '';
+    let timer = 0;
+    let tries = 0;
+    let stable = 0;
+    let boxKey = '';
+    let applied = '';
+    let stopped = false;
+    const stop = () => {
+      stopped = true;
+      window.clearTimeout(timer);
+    };
+    const aim = () => {
+      if (stopped) {
+        return;
+      }
+      tries += 1;
+      const slot = iframeRef.current?.contentDocument?.querySelector<HTMLElement>(
+        `.lowcode-slot[data-widget-id="${CSS.escape(targetId)}"]`,
+      );
+      const box = slot ? slotContentBox(slot) : null;
+      const key = box
+        ? `${Math.round(box.left)},${Math.round(box.top)},${Math.round(box.width)},${Math.round(box.height)}`
+        : '';
+      if (box && (key !== boxKey || cameraTransform() !== applied)) {
+        boxKey = key;
+        focusWidgetInView(box);
+        applied = cameraTransform();
+        stable = 0;
+      } else if (box) {
+        stable += 1;
+      }
+      if (stable < 12 && tries < 40) {
+        timer = window.setTimeout(aim, 60);
+      }
+    };
+    timer = window.setTimeout(aim, 0);
+    const stage = stageRef.current;
+    stage?.addEventListener('wheel', stop, { once: true, passive: true });
+    stage?.addEventListener('pointerdown', stop, { once: true });
+    return () => {
+      stop();
+      stage?.removeEventListener('wheel', stop);
+      stage?.removeEventListener('pointerdown', stop);
+    };
+  }, [componentEditId, slotUseEditId, slotDebugId, focusWidgetInView]);
 
   useLayoutEffect(() => {
     publishEditorI18n(pageI18n, previewLocale);
@@ -1313,6 +1398,9 @@ export function ProjectEditorPage() {
         swiperEditing: editLeaf === 'swiper',
         componentEditing: componentEditId !== null,
         componentEditId: componentEditId,
+        // 插槽使用编辑：被聚焦插槽的运行时节点 id（模板虚拟 id），画布据此只露出该插槽内容。
+        slotFocusId:
+          componentEditId && slotUseEditId ? `${componentEditId}__${slotUseEditId}` : null,
         slotDebugId: slotDebugId,
         tableChrome:
           editLeaf === 'table' && !readOnlyRef.current
@@ -1323,7 +1411,7 @@ export function ProjectEditorPage() {
       },
       window.location.origin,
     );
-  }, [mode, previewLocale, previewQuery, pageI18n, project?.id, selectedPageId, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, tableRange, tableEditId, scrollEditId, swiperEditId, componentEditId, componentDocsKey, iconCatalog, assetCatalog, fontCatalog, animations, slotDebugId]);
+  }, [mode, previewLocale, previewQuery, pageI18n, project?.id, selectedPageId, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, tableRange, tableEditId, scrollEditId, swiperEditId, componentEditId, slotUseEditId, componentDocsKey, iconCatalog, assetCatalog, fontCatalog, animations, slotDebugId]);
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -1411,14 +1499,6 @@ export function ProjectEditorPage() {
           exitSwiperEditRef.current();
         } else {
           enterSwiperEditRef.current();
-        }
-        return;
-      }
-      if (event.data.type === 'component-mode') {
-        if (event.data.action === 'exit') {
-          exitComponentEditRef.current();
-        } else {
-          enterComponentEditRef.current();
         }
         return;
       }
@@ -2472,6 +2552,8 @@ export function ProjectEditorPage() {
     resetHistory();
     componentEditIdRef.current = null;
     setComponentEditId(null);
+    slotUseEditIdRef.current = null;
+    setSlotUseEditId(null);
     slotDebugIdRef.current = null;
     setSlotDebugId(null);
     if (activeOwnerId) {
@@ -2503,6 +2585,8 @@ export function ProjectEditorPage() {
     resetHistory();
     componentEditIdRef.current = null;
     setComponentEditId(null);
+    slotUseEditIdRef.current = null;
+    setSlotUseEditId(null);
     slotDebugIdRef.current = null;
     setSlotDebugId(null);
     if (!selectedPageId) {
@@ -2525,6 +2609,18 @@ export function ProjectEditorPage() {
     if (mode === 'preview' && slotDebugIdRef.current) {
       slotDebugIdRef.current = null;
       setSlotDebugId(null);
+    }
+  }, [mode]);
+
+  // 插槽使用编辑是页面编辑态的能力：切到预览态时自动退出（面板随选中态消失）。
+  // 同时把编辑视图还原成进入插槽前的样子，避免插槽内的缩放残留到页面编辑视图。
+  useEffect(() => {
+    if (mode === 'preview' && componentEditIdRef.current) {
+      componentEditIdRef.current = null;
+      setComponentEditId(null);
+      slotUseEditIdRef.current = null;
+      setSlotUseEditId(null);
+      restoreSlotView();
     }
   }, [mode]);
 
@@ -2755,7 +2851,7 @@ export function ProjectEditorPage() {
       selected?.type === 'component' &&
       selected.id === componentEditIdRef.current
     ) {
-      exitComponentEdit();
+      exitSlotUseEdit();
       return;
     }
     // 插槽调试态：选中的控件若不在正在调试的插槽子树内，自动退出调试态。
@@ -3131,62 +3227,75 @@ export function ProjectEditorPage() {
     return true;
   }
 
-  function enterComponentEdit() {
-    const selected = findWidget(widgetsRef.current, selectedWidgetIdRef.current);
-    if (!selected || selected.type !== 'component' || modeRef.current !== 'edit' || readOnlyRef.current) {
+  /**
+   * 插槽使用编辑：进入某个组件实例的某个插槽，画布只显示该插槽的内容。
+   * 插槽内容仍由既有的虚拟选中/编辑路由处理（componentEditId 为宿主实例）。
+   */
+  function enterSlotUseEdit(componentId: string, slotWidgetId: string) {
+    const componentWidget = findWidget(widgetsRef.current, componentId);
+    if (
+      !componentWidget ||
+      componentWidget.type !== 'component' ||
+      modeRef.current !== 'edit' ||
+      readOnlyRef.current ||
+      catalogKindRef.current !== 'page'
+    ) {
       return;
     }
-    if (componentEditIdRef.current === selected.id) {
-      return;
+    // 进入插槽会话前记下外部视图：插槽内的缩放/平移不写回页面视图，退出时原样还原。
+    if (!componentEditIdRef.current) {
+      const current = viewRef.current;
+      slotReturnViewRef.current = {
+        view: { scale: current.scale, x: current.x, y: current.y },
+        userAdjusted: userAdjustedRef.current,
+        editAdjusted: editUserAdjustedRef.current,
+      };
     }
-    // 先清空选区：编辑组件时本体不进入选中态，只允许插槽与插槽内容被选中。
-    // （此刻编辑 id 尚未设置，selectWidget(null) 不会触发「选中项变化即退出编辑」的清理。）
-    selectWidget(null);
-    componentEditIdRef.current = selected.id;
-    setComponentEditId(selected.id);
-    // 状态查看切换到组件：以组件实例为宿主，初始回到基础外观（默认状态）。
-    setViewingOwnerId(selected.id);
-    setViewingState(null);
-    setViewingByOwner({ [selected.id]: null });
-    // 进入组件编辑时把组件放到画布正中间、与外层缩放/平移隔离：
-    // 记录当前外层视图，随后复位到适配/居中的默认视图。
-    componentEditViewSnapshotRef.current = viewRef.current;
-    fitCanvas(false);
-    // 展开组件节点及全部插槽虚拟节点，让插槽及其内容在控件树里立即可见
-    const doc =
-      liveComponentDocsRef.current[selected.componentId] ?? componentDocsRef.current[selected.componentId];
-    if (doc) {
-      const slotKeys = collectTemplateSlots(doc.widgets).map((slot) =>
-        virtualInnerId(selected.id, slot.id),
-      );
-      setExpandedKeys((prev) => Array.from(new Set([...prev, selected.id, ...slotKeys])));
-    }
+    componentEditIdRef.current = componentId;
+    setComponentEditId(componentId);
+    slotUseEditIdRef.current = slotWidgetId;
+    setSlotUseEditId(slotWidgetId);
+    // 清空选区：插槽内容由画布点选，插槽本体不进入选中态。
+    selectWidgetRef.current(null);
+    setExpandedKeys((prev) =>
+      Array.from(new Set([...prev, componentId, virtualInnerId(componentId, slotWidgetId)])),
+    );
   }
 
-  function exitComponentEdit() {
+  /** 退出插槽使用编辑：回到「选中组件实例」，左上角面板继续显示。 */
+  function exitSlotUseEdit() {
     const editingId = componentEditIdRef.current;
     if (!editingId) {
       return false;
     }
     componentEditIdRef.current = null;
     setComponentEditId(null);
-    // 退出组件编辑时清除组件实例上的状态查看，避免组件继续停留在切换后的外观。
-    setViewingByOwner((prev) => {
-      if (!Object.prototype.hasOwnProperty.call(prev, editingId)) {
-        return prev;
-      }
-      const next = { ...prev };
-      delete next[editingId];
-      return next;
-    });
+    slotUseEditIdRef.current = null;
+    setSlotUseEditId(null);
     selectWidgetRef.current(editingId);
-    // 退出组件编辑时恢复进入前的外层缩放/平移视图。
-    const snapshot = componentEditViewSnapshotRef.current;
-    componentEditViewSnapshotRef.current = null;
-    if (snapshot) {
-      applyView(snapshot, false);
-    }
+    // 还原进入插槽前的画布视图，插槽内的缩放/平移不带回页面编辑。
+    restoreSlotView();
     return true;
+  }
+
+  /**
+   * 还原进入插槽使用编辑前的页面编辑视图。插槽会话内的缩放/平移只服务插槽内容，
+   * 退出（点退出编辑 / 选中别的控件 / 切到预览态）后一律回到进入前的样子。
+   */
+  function restoreSlotView() {
+    const restore = slotReturnViewRef.current;
+    slotReturnViewRef.current = null;
+    preFocusViewRef.current = null;
+    if (!restore) {
+      return;
+    }
+    userAdjustedRef.current = restore.userAdjusted;
+    editUserAdjustedRef.current = restore.editAdjusted;
+    if (modeRef.current === 'preview') {
+      // 预览态有自己的视图，交给切模式的逻辑处理，这里只丢弃快照。
+      return;
+    }
+    applyView(restore.view, false);
   }
 
   /**
@@ -3457,7 +3566,7 @@ export function ProjectEditorPage() {
       layers.push({ depth: widgetDepth(swiperEditIdRef.current), exit: () => exitSwiperEdit() });
     }
     if (componentEditIdRef.current) {
-      layers.push({ depth: widgetDepth(componentEditIdRef.current), exit: () => exitComponentEdit() });
+      layers.push({ depth: widgetDepth(componentEditIdRef.current), exit: () => exitSlotUseEdit() });
     }
     layers.sort((a, b) => b.depth - a.depth);
     return layers[0]?.exit() ?? false;
@@ -3532,8 +3641,6 @@ export function ProjectEditorPage() {
   exitScrollEditRef.current = exitScrollEdit;
   enterSwiperEditRef.current = enterSwiperEdit;
   exitSwiperEditRef.current = exitSwiperEdit;
-  enterComponentEditRef.current = enterComponentEdit;
-  exitComponentEditRef.current = exitComponentEdit;
   exitOneEditRef.current = exitOneEditLayer;
 
   useEffect(() => {
@@ -3583,15 +3690,16 @@ export function ProjectEditorPage() {
       return;
     }
     const rect = node.getBoundingClientRect();
-    focusWidgetInView(
-      {
-        left: rect.left,
-        top: rect.top,
-        width: rect.width,
-        height: rect.height,
-      },
-      restoreIfMax,
-    );
+    // 插槽本体被内容替换后是 display:contents，自身不生成盒子（rect 全 0）。此时改用
+    // 插槽内部控件的并集作为聚焦盒；否则拿着 0×0 去反算会把相机顶到最大倍率并甩出页面。
+    const box =
+      rect.width > 0 && rect.height > 0
+        ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+        : slotContentBox(node);
+    if (!box) {
+      return;
+    }
+    focusWidgetInView(box, restoreIfMax);
   }
 
   function commitDraft(
@@ -6067,21 +6175,6 @@ export function ProjectEditorPage() {
     stateFn: pageStateFn,
     hoverStateId: pageHoverStateId,
   });
-  // 顶部下拉框/工具栏全局状态控制编辑的宿主：组件定义态用当前文档，组件编辑态用组件定义文档。
-  const componentGlobalHost = (() => {
-    if (componentEditInstance) {
-      const doc = componentDefinitionDoc(componentEditInstance);
-      return doc
-        ? pageStateRootWidget({
-            style: doc.style,
-            states: doc.states,
-            stateFn: doc.stateFn,
-            hoverStateId: doc.hoverStateId,
-          })
-        : null;
-    }
-    return catalogKind === 'component' ? globalStateHost : null;
-  })();
   // 工具栏「全局状态控制」编辑的宿主（仅组件定义态）：文档级全局状态，与最外层节点自身状态独立。
   const componentGlobalControlWidget =
     catalogKind === 'component' && !componentEditId ? globalStateHost : null;
@@ -6128,24 +6221,6 @@ export function ProjectEditorPage() {
   const globalVisibleStates = globalStateBarWidget
     ? collectComponentRootStates(PAGE_ROOT_STATE_OWNER_ID, globalStateBarWidget)
     : [];
-  // 顶部「组件全局状态」下拉框：组件定义态取文档级全局状态，组件编辑态取组件实例的文档级全局状态。
-  const componentGlobalOwnerId =
-    componentEditId ?? (catalogKind === 'component' ? PAGE_ROOT_STATE_OWNER_ID : null);
-  const componentGlobalStates = componentGlobalOwnerId && componentGlobalHost
-    ? collectComponentRootStates(componentGlobalOwnerId, componentGlobalHost)
-    : [];
-  const componentGlobalStateId = componentGlobalOwnerId
-    ? viewingByOwner[componentGlobalOwnerId] ?? null
-    : null;
-  function commitComponentGlobalState(id: string | null) {
-    if (readOnlyRef.current || !componentGlobalOwnerId) {
-      return;
-    }
-    setViewingByOwner((prev) => ({ ...prev, [componentGlobalOwnerId]: id }));
-    if (viewingOwnerIdRef.current === componentGlobalOwnerId) {
-      setViewingState(id);
-    }
-  }
   const selectedDisplayWidget = selectedWidget
     ? widgetWithStateLayers(selectedWidget, stateLayersFor(selectedWidget), previewLocaleRef.current)
     : null;
@@ -6251,6 +6326,17 @@ export function ProjectEditorPage() {
       const componentWidget = findWidget(widgets, componentEditId);
       const doc = componentWidget?.type === 'component' ? componentDefinitionDoc(componentWidget) : null;
       if (componentWidget && componentWidget.type === 'component' && doc) {
+        if (slotUseEditId) {
+          // 插槽使用编辑：控件树只剩被编辑插槽的虚拟节点及其内容。
+          return componentSlotSubtree(
+            componentWidget.id,
+            doc.widgets,
+            componentWidget.slotContent ?? {},
+            doc.slots ?? [],
+            (widget) => widgetTreeLabel(widget, t),
+            slotUseEditId,
+          );
+        }
         return withComponentVirtualTree(
           base,
           componentWidget.id,
@@ -6287,32 +6373,47 @@ export function ProjectEditorPage() {
     }));
   })();
 
-  const componentEditSlots = (() => {
-    if (!componentEditId || catalogKind !== 'page') {
-      return [];
+  // 插槽使用编辑：处于编辑态时取编辑中的组件实例，否则取当前选中的组件实例。
+  const slotUseInstance = (() => {
+    if (catalogKind !== 'page') {
+      return null;
     }
-    const componentWidget = findWidget(widgets, componentEditId);
-    const doc = componentWidget?.type === 'component' ? componentDefinitionDoc(componentWidget) : null;
-    if (!componentWidget || componentWidget.type !== 'component' || !doc) {
-      return [];
+    if (componentEditId) {
+      const widget = findWidget(widgets, componentEditId);
+      return widget?.type === 'component' ? widget : null;
     }
-    const slotNameMap = new Map((doc.slots ?? []).map((slot) => [slot.id, slot.name ?? '']));
-    const slotParamsMap = new Map((doc.slots ?? []).map((slot) => [slot.id, slot.params ?? []]));
-    return collectTemplateSlots(doc.widgets).map((slotWidget) => {
-      let name = widgetTreeLabel(slotWidget, t);
-      if (!slotWidget.name?.trim()) {
-        const declarationName = slotNameMap.get(slotWidget.slotId)?.trim();
-        if (declarationName) {
-          name = `${name} · ${declarationName}`;
-        }
-      }
-      return {
-        key: virtualInnerId(componentEditId, slotWidget.id),
-        name,
-        params: slotParamsMap.get(slotWidget.slotId) ?? [],
-      };
-    });
+    return selectedWidget?.type === 'component' ? selectedWidget : null;
   })();
+  // 插槽使用编辑面板的插槽清单，取组件模板里真实存在的插槽控件。
+  const slotUseSlots = (() => {
+    if (!slotUseInstance) {
+      return [] as Array<{ id: string; name: string }>;
+    }
+    const doc = componentDefinitionDoc(slotUseInstance);
+    if (!doc) {
+      return [];
+    }
+    const declaredNames = new Map((doc.slots ?? []).map((slot) => [slot.id, slot.name ?? '']));
+    return collectTemplateSlots(doc.widgets).map((slotWidget) => ({
+      id: slotWidget.id,
+      name:
+        slotWidget.name?.trim() ||
+        declaredNames.get(slotWidget.slotId)?.trim() ||
+        t('lowcode.slotsTitle'),
+    }));
+  })();
+
+  /** 插槽使用编辑：点当前插槽退出编辑，点其它插槽切入对应插槽内容的编辑。 */
+  function toggleSlotUse(slotWidgetId: string) {
+    if (!slotUseInstance) {
+      return;
+    }
+    if (componentEditId === slotUseInstance.id && slotUseEditId === slotWidgetId) {
+      exitSlotUseEdit();
+      return;
+    }
+    enterSlotUseEdit(slotUseInstance.id, slotWidgetId);
+  }
 
   return (
     <ProjectVersionProvider versionId={projectVersionId}>
@@ -6441,8 +6542,9 @@ export function ProjectEditorPage() {
               slotDebugId={slotDebugId}
               slotDebugSlots={slotDebugSlots}
               onToggleSlotDebug={toggleSlotDebug}
-              componentEditSlots={componentEditSlots}
-              onSelectSlot={selectWidget}
+              slotUseSlots={slotUseSlots}
+              slotUseActiveId={slotUseEditId}
+              onToggleSlotUse={toggleSlotUse}
               previewSlot={previewSlotInfo}
               sendPreview={sendPreview}
               showStyleChrome={showStyleChrome}
@@ -6501,10 +6603,6 @@ export function ProjectEditorPage() {
               commitPageStates={commitPageStates}
               componentEditSelectionKind={virtualSelection?.kind ?? null}
               componentEditSlotId={virtualSelection?.kind === 'content' ? virtualSelection.slotId : null}
-              showComponentGlobalState={Boolean(componentEditId) && showStyleChrome}
-              componentGlobalStates={componentGlobalStates}
-              componentGlobalStateId={componentGlobalStateId}
-              onComponentGlobalStateChange={commitComponentGlobalState}
               componentGlobalWidget={componentGlobalControlWidget}
               onComponentGlobalStateFnChange={(stateFn, hoverStateId) =>
                 commitPageStateMeta(stateFn, hoverStateId, 'doc-state-fn')

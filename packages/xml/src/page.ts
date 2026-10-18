@@ -1094,6 +1094,52 @@ export function stripDataDrivenPresenceGates(widgets: PageWidget[]): PageWidget[
   });
 }
 
+/**
+ * 剥掉「根 → targetId」这条链上所有控件的存在与显示闸门（existsFn/displayFn/visibleFn）。
+ * 用于插槽调试态与插槽使用编辑态：目标插槽自身或它的某个祖先若被常量闸门（如 `return false`）关掉，
+ * 整棵子树会直接不进渲染树，隔离画布就无法只显示插槽内容（表现为整页照常显示）。
+ * 按 id 收集，循环展开出的同 id 多份实例一并覆盖。就地修改传入的树（调用方传入的是展开后的克隆树）。
+ */
+export function stripPathPresenceGates(widgets: PageWidget[], targetId: string): void {
+  const pathIds = new Set<string>();
+  let found = false;
+  const visit = (list: PageWidget[], chain: string[]): void => {
+    for (const widget of list) {
+      const next = [...chain, widget.id];
+      if (widget.id === targetId) {
+        found = true;
+        next.forEach((id) => pathIds.add(id));
+        return;
+      }
+      const children = (widget as PageWidget & { children?: PageWidget[] }).children;
+      if (children?.length) {
+        visit(children, next);
+        if (found) {
+          return;
+        }
+      }
+    }
+  };
+  visit(widgets, []);
+  if (!found) {
+    return;
+  }
+  const strip = (list: PageWidget[]): void => {
+    for (const widget of list) {
+      if (pathIds.has(widget.id)) {
+        delete widget.existsFn;
+        delete widget.displayFn;
+        delete widget.visibleFn;
+      }
+      const children = (widget as PageWidget & { children?: PageWidget[] }).children;
+      if (children?.length) {
+        strip(children);
+      }
+    }
+  };
+  strip(widgets);
+}
+
 function parseWidgetPresence(raw: string | undefined): WidgetPresence | undefined {
   const value = raw?.trim();
   return value && (WIDGET_PRESENCES as readonly string[]).includes(value) ? (value as WidgetPresence) : undefined;
@@ -4552,27 +4598,51 @@ function normalizeViewing(
 }
 
 export type ResolveWidgetTreeOptions = {
-  appliedStateFor?: (widget: PageWidget) => string | null;
+  /** 返回控件自身激活的状态列表（浅→深排序；根组在前、嵌套组按作用域链序在后）。
+   * inheritedIds 为从祖先链流入的激活状态 id（作用域），嵌套组仅在这些作用域激活时参与解析。 */
+  appliedStateFor?: (widget: PageWidget, inheritedIds: string[]) => string | string[] | null;
   stateLayersSink?: WeakMap<object, WidgetStateLayer[]>;
   /** 当前语言 key，用于按语言分支解析状态字段。 */
   locale?: string;
   /** 文档级全局状态 id：作为最外层「后代」状态层叠加到所有控件，使全局状态能承载节点样式增量。 */
   rootGlobalState?: string | null;
+  /** 树根节点的初始继承状态 id 链（浅→深）。提供时取代 rootGlobalState 作为基础链，
+   * 用于把外部祖先链（如页面侧组件实例的激活状态）传入独立解析的子树（如插槽内容）。 */
+  inheritedStateIds?: string[];
 };
 
-function ownerActiveState(
+/** 规范化状态 id 列表：去空白、丢空值/initial、去重、保持原顺序。 */
+function normalizeStateIdList(value: string | string[] | null | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+  const list = Array.isArray(value) ? value : [value];
+  const out: string[] = [];
+  for (const item of list) {
+    const id = typeof item === 'string' ? item.trim() : '';
+    if (id && id !== 'initial' && !out.includes(id)) {
+      out.push(id);
+    }
+  }
+  return out;
+}
+
+function ownerActiveStates(
   widget: PageWidget,
   viewing: WidgetStateViewing[],
-  appliedStateFor?: (widget: PageWidget) => string | null,
-): string | null {
+  inheritedIds: string[],
+  appliedStateFor?: (widget: PageWidget, inheritedIds: string[]) => string | string[] | null,
+): string[] {
   const hit = viewing.find((item) => item.ownerId === widget.id);
   if (hit) {
-    return hit.state;
+    // 编辑态查看：命中查看项时只显示该状态（编辑器单选语义），不叠加运行时其它分组。
+    return hit.state ? [hit.state] : [];
   }
   if (appliedStateFor) {
-    return appliedStateFor(widget);
+    return normalizeStateIdList(appliedStateFor(widget, inheritedIds));
   }
-  return appliedStateId(widget);
+  const applied = appliedStateId(widget);
+  return applied ? [applied] : [];
 }
 
 function layerRole(widget: PageWidget, id: string): WidgetStateRole {
@@ -4600,21 +4670,32 @@ function resolveWidgetNode(
   inheritedIds: string[],
   viewing: WidgetStateViewing[],
   inheritedTransition: number | string | undefined,
-  appliedStateFor?: (widget: PageWidget) => string | null,
+  appliedStateFor?: (widget: PageWidget, inheritedIds: string[]) => string | string[] | null,
   stateLayersSink?: WeakMap<object, WidgetStateLayer[]>,
   locale?: string,
 ): PageWidget {
-  const ownState = ownerActiveState(widget, viewing, appliedStateFor);
+  // 自身激活状态按「分组」解析：根组（states）与各激活作用域下的嵌套组各出至多一个状态，
+  // 不同分组（不同父亲）的状态可同时生效；层级越深越靠后合并，冲突属性以更深状态为准。
+  const ownStates = ownerActiveStates(widget, viewing, inheritedIds, appliedStateFor);
   const layers: WidgetStateLayer[] = [];
   for (const id of inheritedIds) {
     const role = layerRole(widget, id);
     layers.push({ id, role });
   }
-  if (ownState) {
-    layers.push({ id: ownState, role: layerRole(widget, ownState) });
+  for (const id of ownStates) {
+    layers.push({ id, role: layerRole(widget, id) });
   }
+  const ownTransition = (() => {
+    for (let i = ownStates.length - 1; i >= 0; i -= 1) {
+      const duration = stateTransition(widget, ownStates[i]);
+      if (duration) {
+        return duration;
+      }
+    }
+    return undefined;
+  })();
   const transition =
-    (ownState ? stateTransition(widget, ownState) : undefined) ??
+    ownTransition ??
     compactTransition(widget.transition) ??
     stackTransition(widget, layers, inheritedTransition);
   const fields = resolveWidgetStateStack(widget, layers, locale);
@@ -4622,9 +4703,9 @@ function resolveWidgetNode(
   // 存在/显示/可见闸门（引用 $props/$data 等绑定）不再参与判定：状态激活本身
   // 就代表该状态下的显隐安排，否则「无数据时隐藏」之类的基础 displayFn 会在
   // 状态生效时把整个子树遮蔽掉。常量闸门（如 return false）是结构性设计，保留。
+  const rootOwnActive = ownStates.some((id) => widget.states?.some((item) => item.id === id));
   if (
-    ownState &&
-    widget.states?.some((item) => item.id === ownState) &&
+    rootOwnActive &&
     fields.presence === undefined &&
     hasDataDrivenPresenceGates(widget)
   ) {
@@ -4633,7 +4714,8 @@ function resolveWidgetNode(
   const next = withResolvedFields(widget, fields, transition, locale);
   stateLayersSink?.set(next, layers);
   if ('children' in next) {
-    const childIds = ownState && !inheritedIds.includes(ownState) ? [...inheritedIds, ownState] : inheritedIds;
+    const extraIds = ownStates.filter((id) => !inheritedIds.includes(id));
+    const childIds = extraIds.length > 0 ? [...inheritedIds, ...extraIds] : inheritedIds;
     const childTransition = transition;
     next.children = next.children.map((child) =>
       resolveWidgetNode(child, childIds, viewing, childTransition, appliedStateFor, stateLayersSink, locale),
@@ -4651,7 +4733,11 @@ export function resolveWidgetTree(
   // 文档级全局状态作为最外层继承层：所有控件都以「后代」角色叠加它，
   // 从而应用各自 stateOverrides 中记录的该全局状态下的样式增量。
   const rootGlobalState = options?.rootGlobalState ?? null;
-  const inheritedIds = rootGlobalState ? [rootGlobalState] : [];
+  const inheritedIds = options?.inheritedStateIds
+    ? [...options.inheritedStateIds]
+    : rootGlobalState
+      ? [rootGlobalState]
+      : [];
   return widgets.map((widget) =>
     resolveWidgetNode(widget, inheritedIds, list, undefined, options?.appliedStateFor, options?.stateLayersSink, options?.locale),
   );

@@ -6,6 +6,8 @@ import type { ScopeAssign } from './sugar';
 export type WidgetSlotOverrideMeta = {
   content: PageWidget[];
   scope: BindingScope;
+  /** 页面侧祖先链（含组件实例自身）激活的状态 id：插槽内容是页面内容，需继承这些作用域。 */
+  inheritedStateIds?: string[];
   outer: {
     scope: BindingScope;
     assignScope?: ScopeAssign;

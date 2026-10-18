@@ -45,8 +45,10 @@ export type LowcodePreviewMessage = {
   scrollEditing?: boolean;
   swiperEditing?: boolean;
   componentEditing?: boolean;
-  /** 正在编辑的组件实例 id（组件编辑态，供画布侧定位居中主体与退出按钮）。 */
+  /** 插槽使用编辑：正在编辑插槽内容的组件实例 id。 */
   componentEditId?: string | null;
+  /** 插槽使用编辑：被聚焦插槽的运行时节点 id（`组件id__插槽控件id`），画布只露出该插槽内容。 */
+  slotFocusId?: string | null;
   /** 组件定义编辑器：正在调试的插槽 id（隔离显示其内部调试节点）。 */
   slotDebugId?: string | null;
   settle?: number;
@@ -98,12 +100,6 @@ export type LowcodeScrollModeMessage = {
 export type LowcodeSwiperModeMessage = {
   source: typeof LOWCODE_MESSAGE_SOURCE;
   type: 'swiper-mode';
-  action: 'enter' | 'exit';
-};
-
-export type LowcodeComponentModeMessage = {
-  source: typeof LOWCODE_MESSAGE_SOURCE;
-  type: 'component-mode';
   action: 'enter' | 'exit';
 };
 
@@ -299,7 +295,6 @@ export type LowcodeMessage =
   | LowcodeTableModeMessage
   | LowcodeScrollModeMessage
   | LowcodeSwiperModeMessage
-  | LowcodeComponentModeMessage
   | LowcodeTableCommandMessage
   | LowcodeTableFreezeMessage
   | LowcodeTableResizeMessage
@@ -330,7 +325,6 @@ const MESSAGE_TYPES = new Set([
   'table-mode',
   'scroll-mode',
   'swiper-mode',
-  'component-mode',
   'table-command',
   'table-freeze',
   'table-resize',

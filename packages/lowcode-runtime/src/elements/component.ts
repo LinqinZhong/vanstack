@@ -11,6 +11,7 @@ import {
   resolveCopyValue,
   resolveWidgetTree,
   stripDataDrivenPresenceGates,
+  stripPathPresenceGates,
   type BindingScope,
   type ComponentProp,
   type ComponentSlot,
@@ -473,6 +474,9 @@ function ComponentView({
     .map(([name, value]) => `${name}\0${value}`)
     .join('\n');
   const queryValueKey = JSON.stringify(query ?? {});
+  // 页面侧祖先链（含实例自身）激活的状态 id：插槽内容作为页面内容需继承这条链，
+  // 同时纳入 childKey，祖先状态切换时插槽内容重新解析（否则 data-state 滞留旧值）。
+  const instanceStateIds = (ctx.stateLayers?.get(widget) ?? []).map((layer) => layer.id);
   const viewingKey = ctx.viewing
     ? (Array.isArray(ctx.viewing) ? ctx.viewing : [ctx.viewing])
         .map((item) => `${item.ownerId}\0${item.state ?? ''}`)
@@ -485,6 +489,7 @@ function ComponentView({
     ctx.editing ? '1' : '0',
     ctx.slotChrome ? '1' : '0',
     ctx.componentEditing ? '1' : '0',
+    ctx.slotFocusId ?? '',
     (ctx.hoverInstanceKeys ?? []).join(','),
     ctx.locale ?? '',
     viewingKey,
@@ -493,6 +498,7 @@ function ComponentView({
     slotValueKey,
     dataWritesValueKey,
     queryValueKey,
+    instanceStateIds.join(','),
   ].join('\0');
   if (!childCache.current || childCache.current.key !== childKey) {
     // 先展开循环，再按每一项求 state()。样式仍用模板，避免某一项的状态写进共用 class。
@@ -501,6 +507,7 @@ function ComponentView({
           defs: nested.slots,
           args: slotArgValues,
           content: prefixedSlotContent,
+          inheritedStateIds: instanceStateIds,
           outer: {
             scope: ctx.bindingScope,
             assignScope: ctx.assignScope,
@@ -510,16 +517,24 @@ function ComponentView({
         }
       : undefined;
     const expanded = nested ? expandLoopTree(template, scope, false, widgetInstanceKey(widget), slotExpand) : [];
+    // 组件编辑态下显示与数据解耦：剔除引用绑定的存在/显示/可见闸门（常量闸门保留），
+    // 显隐只由状态栏选中的查看状态（delta presence）驱动。
+    const editingTree = editingThis ? stripDataDrivenPresenceGates(expanded) : expanded;
+    // 插槽使用编辑：被聚焦的插槽若被常量闸门（如 exists `return false`）挡住，整棵子树不进渲染树，
+    // 预览层的隔离 CSS 找不到它，画布就会照常显示整页。把「组件根 → 聚焦插槽」链上的闸门剥掉，
+    // 保证聚焦插槽始终进入渲染树（模板 id 已带 `${实例id}__` 前缀，与 slotFocusId 一致）。
+    if (editingThis && ctx.slotFocusId) {
+      stripPathPresenceGates(editingTree, ctx.slotFocusId);
+    }
     const innerWidgets = nested
       ? resolveWidgetTree(
-          // 组件编辑态下显示与数据解耦：剔除引用绑定的存在/显示/可见闸门（常量闸门保留），
-          // 显隐只由状态栏选中的查看状态（delta presence）驱动。
-          editingThis ? stripDataDrivenPresenceGates(expanded) : expanded,
+          editingTree,
           remapInstanceViewing(ctx.viewing ?? null, widget.id, nested.widgets[0]?.id),
           {
             // 组件内部控件状态一律由各自脚本（stateFn）驱动：编辑态也照常求值，
             // 不再回退到设计期 appliedState；组件全局状态由引用者的 viewing 承载，二者互不影响。
-            appliedStateFor: (child) => resolveRuntimeOwnState(child, ctx.editing ? [] : (ctx.hoverInstanceKeys ?? [])),
+            appliedStateFor: (child, inheritedIds) =>
+              resolveRuntimeOwnState(child, ctx.editing ? [] : (ctx.hoverInstanceKeys ?? []), inheritedIds),
             stateLayersSink: ctx.stateLayers,
             locale: ctx.locale,
             // 组件文档级「全局状态」同样作为最外层后代层叠加到组件内部控件，

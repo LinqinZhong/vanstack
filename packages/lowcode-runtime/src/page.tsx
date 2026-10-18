@@ -13,6 +13,7 @@ import {
   resolvePageStyleWithStates,
   resolveStateFnId,
   resolveWidgetTree,
+  stripPathPresenceGates,
   type BindingScope,
   type ComponentProp,
   type PageI18n,
@@ -69,6 +70,8 @@ export type LowcodePageProps = {
   componentEditing?: boolean;
   /** 组件编辑态下正在编辑的组件实例 id。 */
   componentEditId?: string | null;
+  /** 插槽使用编辑：被聚焦插槽的运行时节点 id（`${实例id}__${模板插槽id}`）。 */
+  slotFocusId?: string | null;
   icons?: Readonly<Record<string, string>>;
   assets?: Readonly<Record<string, string>>;
   animationsKey?: string;
@@ -90,59 +93,7 @@ function pagePropsKey(props: ComponentProp[] | undefined) {
     .join('\n');
 }
 
-function widgetChildren(widget: PageWidget): PageWidget[] | undefined {
-  return (widget as PageWidget & { children?: PageWidget[] }).children;
-}
-
-/**
- * 组件定义编辑器的插槽调试态：被调试的插槽必须始终可见。
- * 插槽本身或它的某个祖先若被状态显隐规则关掉（「存在与显示」落在 existsFn/displayFn/visibleFn 上，
- * 包括状态叠加得出的 removed/hidden/occupy，例如模板里某个容器 `exists` 为 `return false`），
- * 整棵子树会直接不进渲染树或被 display:none，调试画布就会全空。
- * 这里把「根 → 被调试插槽」这条链上所有控件的存在与显示配置剥掉；按 id 收集，
- * 循环展开出的同 id 多份实例一并覆盖。插槽自身的可见性由 slot.ts 的调试分支强制为 visible。
- */
-function stripDebugPathPresenceGates(widgets: PageWidget[], slotDebugId: string): void {
-  const pathIds = new Set<string>();
-  let found = false;
-  const visit = (list: PageWidget[], chain: string[]): void => {
-    for (const widget of list) {
-      const next = [...chain, widget.id];
-      if (widget.id === slotDebugId) {
-        found = true;
-        next.forEach((id) => pathIds.add(id));
-        return;
-      }
-      const children = widgetChildren(widget);
-      if (children?.length) {
-        visit(children, next);
-        if (found) {
-          return;
-        }
-      }
-    }
-  };
-  visit(widgets, []);
-  if (!found) {
-    return;
-  }
-  const strip = (list: PageWidget[]): void => {
-    for (const widget of list) {
-      if (pathIds.has(widget.id)) {
-        delete widget.existsFn;
-        delete widget.displayFn;
-        delete widget.visibleFn;
-      }
-      const children = widgetChildren(widget);
-      if (children?.length) {
-        strip(children);
-      }
-    }
-  };
-  strip(widgets);
-}
-
-export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel, onModelValue, onQueryValue, loadWidgetEvent, loadFunction, pageId, query, components, centerContent, useComponentTestData, slotChrome, slotDebugId, componentEditing, componentEditId, icons, assets, animationsKey, onCommit }: LowcodePageProps): ReactElement {
+export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewing, dynamicTextLabel, onModelValue, onQueryValue, loadWidgetEvent, loadFunction, pageId, query, components, centerContent, useComponentTestData, slotChrome, slotDebugId, componentEditing, componentEditId, slotFocusId, icons, assets, animationsKey, onCommit }: LowcodePageProps): ReactElement {
   installPageIcons(icons);
   installPageAssets(assets);
   const currentLocale = locale || pickPageLocale(catalog);
@@ -386,7 +337,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     const slotExpand = page.slots?.length ? { defs: page.slots } : undefined;
     const expanded = expandLoopTree(page.widgets, { data: dataScope, props: propsScope, query: liveQuery, aliases: {} }, editing, '', slotExpand);
     const resolved = resolveWidgetTree(expanded, editing ? viewing : null, {
-      appliedStateFor: editing ? undefined : (widget) => resolveRuntimeOwnState(widget, hoverInstanceKeys),
+      appliedStateFor: editing ? undefined : (widget, inheritedIds) => resolveRuntimeOwnState(widget, hoverInstanceKeys, inheritedIds),
       stateLayersSink: sink,
       locale: currentLocale,
       // 全局状态作为最外层后代层叠加到所有控件，使「全局状态下修改的节点样式」生效（编辑态与发布态一致）。
@@ -394,7 +345,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     });
     // 插槽调试态：保证被调试插槽及其祖先不被状态显隐规则关掉，否则调试画布会全空。
     if (editing && slotDebugId) {
-      stripDebugPathPresenceGates(resolved, slotDebugId);
+      stripPathPresenceGates(resolved, slotDebugId);
     }
     return { widgets: resolved, stateLayers: sink };
   }, [paintKey, page.slots, viewing, dataScope, propsScope, liveQuery, editing, hoverInstanceKeys, currentLocale, pageGlobalStateId, slotDebugId]);
@@ -562,6 +513,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       componentEditing: Boolean(componentEditing),
       slotDefs: page.slots,
       componentEditId: componentEditId ?? null,
+      slotFocusId: slotFocusId ?? null,
       viewing,
       icons,
       drawerBoardIndex: drawerBoardIndexes.get(widget.id),
@@ -639,6 +591,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     useComponentTestData ? '1' : '0',
     componentEditing ? '1' : '0',
     slotDebugId ?? '',
+    slotFocusId ?? '',
     JSON.stringify(viewing),
     JSON.stringify(modelOverrides),
   ].join('\n');

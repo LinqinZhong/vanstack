@@ -44,6 +44,8 @@ export type RenderPageXmlOptions = {
   componentEditing?: boolean;
   /** 组件编辑态下正在编辑的组件实例 id。 */
   componentEditId?: string | null;
+  /** 插槽使用编辑：被聚焦插槽的运行时节点 id（`${实例id}__${模板插槽id}`）。 */
+  slotFocusId?: string | null;
   icons?: Readonly<Record<string, string>>;
   /** 资源库路径 `分组.文件名` 到文件地址。 */
   assets?: Readonly<Record<string, string>>;
@@ -122,6 +124,7 @@ export function renderPage(
       slotDebugId: options?.slotDebugId,
       componentEditing: Boolean(options?.componentEditing),
       componentEditId: options?.componentEditId,
+      slotFocusId: options?.slotFocusId,
       icons: options?.icons,
       assets: options?.assets,
       animationsKey: options?.animationsKey,

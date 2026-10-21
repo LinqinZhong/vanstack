@@ -467,31 +467,52 @@ function stretchTableColumns(table: HTMLElement) {
   });
 }
 
-/** 表格编辑态：非自适应的那一轴画蓝色辅助线，标出表格设定的宽高。 */
+/** 表格编辑态：调整列宽/行高时，在非自适应那一轴画蓝色辅助线，标出表格内容区的设定宽高。
+ *  辅助线落在表格的 content-box 上（扣掉边框与内边距），这样最小总列宽的右缘正好和辅助线对齐。 */
 function paintSizeGuide(overlay: HTMLElement, host: HTMLElement, table: HTMLElement, zoom: number) {
   const fitWidth = table.dataset.tableFitWidth != null;
   const fitHeight = table.dataset.tableFitHeight != null;
   if (fitWidth && fitHeight) {
     return;
   }
-  const targetWidth = fitWidth ? null : declaredSize(table, 'width');
-  const targetHeight = fitHeight ? null : declaredSize(table, 'height');
+  const style = table.ownerDocument.defaultView?.getComputedStyle(table);
+  if (!style) {
+    return;
+  }
+  const px = (raw: string) => Number.parseFloat(raw) || 0;
+  const borderLeft = px(style.borderLeftWidth);
+  const borderRight = px(style.borderRightWidth);
+  const borderTop = px(style.borderTopWidth);
+  const borderBottom = px(style.borderBottomWidth);
+  const paddingLeft = px(style.paddingLeft);
+  const paddingRight = px(style.paddingRight);
+  const paddingTop = px(style.paddingTop);
+  const paddingBottom = px(style.paddingBottom);
+
+  const box = hostBox(host, table, zoom);
+  // 表格内容区的左上角与实际尺寸（编辑态壳被强制成 max-content，实际宽高可能不等于声明值）。
+  const contentLeft = box.left + borderLeft + paddingLeft;
+  const contentTop = box.top + borderTop + paddingTop;
+  const actualContentWidth = Math.max(0, box.width - borderLeft - borderRight - paddingLeft - paddingRight);
+  const actualContentHeight = Math.max(0, box.height - borderTop - borderBottom - paddingTop - paddingBottom);
+
+  const targetWidth = fitWidth ? null : contentTarget(table, 'width');
+  const targetHeight = fitHeight ? null : contentTarget(table, 'height');
   const showWidth = targetWidth != null;
   const showHeight = targetHeight != null;
   if (!showWidth && !showHeight) {
     return;
   }
-  const box = hostBox(host, table, zoom);
   const guide = document.createElement('div');
   guide.className = 'table-chrome-size';
   guide.hidden = false;
   // 线宽用编辑铬的 hairline，缩放后仍和屏幕辅助线一样是 1 个屏幕像素。
   const line = 'var(--editor-hairline, 1px)';
   place(guide, {
-    left: `${box.left}px`,
-    top: `${box.top}px`,
-    width: `${showWidth ? targetWidth : box.width}px`,
-    height: `${showHeight ? targetHeight : box.height}px`,
+    left: `${contentLeft}px`,
+    top: `${contentTop}px`,
+    width: `${showWidth ? targetWidth : actualContentWidth}px`,
+    height: `${showHeight ? targetHeight : actualContentHeight}px`,
     borderTopWidth: showHeight ? line : '0',
     borderBottomWidth: showHeight ? line : '0',
     borderLeftWidth: showWidth ? line : '0',
@@ -555,7 +576,8 @@ export function syncTableChrome(
     host.append(overlay);
   }
   overlay.replaceChildren();
-  if (tableOpen) {
+  // 蓝色辅助线只在拖拽列宽/行高时显示，标出表格设定的内容区宽高。
+  if (tableOpen && draggingKey) {
     paintSizeGuide(overlay, host, table, zoom);
   }
 

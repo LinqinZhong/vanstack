@@ -29,18 +29,13 @@ export function renderSlot(
   let children: Array<ReactElement | null>;
   if (override) {
     // 外层页面覆盖了插槽内容：用外层作用域（叠加插槽参数）展开并渲染。
-    // 状态链：页面侧祖先（含实例自身）激活状态（override.inheritedStateIds，较浅）
-    // + 模板侧插槽节点自身层（含插槽自身状态，较深），一并作为插槽内容的继承作用域，
-    // 否则页面祖先（如按钮「激活」）作用域下的嵌套状态在插槽内容里永不激活。
+    // 状态链仅取页面侧祖先（含实例自身）激活状态（override.inheritedStateIds）。
+    // 插槽是状态边界：组件内部祖先的状态（含循环项状态、组件全局状态）不传入插槽内容，
+    // 避免组件内部状态污染外部插槽内容；页面侧嵌套状态已由 inheritedStateIds 完整承载。
     const chain: string[] = [];
     for (const id of override.inheritedStateIds ?? []) {
       if (!chain.includes(id)) {
         chain.push(id);
-      }
-    }
-    for (const layer of ctx.stateLayers?.get(widget) ?? []) {
-      if (!chain.includes(layer.id)) {
-        chain.push(layer.id);
       }
     }
     const expanded = expandLoopTree(override.content, override.scope, false, widgetInstanceKey(widget));

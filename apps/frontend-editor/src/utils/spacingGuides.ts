@@ -124,10 +124,20 @@ function rotateLayoutBox(host: HTMLElement, widget: HTMLElement, zoom: number): 
   const hostRect = host.getBoundingClientRect();
   const widgetRect = widget.getBoundingClientRect();
   const scale = previewVisualScale(host, zoom);
-  const width = widget.offsetWidth;
-  const height = widget.offsetHeight;
-  const centerX = (widgetRect.left + widgetRect.width / 2 - hostRect.left) / scale;
-  const centerY = (widgetRect.top + widgetRect.height / 2 - hostRect.top) / scale;
+  let width = widget.offsetWidth;
+  let height = widget.offsetHeight;
+  let centerX = (widgetRect.left + widgetRect.width / 2 - hostRect.left) / scale;
+  let centerY = (widgetRect.top + widgetRect.height / 2 - hostRect.top) / scale;
+  // 元素自身不占布局空间时（如 display:contents 的插槽），改用可见子节点并集计算
+  if (width === 0 && height === 0) {
+    const union = unionPaintedBox(host, widget, zoom);
+    if (union.width > 0 || union.height > 0) {
+      width = union.width;
+      height = union.height;
+      centerX = union.left + width / 2;
+      centerY = union.top + height / 2;
+    }
+  }
   return {
     left: centerX - width / 2,
     top: centerY - height / 2,

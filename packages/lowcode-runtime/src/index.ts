@@ -139,7 +139,7 @@ export function renderPage(
   }
 }
 
-export { pageCssText } from './css';
+export { pageCssText, widgetClassName } from './css';
 export { installPageAnimations } from './animation';
 export { HOVER_STATE_NAME, mergeHoverViewing, widgetHasHoverState } from './hover';
 export { installPageIcons } from './icon';

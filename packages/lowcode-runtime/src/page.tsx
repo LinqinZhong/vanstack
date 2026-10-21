@@ -23,7 +23,7 @@ import {
   type ScopeAssign,
   type WidgetStateLayer,
 } from '@vanstack/xml';
-import { libraryPaintKey, pageCss, pageCssText, pageScrollCss, widgetPaintKey } from './css';
+import { libraryPaintKey, pageCss, pageCssText, pageScrollCss, widgetClassName, widgetPaintKey } from './css';
 import { bindDrawerHandles, drawerRailMetrics } from './elements/drawer';
 import { bindComponentInstances, buildSelf, initMethodLocal, runMethodCode, type ComponentInstance } from './methods';
 import { bindOverlayScrollbar } from './overlay-scrollbar';
@@ -332,7 +332,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     return resolveStateFnId(pageStateRootWidget(page), { data: dataScope, props: propsScope, query: liveQuery });
   }, [pageViewingStateIds, editing, page, dataScope, propsScope, liveQuery]);
   const paintKey = widgetPaintKey(page.widgets);
-  const { widgets, stateLayers } = useMemo(() => {
+  const { widgets, stateLayers, debugPathIds } = useMemo(() => {
     const sink = new WeakMap<object, WidgetStateLayer[]>();
     const slotExpand = page.slots?.length ? { defs: page.slots } : undefined;
     const expanded = expandLoopTree(page.widgets, { data: dataScope, props: propsScope, query: liveQuery, aliases: {} }, editing, '', slotExpand);
@@ -344,10 +344,9 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
       rootGlobalState: pageGlobalStateId,
     });
     // 插槽调试态：保证被调试插槽及其祖先不被状态显隐规则关掉，否则调试画布会全空。
-    if (editing && slotDebugId) {
-      stripPathPresenceGates(resolved, slotDebugId);
-    }
-    return { widgets: resolved, stateLayers: sink };
+    // 同时拿回「根 → 插槽」路径 id，用于强制放开路径上的 overflow 裁剪（见 debugOverflowCss）。
+    const debugPathIds = editing && slotDebugId ? stripPathPresenceGates(resolved, slotDebugId) : [];
+    return { widgets: resolved, stateLayers: sink, debugPathIds };
   }, [paintKey, page.slots, viewing, dataScope, propsScope, liveQuery, editing, hoverInstanceKeys, currentLocale, pageGlobalStateId, slotDebugId]);
   const drawerBoardIndexes = new Map<string, number>();
   {
@@ -362,6 +361,17 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
   const toast = usePageToast();
   const dir = pageI18nDir(catalog, currentLocale);
   const styleText = useMemo(() => pageCssText(page.widgets, currentLocale, { animations: !editing }), [page.widgets, currentLocale, editing, animationsKey]);
+  // 插槽调试态：静态 overflow（含无 style 控件的默认 overflow:hidden）走 class 规则发射，改克隆树的
+  // style 不会生效；插槽内容又常被路径祖先（循环 flex、轮播、滚动容器等）裁剪到可视区外，调试画布
+  // 表现为全空白。这里沿「根 → 被调试插槽」路径强制 overflow: visible !important，压过一切非 important
+  // 的 class / inline overflow，确保插槽内容无论如何都绘制出来。
+  const debugOverflowCss = useMemo(() => {
+    if (!debugPathIds.length) {
+      return '';
+    }
+    const css = debugPathIds.map((id) => `.${widgetClassName(id)} { overflow: visible !important; }`).join('\n');
+    return css;
+  }, [debugPathIds]);
   const pageRootStyle = useMemo(
     () => resolvePageStyleWithStates(
       { style: page.style, states: page.states, stateFn: page.stateFn, hoverStateId: page.hoverStateId },
@@ -647,7 +657,7 @@ export function LowcodePage({ page, editing, tableLayout, locale, catalog, viewi
     },
     createElement('style', {
       key: 'lowcode-page-style',
-      dangerouslySetInnerHTML: { __html: styleText },
+      dangerouslySetInnerHTML: { __html: debugOverflowCss ? `${styleText}\n${debugOverflowCss}` : styleText },
     }),
     createElement(
       'div',

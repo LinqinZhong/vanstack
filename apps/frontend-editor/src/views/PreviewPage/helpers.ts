@@ -188,7 +188,12 @@ export function clearLiveInlineStyles(root: HTMLElement | null) {
       }
       continue;
     }
+    // 表格的宽高来自文档样式且不会被即时样式覆盖，清掉会让非自适应表格退回自适应。
+    const keepSize = node.dataset.widgetType === 'table';
     for (const key of LIVE_STYLE_KEYS) {
+      if (keepSize && (key === 'width' || key === 'height')) {
+        continue;
+      }
       node.style[key] = '';
     }
   }

@@ -29,7 +29,7 @@ type LoginPageProps = {
 export function LoginPage({ onLoggedIn }: LoginPageProps) {
   const { t } = useTranslation();
   const [form] = Form.useForm<LoginFormValues>();
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const desktop = isDesktopShell();
   const server = getServerConfig();
@@ -45,7 +45,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
 
   async function submit(values: LoginFormValues) {
     setPending(true);
-    setError(false);
+    setError(null);
     try {
       if (desktop) {
         const server = parseServerConfig(values.host ?? '', values.port ?? '');
@@ -54,8 +54,8 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
       }
       const session = await api.login({ username: values.username, password: values.password });
       onLoggedIn(session);
-    } catch {
-      setError(true);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t('login.failed'));
     } finally {
       setPending(false);
     }
@@ -76,7 +76,10 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
           layout="vertical"
           onFinish={(values) => void submit(values)}
           requiredMark={false}
-          initialValues={desktop ? { host: server.host, port: String(server.port) } : undefined}
+          initialValues={{
+            ...(desktop ? { host: server.host, port: String(server.port) } : undefined),
+            ...(import.meta.env.DEV ? { username: 'admin', password: 'Admin@1727' } : undefined),
+          }}
         >
           {desktop ? <ServerAddressFields /> : null}
           <Form.Item
@@ -93,7 +96,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
           >
             <Input.Password autoComplete="current-password" size="large" prefix={<LockOutlined />} />
           </Form.Item>
-          {error ? <Alert type="error" showIcon message={t('login.failed')} style={{ marginBottom: 16 }} /> : null}
+          {error ? <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} /> : null}
           <Button type="primary" htmlType="submit" loading={pending} block size="large">
             {pending ? t('login.submitting') : t('login.submit')}
           </Button>

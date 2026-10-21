@@ -22,6 +22,7 @@ import { WidgetStateList, stateRowKey } from '../../../components/WidgetStateLis
 import { WidgetStateFnModal } from '../../../components/WidgetStateFnModal';
 import { setSpacingDragCursor } from '../../../utils/spacingGuides';
 import { patchTableCellStyles, type TableRange } from '../../../utils/tableEdit';
+import type { LowcodeWidgetBoxModel } from '../../../utils/lowcode-protocol';
 import { collectTreeStateIds, findWidget, updateWidgetById, type WidgetPatch } from '../../../utils/widgetTree';
 import {
   createWidgetState,
@@ -515,6 +516,8 @@ type CanvasWorkspaceProps = {
   readOnly: boolean;
   openBoxGroup: BoxGroup | null;
   handleOpenBoxGroupChange: (group: BoxGroup | null) => void;
+  /** 选中控件的实测盒模型（widget-box 消息回传），气泡工具栏布局概览图使用。 */
+  widgetBoxModel: { widgetId: string; model: LowcodeWidgetBoxModel } | null;
   tableBubble: TableBubbleModel | undefined;
   projectId: string;
   updateWidget: (widgetId: string, patch: WidgetPatch, coalesceKey: string) => void;
@@ -718,6 +721,7 @@ export function CanvasWorkspace({
   readOnly,
   openBoxGroup,
   handleOpenBoxGroupChange,
+  widgetBoxModel,
   tableBubble,
   projectId,
   updateWidget,
@@ -1300,6 +1304,7 @@ export function CanvasWorkspace({
                     disabled={readOnly}
                     openGroup={openBoxGroup}
                     onOpenGroupChange={handleOpenBoxGroupChange}
+                    boxModel={widgetBoxModel && widgetBoxModel.widgetId === bubbleWidget.id ? widgetBoxModel.model : undefined}
                     table={tableBubble}
                     onTableLines={
                       bubbleWidget.type === 'table'

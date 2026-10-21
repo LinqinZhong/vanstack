@@ -24,9 +24,13 @@ const CHROME_ATTR = 'data-table-chrome';
 function hostBox(host: HTMLElement, node: HTMLElement, zoom: number): Box {
   const hostRect = host.getBoundingClientRect();
   const rect = node.getBoundingClientRect();
-  const scale = previewVisualScale(host, zoom);
   const width = node.offsetWidth;
   const height = node.offsetHeight;
+  // 画布的低倍率靠 host 的 CSS zoom 放大布局，zoom 已经吃进 offsetWidth；
+  // 这里用元素自身的 rect/offset 比值才是 CSS px 到屏幕 px 的真实比例，
+  // 再乘一次 zoom 会把坐标缩成一半，列标/辅助线整体左移上移。
+  const measured = width > 0 ? rect.width / width : 0;
+  const scale = measured > 0 ? measured : previewVisualScale(host, zoom);
   const centerX = (rect.left + rect.width / 2 - hostRect.left) / scale;
   const centerY = (rect.top + rect.height / 2 - hostRect.top) / scale;
   return {
@@ -54,13 +58,6 @@ function opButton(label: string, title: string, attrs: { command?: string; freez
     button.dataset.tableFreeze = attrs.freeze;
   }
   return button;
-}
-
-function keepTableEdge(value: number, others: number, tableSpan: number): number {
-  if (tableSpan <= 0) {
-    return Math.max(24, value);
-  }
-  return Math.max(value, 24, tableSpan - others);
 }
 
 /** 内部边把增减让给相邻轨道，两边之和不变，外框不跟着动。 */
@@ -147,14 +144,9 @@ export function applyLiveTableTrack(
       return undefined;
     }
     const shared = pair?.nextStart != null ? shareWithNext(value, pair.start, pair.nextStart) : null;
-    let next = shared?.value ?? value;
-    if (!shared && index === headers.length - 1) {
-      const others = headers.reduce(
-        (sum, header, headerIndex) => (headerIndex === index ? sum : sum + header.offsetWidth),
-        0,
-      );
-      next = keepTableEdge(value, others, table.clientWidth);
-    }
+    // 最右列没有邻居：允许自由缩到最小值 24px，但表格宽非自适应时不能小于表格宽。
+    // 表格壳的 max-content 宽度会随之增大/缩小，外框始终包住整列内容。
+    const next = shared?.value ?? Math.max(lastColumnFloor(table, headers, index), value);
     const widths = headers.map((header, headerIndex) => {
       if (headerIndex === index) {
         return next;
@@ -220,7 +212,14 @@ function pinCellTrack(row: HTMLElement, type: 'th' | 'td', height: number) {
   }
 }
 
-function editingTable(root: HTMLElement): HTMLElement | null {
+function editingTable(root: HTMLElement, tableId?: string | null): HTMLElement | null {
+  // 表格编辑态可能没有任何选中节点，此时以父页给出的正在编辑的表格 id 为准。
+  if (tableId) {
+    const node = root.querySelector<HTMLElement>(`[data-widget-id="${CSS.escape(tableId)}"]`);
+    if (node?.dataset.widgetType === 'table') {
+      return node;
+    }
+  }
   const selected = root.querySelector('.is-widget-selected');
   if (!(selected instanceof HTMLElement)) {
     return null;
@@ -238,6 +237,7 @@ export function syncTableReveal(
   root: HTMLElement | null,
   editing: boolean,
   tableEditing: boolean,
+  tableId?: string | null,
 ) {
   const clearOpen = () => {
     root?.querySelectorAll('.lowcode-table.is-table-open').forEach((node) => {
@@ -258,7 +258,7 @@ export function syncTableReveal(
       node.scrollLeft = 0;
     }
   });
-  const table = tableEditing ? editingTable(root) : null;
+  const table = tableEditing ? editingTable(root, tableId) : null;
   root.querySelectorAll('.lowcode-table.is-table-open').forEach((node) => {
     if (node !== table) {
       node.classList.remove('is-table-open');
@@ -379,6 +379,127 @@ function paintTableModeButton(
   clampButtonInView(button, host, zoom);
 }
 
+/** 读取表格声明的宽/高，换算成像素；自适应或无法解析时返回 null。 */
+function declaredSize(table: HTMLElement, axis: 'width' | 'height'): number | null {
+  const raw = (axis === 'width' ? table.dataset.tableWidth : table.dataset.tableHeight)?.trim();
+  if (!raw) {
+    return null;
+  }
+  const value = Number.parseFloat(raw);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  if (raw.endsWith('%')) {
+    const parent = table.parentElement;
+    if (!parent) {
+      return null;
+    }
+    // 百分比相对父级内容区（不含内边距），和 CSS 的解析口径一致。
+    const view = parent.ownerDocument.defaultView;
+    const style = view?.getComputedStyle(parent);
+    const inner = axis === 'width'
+      ? parent.clientWidth - (Number.parseFloat(style?.paddingLeft ?? '') || 0) - (Number.parseFloat(style?.paddingRight ?? '') || 0)
+      : parent.clientHeight - (Number.parseFloat(style?.paddingTop ?? '') || 0) - (Number.parseFloat(style?.paddingBottom ?? '') || 0);
+    return inner > 0 ? (inner * value) / 100 : null;
+  }
+  return raw.endsWith('px') ? value : null;
+}
+
+/** 声明的宽/高换算成表格内容区尺寸（扣掉边框与内边距）；自适应或无法解析时返回 null。 */
+function contentTarget(table: HTMLElement, axis: 'width' | 'height'): number | null {
+  const declared = declaredSize(table, axis);
+  if (declared == null) {
+    return null;
+  }
+  const style = table.ownerDocument.defaultView?.getComputedStyle(table);
+  if (!style) {
+    return declared;
+  }
+  const px = (raw: string) => Number.parseFloat(raw) || 0;
+  const border = axis === 'width'
+    ? px(style.borderLeftWidth) + px(style.borderRightWidth)
+    : px(style.borderTopWidth) + px(style.borderBottomWidth);
+  const padding = axis === 'width'
+    ? px(style.paddingLeft) + px(style.paddingRight)
+    : px(style.paddingTop) + px(style.paddingBottom);
+  return Math.max(0, declared - border - padding);
+}
+
+/** 宽非自适应时，最后一列的宽度下限：总列宽不能小于表格宽。 */
+function lastColumnFloor(table: HTMLElement, headers: HTMLElement[], index: number): number {
+  if (table.dataset.tableFitWidth != null || index !== headers.length - 1) {
+    return 24;
+  }
+  const target = contentTarget(table, 'width');
+  if (target == null) {
+    return 24;
+  }
+  const others = headers.reduce((sum, header, headerIndex) => (headerIndex === index ? sum : sum + header.offsetWidth), 0);
+  return Math.max(24, target - others);
+}
+
+/** 宽非自适应时，把「表格宽 - 总列宽」的差额补到最后一列，保证总列宽不小于表格宽。 */
+function stretchTableColumns(table: HTMLElement) {
+  if (table.dataset.tableFitWidth != null) {
+    return;
+  }
+  // 表格编辑态为了外框包住全部内容会把壳强制成 max-content，
+  // 这里必须按声明的宽来校正，否则差额永远算成 0。
+  const target = contentTarget(table, 'width');
+  if (target == null) {
+    return;
+  }
+  const head = table.querySelector<HTMLElement>(':scope > .lowcode-table-head');
+  const headers = head ? [...head.querySelectorAll<HTMLElement>(':scope > [data-widget-type="th"]')] : [];
+  if (headers.length === 0) {
+    return;
+  }
+  const widths = headers.map((header) => header.offsetWidth);
+  const total = widths.reduce((sum, width) => sum + width, 0);
+  if (total >= target) {
+    return;
+  }
+  widths[widths.length - 1] += target - total;
+  const template = widths.map((width) => `${width}px`).join(' ');
+  head!.style.gridTemplateColumns = template;
+  table.querySelectorAll<HTMLElement>(':scope > [data-widget-type="tr"]').forEach((row) => {
+    row.style.gridTemplateColumns = template;
+  });
+}
+
+/** 表格编辑态：非自适应的那一轴画蓝色辅助线，标出表格设定的宽高。 */
+function paintSizeGuide(overlay: HTMLElement, host: HTMLElement, table: HTMLElement, zoom: number) {
+  const fitWidth = table.dataset.tableFitWidth != null;
+  const fitHeight = table.dataset.tableFitHeight != null;
+  if (fitWidth && fitHeight) {
+    return;
+  }
+  const targetWidth = fitWidth ? null : declaredSize(table, 'width');
+  const targetHeight = fitHeight ? null : declaredSize(table, 'height');
+  const showWidth = targetWidth != null;
+  const showHeight = targetHeight != null;
+  if (!showWidth && !showHeight) {
+    return;
+  }
+  const box = hostBox(host, table, zoom);
+  const guide = document.createElement('div');
+  guide.className = 'table-chrome-size';
+  guide.hidden = false;
+  // 线宽用编辑铬的 hairline，缩放后仍和屏幕辅助线一样是 1 个屏幕像素。
+  const line = 'var(--editor-hairline, 1px)';
+  place(guide, {
+    left: `${box.left}px`,
+    top: `${box.top}px`,
+    width: `${showWidth ? targetWidth : box.width}px`,
+    height: `${showHeight ? targetHeight : box.height}px`,
+    borderTopWidth: showHeight ? line : '0',
+    borderBottomWidth: showHeight ? line : '0',
+    borderLeftWidth: showWidth ? line : '0',
+    borderRightWidth: showWidth ? line : '0',
+  });
+  overlay.append(guide);
+}
+
 /** syncTableChrome：把行/列操作条画在预览叠层上，不进入表格布局。 */
 export function syncTableChrome(
   host: HTMLElement | null,
@@ -405,6 +526,11 @@ export function syncTableChrome(
     host.querySelector(`[${CHROME_ATTR}]`)?.remove();
     return;
   }
+  const tableOpen = table.classList.contains('is-table-open');
+  if (tableOpen && !draggingKey) {
+    // 进入表格编辑时纠正列宽：非自适应宽下总列宽不得小于表格宽。
+    stretchTableColumns(table);
+  }
   const headers = [...table.querySelectorAll<HTMLElement>(':scope > .lowcode-table-head [data-widget-type="th"]')];
   const head = table.querySelector<HTMLElement>(':scope > .lowcode-table-head');
   const bodyRows = [...table.querySelectorAll<HTMLElement>(':scope > [data-widget-type="tr"]')];
@@ -429,6 +555,9 @@ export function syncTableChrome(
     host.append(overlay);
   }
   overlay.replaceChildren();
+  if (tableOpen) {
+    paintSizeGuide(overlay, host, table, zoom);
+  }
 
   const range = model.range;
   if (range?.kind === 'column') {

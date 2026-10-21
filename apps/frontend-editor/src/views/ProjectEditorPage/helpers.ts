@@ -57,6 +57,28 @@ export const FOCUS_PADDING = 48;
 export const CANVAS_RASTER_SCALE = 2;
 export const EDIT_OVERFLOW_X = 4;
 export const EDIT_OVERFLOW_Y = 2;
+
+/**
+ * 当前画布栅格倍率。普通编辑态为 CANVAS_RASTER_SCALE（预览宿主 zoom=2 换取高分文本栅格化）；
+ * 插槽调试态 / 插槽使用编辑态降为 1——zoom=1 时 iframe 内 getBoundingClientRect 与实际绘制
+ * 一致，相机对准、点击命中等一切基于测量的逻辑不再受 zoom 坐标系分歧影响。
+ */
+let activeRasterScale = CANVAS_RASTER_SCALE;
+
+export function setCanvasRasterScale(raster: number) {
+  activeRasterScale = raster >= 1 ? raster : 1;
+}
+
+/**
+ * 插槽会话（插槽调试 / 插槽使用编辑）的栅格倍率：跟随画布缩放。
+ * 放大超过 100% 时提高预览宿主 zoom，内容按更高分辨率重新栅格化，消除合成器放大带来的模糊；
+ * ≤100% 时保持 1（此时 iframe 内 gBCR 测量与绘制一致，相机对准、点击命中不受影响）。
+ * 0.5 步进取整，避免每次缩放都触发预览重排。视觉上缩放恒等于 viewScale（zoom×相机=scale），
+ * 切换倍率本身不引起任何跳动，只有清晰度变化。
+ */
+export function slotCanvasRasterScale(viewScale: number) {
+  return Math.max(1, Math.ceil(viewScale * 2) / 2);
+}
 const MIN_SCALE = 0.1;
 export const MAX_SCALE = 5;
 export const ZOOM_STEP = 1.15;
@@ -79,7 +101,7 @@ export function snapDevicePixel(value: number) {
 function cameraTransform(view: ViewTransform, hasEditOverflow: boolean) {
   const shiftX = hasEditOverflow ? SCREEN_WIDTH * (EDIT_OVERFLOW_X / 2) * view.scale : 0;
   const shiftY = hasEditOverflow ? SCREEN_HEIGHT * (EDIT_OVERFLOW_Y / 2) * view.scale : 0;
-  return `translate3d(${view.x - shiftX}px, ${view.y - shiftY}px, 0) scale(${view.scale / CANVAS_RASTER_SCALE})`;
+  return `translate3d(${view.x - shiftX}px, ${view.y - shiftY}px, 0) scale(${view.scale / activeRasterScale})`;
 }
 
 export function paintCanvasView(

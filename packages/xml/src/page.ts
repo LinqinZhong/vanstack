@@ -1099,16 +1099,17 @@ export function stripDataDrivenPresenceGates(widgets: PageWidget[]): PageWidget[
  * 用于插槽调试态与插槽使用编辑态：目标插槽自身或它的某个祖先若被常量闸门（如 `return false`）关掉，
  * 整棵子树会直接不进渲染树，隔离画布就无法只显示插槽内容（表现为整页照常显示）。
  * 按 id 收集，循环展开出的同 id 多份实例一并覆盖。就地修改传入的树（调用方传入的是展开后的克隆树）。
+ * 返回「根 → targetId」路径上的控件 id（有序，未找到时为空数组），供调用方做路径级样式覆盖。
  */
-export function stripPathPresenceGates(widgets: PageWidget[], targetId: string): void {
-  const pathIds = new Set<string>();
+export function stripPathPresenceGates(widgets: PageWidget[], targetId: string): string[] {
+  let pathIds: string[] = [];
   let found = false;
   const visit = (list: PageWidget[], chain: string[]): void => {
     for (const widget of list) {
       const next = [...chain, widget.id];
       if (widget.id === targetId) {
         found = true;
-        next.forEach((id) => pathIds.add(id));
+        pathIds = next;
         return;
       }
       const children = (widget as PageWidget & { children?: PageWidget[] }).children;
@@ -1122,11 +1123,12 @@ export function stripPathPresenceGates(widgets: PageWidget[], targetId: string):
   };
   visit(widgets, []);
   if (!found) {
-    return;
+    return [];
   }
+  const owned = new Set(pathIds);
   const strip = (list: PageWidget[]): void => {
     for (const widget of list) {
-      if (pathIds.has(widget.id)) {
+      if (owned.has(widget.id)) {
         delete widget.existsFn;
         delete widget.displayFn;
         delete widget.visibleFn;
@@ -1138,6 +1140,7 @@ export function stripPathPresenceGates(widgets: PageWidget[], targetId: string):
     }
   };
   strip(widgets);
+  return pathIds;
 }
 
 function parseWidgetPresence(raw: string | undefined): WidgetPresence | undefined {
@@ -2425,8 +2428,9 @@ export function sanitizeWidgetStyle(
     delete next.rotateZ;
   }
   if (type === 'table') {
-    next.width = compactSize(next.width) ?? DEFAULT_TABLE_WIDTH;
-    next.height = compactSize(next.height) ?? DEFAULT_TABLE_HEIGHT;
+    // 表格宽高支持自适应：留空即按行列内容撑开，不再回填默认尺寸。
+    next.width = compactSize(next.width);
+    next.height = compactSize(next.height);
     if (next.overflow === 'auto') {
       delete next.overflow;
     }
@@ -4715,7 +4719,15 @@ function resolveWidgetNode(
   stateLayersSink?.set(next, layers);
   if ('children' in next) {
     const extraIds = ownStates.filter((id) => !inheritedIds.includes(id));
-    const childIds = extraIds.length > 0 ? [...inheritedIds, ...extraIds] : inheritedIds;
+    // 插槽是状态边界：组件祖先（含全局状态）的状态不传入插槽内容，
+    // 仅插槽自身声明的状态可向下传递。插槽内容（调试节点/外部覆盖）
+    // 只受自身状态与页面侧状态驱动，避免组件内部状态污染插槽。
+    const childIds =
+      next.type === 'slot'
+        ? extraIds
+        : extraIds.length > 0
+          ? [...inheritedIds, ...extraIds]
+          : inheritedIds;
     const childTransition = transition;
     next.children = next.children.map((child) =>
       resolveWidgetNode(child, childIds, viewing, childTransition, appliedStateFor, stateLayersSink, locale),

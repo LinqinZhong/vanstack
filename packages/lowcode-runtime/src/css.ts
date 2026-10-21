@@ -749,7 +749,7 @@ function tableLineRules(cls: string, lines: { header?: TableLine; row?: TableLin
   }
   const row = tableLineDeclaration('bottom', lines.row);
   if (row) {
-    rules.push(`.${cls} > [data-widget-type="tr"]:not(:last-child) > * { ${row}; }`);
+    rules.push(`.${cls} > [data-widget-type="tr"] > * { ${row}; }`);
   }
   const column = tableLineDeclaration('right', lines.column);
   if (column) {
@@ -916,10 +916,32 @@ export function pageCssText(widgets: PageWidget[], locale?: string, options?: { 
     }
   }
 
-  function walk(list: PageWidget[], root: boolean) {
+  /** 收集一棵控件子树里所有声明的状态 id（控件自身 states 数组），用于插槽状态边界判定。 */
+  function collectDeclaredStateIds(list: PageWidget[]): Set<string> {
+    const ids = new Set<string>();
+    const stack: PageWidget[] = [...list];
+    while (stack.length) {
+      const w = stack.pop()!;
+      for (const s of w.states ?? []) {
+        ids.add(s.id);
+      }
+      if ('children' in w && w.children) {
+        stack.push(...w.children);
+      }
+    }
+    return ids;
+  }
+
+  function walk(list: PageWidget[], root: boolean, slotStateIds: Set<string> | undefined) {
     for (const widget of list) {
       const cls = widgetClassName(widget.id);
+      // 插槽是状态边界：插槽内控件的 stateOverrides 只对「插槽子树内声明的状态」生成 CSS，
+      // 组件祖先状态的覆盖规则不发射，避免后代选择器 [data-state~="id"] 跨过插槽渗透；
+      // 但插槽内部自己声明的状态（如插槽内 flex 的「激活」）仍需正常生效。
       for (const override of widget.stateOverrides ?? []) {
+        if (slotStateIds && !slotStateIds.has(override.id)) {
+          continue;
+        }
         const overrideId = escapeStateId(override.id);
         push(`[data-state~="${overrideId}"] .${cls}`, override.style, false);
         pushAnimation(`[data-state~="${overrideId}"] .${cls}`, widget, override.animation);
@@ -973,12 +995,18 @@ export function pageCssText(widgets: PageWidget[], locale?: string, options?: { 
       // 仅预览态播放动画：编辑态不发射 animation 规则，避免画布上动画自播干扰编辑。
       pushAnimation(`.${cls}`, widget, widget.animation);
       if ('children' in widget) {
-        walk(widget.children, false);
+        // 进入插槽时，子树允许响应「插槽子树内声明的所有状态」（含插槽自身及后代声明的状态），
+        // 组件祖先状态不在此集合内，其 stateOverrides 不会生成 CSS，从而不跨过插槽渗透。
+        const childSlotStateIds =
+          widget.type === 'slot'
+            ? collectDeclaredStateIds(widget.children)
+            : slotStateIds;
+        walk(widget.children, false, childSlotStateIds);
       }
     }
   }
 
-  walk(widgets, true);
+  walk(widgets, true, undefined);
   blocks.unshift('.lowcode-drawer-panel { box-sizing: border-box; background: #fff; }');
   blocks.push(
     '.lowcode-page-scroll > [data-widget-id] { flex: 0 0 auto; max-width: none; }',

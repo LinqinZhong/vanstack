@@ -342,16 +342,25 @@ export function addWidgetToTree(
       const inserted = insertAfterSibling(widgets, selected.id, widget);
       return inserted.found ? inserted.widgets : widgets;
     }
+    // 选中节点是容器且能接受该类型：添加到节点内
     const next = placeInContainer(selected, widget);
     if (next) {
       return updateWidgetById(widgets, selected.id, () => next);
     }
-    const cell = tableCellForInsert(widgets, selected);
-    if (cell && cell.id !== selected.id) {
-      const placed = placeInContainer(cell, widget);
-      if (placed) {
-        return updateWidgetById(widgets, cell.id, () => placed);
+    // 表格/表格行不能直接容纳普通控件：落到第一个单元格内
+    if (selected.type === 'table' || selected.type === 'tr') {
+      const cell = tableCellForInsert(widgets, selected);
+      if (cell && cell.id !== selected.id) {
+        const placed = placeInContainer(cell, widget);
+        if (placed) {
+          return updateWidgetById(widgets, cell.id, () => placed);
+        }
       }
+    }
+    // 选中节点不是容器（或容器不接受该类型）：插到选中节点之后，成为其父节点的下一个子节点
+    const inserted = insertAfterSibling(widgets, selected.id, widget);
+    if (inserted.found) {
+      return inserted.widgets;
     }
   }
   if (!canContain('page', widget.type)) {
@@ -372,7 +381,8 @@ function removeFromList(list: PageWidget[], id: string, parentId: string | null)
     const next = list[index + 1]?.id ?? null;
     return {
       widgets: [...list.slice(0, index), ...list.slice(index + 1)],
-      nextSelectedId: parentId ?? prev ?? next,
+      // 删除后的激活项：下一个兄弟 → 上一个兄弟 → 父节点
+      nextSelectedId: next ?? prev ?? parentId,
       found: true,
     };
   }
@@ -394,6 +404,17 @@ function removeFromList(list: PageWidget[], id: string, parentId: string | null)
 export function removeWidget(widgets: PageWidget[], id: string): RemoveWidgetResult {
   const result = removeFromList(widgets, id, null);
   return { widgets: result.widgets, nextSelectedId: result.nextSelectedId };
+}
+
+/** 删除控件后的下一个激活项：下一个兄弟节点 → 上一个兄弟节点 → 父节点。 */
+export function nextSelectionAfterRemove(widgets: PageWidget[], id: string): string | null {
+  const parent = findParentWidget(widgets, id);
+  const siblings = parent && hasChildren(parent) ? parent.children : widgets;
+  const index = siblings.findIndex((widget) => widget.id === id);
+  if (index < 0) {
+    return parent?.id ?? null;
+  }
+  return siblings[index + 1]?.id ?? siblings[index - 1]?.id ?? parent?.id ?? null;
 }
 
 function insertAfterSibling(
@@ -675,6 +696,34 @@ export function toWidgetTreeData(
     title: labelOf(widget),
     children: hasChildren(widget) ? toWidgetTreeData(widget.children, labelOf) : undefined,
   }));
+}
+
+/**
+ * 页面编辑器的控件树取数：未进入滚动容器/表格编辑时不展开其子节点，
+ * 进入编辑后只显示该容器内部的子节点（容器自身不再作为根节点显示）。
+ * 表格编辑优先于滚动容器编辑（叶子编辑态）。
+ */
+export function containerTreeWidgets(
+  widgets: PageWidget[],
+  scrollEditId: string | null,
+  tableEditId: string | null,
+): PageWidget[] {
+  const editId = tableEditId ?? scrollEditId;
+  const prune = (list: PageWidget[]): PageWidget[] =>
+    list.map((widget) => {
+      if (!hasChildren(widget)) {
+        return widget;
+      }
+      if (widget.type === 'scroll' || widget.type === 'table') {
+        return mapChildren(widget, []);
+      }
+      return mapChildren(widget, prune(widget.children));
+    });
+  if (editId) {
+    const container = findWidget(widgets, editId);
+    return container && hasChildren(container) ? prune(container.children) : [];
+  }
+  return prune(widgets);
 }
 
 /**

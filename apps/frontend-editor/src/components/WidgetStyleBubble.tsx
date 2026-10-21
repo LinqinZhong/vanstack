@@ -105,6 +105,7 @@ import {
 } from './WidgetPresence';
 import { compactDrawerStyle, drawerRadiusKeys, drawerRadiusValue, drawerSizeAxis } from '../widgets/drawer';
 import { modifierShortcutLabel } from '../utils/widgetShortcuts';
+import type { LowcodeWidgetBoxModel, LowcodeWidgetBoxQuad } from '../utils/lowcode-protocol';
 
 type ShadowValue = {
   x: number;
@@ -683,11 +684,88 @@ function GridControlPanel({
   );
 }
 
+/** formatBoxEdge：盒模型图边上的数值，0 显示为占位符（与 DevTools 一致）。 */
+function formatBoxEdge(value: number) {
+  return value ? String(value) : '-';
+}
+
+/**
+ * BoxModelDiagram：选中控件的布局概览图（margin → border → padding → 内容尺寸），
+ * 点击某一层快速打开对应的编辑分组（外边距/边框/内边距/尺寸）。
+ */
+function BoxModelDiagram({
+  widgetType,
+  boxModel,
+  openGroup,
+  onPick,
+}: {
+  widgetType: PageWidget['type'];
+  boxModel: LowcodeWidgetBoxModel;
+  openGroup: BoxGroup | null;
+  onPick: (group: BoxGroup) => void;
+}) {
+  const { t } = useTranslation();
+
+  function layer(kind: 'margin' | 'border' | 'padding', quad: LowcodeWidgetBoxQuad, label: string, child: ReactNode): ReactNode {
+    const allowed = isBoxGroupAllowed(widgetType, kind);
+    const active = openGroup === kind;
+    return (
+      <div
+        className={['widget-boxmodel-layer', `is-${kind}`, allowed ? 'is-clickable' : '', active ? 'is-active' : ''].filter(Boolean).join(' ')}
+        onClick={
+          allowed
+            ? (event) => {
+                event.stopPropagation();
+                onPick(kind);
+              }
+            : undefined
+        }
+      >
+        <span className="widget-boxmodel-label">{label}</span>
+        <span className="widget-boxmodel-edge is-top">{formatBoxEdge(quad.top)}</span>
+        <span className="widget-boxmodel-edge is-right">{formatBoxEdge(quad.right)}</span>
+        <span className="widget-boxmodel-edge is-bottom">{formatBoxEdge(quad.bottom)}</span>
+        <span className="widget-boxmodel-edge is-left">{formatBoxEdge(quad.left)}</span>
+        {child}
+      </div>
+    );
+  }
+
+  const sizeAllowed = isBoxGroupAllowed(widgetType, 'size');
+  const content = (
+    <div
+      className={['widget-boxmodel-content', sizeAllowed ? 'is-clickable' : '', openGroup === 'size' ? 'is-active' : ''].filter(Boolean).join(' ')}
+      onClick={
+        sizeAllowed
+          ? (event) => {
+              event.stopPropagation();
+              onPick('size');
+            }
+          : undefined
+      }
+    >
+      {`${boxModel.contentWidth} × ${boxModel.contentHeight}`}
+    </div>
+  );
+
+  return (
+    <div className="widget-boxmodel">
+      {layer(
+        'margin',
+        boxModel.margin,
+        t('lowcode.styleMargin'),
+        layer('border', boxModel.border, t('lowcode.styleBorder'), layer('padding', boxModel.padding, t('lowcode.stylePadding'), content)),
+      )}
+    </div>
+  );
+}
+
 export function WidgetStyleBubble({
   widget,
   style,
   openGroup,
   onOpenGroupChange,
+  boxModel,
   onChange,
   onTextChange,
   onSrcChange,
@@ -720,6 +798,8 @@ export function WidgetStyleBubble({
   style?: WidgetStyle;
   openGroup: BoxGroup | null;
   onOpenGroupChange: (group: BoxGroup | null) => void;
+  /** 选中控件的实测盒模型（iframe 回传），用于布局概览图；无数据时不显示。 */
+  boxModel?: LowcodeWidgetBoxModel;
   onChange: (style: WidgetStyle | undefined) => void;
   onStyleDelta?: (delta: Partial<WidgetStyle>) => void;
   onTextChange?: (text: string) => void;
@@ -1299,6 +1379,10 @@ export function WidgetStyleBubble({
             />
           </Tooltip>
         </div>
+        {/* 布局概览图：实测盒模型，点击某一层快速进入对应编辑分组；有工具展开时隐藏。 */}
+        {boxModel && !openGroup ? (
+          <BoxModelDiagram widgetType={widget.type} boxModel={boxModel} openGroup={openGroup} onPick={toggleGroup} />
+        ) : null}
         {/* 属性详细设置面板 */}
         {openGroup ? (
           <div className="widget-style-bubble-panel">

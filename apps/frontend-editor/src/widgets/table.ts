@@ -1,4 +1,4 @@
-import { compactTableLines, sanitizeWidgetStyle, type PageWidget } from '@vanstack/xml';
+import { compactTableLines, DEFAULT_TABLE_HEIGHT, DEFAULT_TABLE_WIDTH, sanitizeWidgetStyle, type PageWidget } from '@vanstack/xml';
 import { applyCommon, cloneChildren, cloneItemField, cloneShared } from './common';
 import { createTableHeader } from './th';
 import { createTableRow } from './tr';
@@ -16,7 +16,7 @@ export const tableHelper = {
     return {
       type: 'table',
       id: ctx.id,
-      style: sanitizeWidgetStyle('table', undefined),
+      style: sanitizeWidgetStyle('table', { width: DEFAULT_TABLE_WIDTH, height: DEFAULT_TABLE_HEIGHT }),
       children: [...headers, ...rows],
     };
   },

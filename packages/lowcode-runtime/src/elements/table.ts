@@ -22,6 +22,8 @@ type RowLayout = {
   columns: number;
   template: string;
   height: number;
+  /** 表格宽非自适应时，行宽至少撑满表格，让最后一列填掉剩余宽度。 */
+  stretchWidth?: boolean;
   stickyFooter?: boolean;
   stickyBackground?: string;
 };
@@ -220,6 +222,7 @@ export function renderTr(
           width: 'max-content',
           height,
           minHeight: height,
+          ...(layout?.stretchWidth ? { minWidth: '100%' } : {}),
           boxSizing: 'border-box',
           ...(layout?.stickyFooter
             ? { position: 'sticky', bottom: 0, zIndex: 2, background: layout.stickyBackground || '#ffffff' }
@@ -243,9 +246,18 @@ export function renderTable(
   const columns = widget.children.filter((child): child is Extract<PageWidget, { type: 'th' }> => child.type === 'th');
   const rows = widget.children.filter((child): child is Extract<PageWidget, { type: 'tr' }> => child.type === 'tr');
   const widths = columns.map((column) => track(column.width, DEFAULT_TABLE_COLUMN_WIDTH));
-  const template = trackTemplate(widths);
-  const headerHeight = track(widget.headerHeight, DEFAULT_TABLE_HEADER_HEIGHT);
   const contentWidth = widths.reduce((sum, width) => sum + width, 0);
+  // 宽/高未设置即自适应：壳按行列内容取宽高，不再落到 120px/240px 的默认值。
+  const fitWidth = style?.width == null;
+  const fitHeight = style?.height == null;
+  // 宽非自适应时，最后一列吃掉剩余宽度，保证总列宽不小于表格宽。
+  // 用 1fr 而不是 calc(百分比)，避免 max-content 容器里百分比轨道退化成负值。
+  const lastColumn = widths.length - 1;
+  const template =
+    fitWidth || lastColumn < 0
+      ? trackTemplate(widths)
+      : widths.map((width, index) => (index === lastColumn ? `minmax(${width}px, 1fr)` : `${width}px`)).join(' ');
+  const headerHeight = track(widget.headerHeight, DEFAULT_TABLE_HEADER_HEIGHT);
   const contentHeight =
     (columns.length > 0 ? headerHeight : 0) +
     rows.reduce((sum, row) => sum + track(row.height, DEFAULT_TABLE_ROW_HEIGHT), 0);
@@ -261,18 +273,22 @@ export function renderTable(
       : overflow
     : !scrollable
       ? overflow
-      : contentWidth > (pxBox(style?.width, DEFAULT_TABLE_WIDTH, ctx) ?? contentWidth - 1)
-        ? 'auto'
-        : 'hidden';
+      : fitWidth
+        ? 'hidden'
+        : contentWidth > (pxBox(style?.width, DEFAULT_TABLE_WIDTH, ctx) ?? contentWidth - 1)
+          ? 'auto'
+          : 'hidden';
   const overflowY = ctx.editing
     ? scrollable
       ? 'hidden'
       : overflow
     : !scrollable
       ? overflow
-      : contentHeight > (pxBox(style?.height, DEFAULT_TABLE_HEIGHT, ctx) ?? contentHeight - 1)
-        ? 'auto'
-        : 'hidden';
+      : fitHeight
+        ? 'hidden'
+        : contentHeight > (pxBox(style?.height, DEFAULT_TABLE_HEIGHT, ctx) ?? contentHeight - 1)
+          ? 'auto'
+          : 'hidden';
   const canStick = !ctx.editing && overflowY === 'auto';
   const freeze = canStick && Boolean(widget.freezeHeader);
   const freezeFooter = canStick && Boolean(widget.freezeFooter) && rows.length > 0;
@@ -286,6 +302,7 @@ export function renderTable(
       columns: columns.length,
       template,
       height: rowHeight,
+      stretchWidth: !fitWidth,
       stickyFooter: freezeFooter && row === rows[rows.length - 1],
       stickyBackground,
     });
@@ -301,8 +318,8 @@ export function renderTable(
     hiddenCss(widget.hidden, ctx.editing),
     presenceCss(widget, widgetCssOptions(ctx)),
     {
-      width: sizeCss(style?.width ?? DEFAULT_TABLE_WIDTH, widgetCssOptions(ctx)),
-      height: sizeCss(style?.height ?? DEFAULT_TABLE_HEIGHT, widgetCssOptions(ctx)),
+      width: style?.width != null ? sizeCss(style.width, widgetCssOptions(ctx)) : 'max-content',
+      height: style?.height != null ? sizeCss(style.height, widgetCssOptions(ctx)) : 'max-content',
       minWidth: 0,
       minHeight: 0,
       overflowX,
@@ -323,6 +340,11 @@ export function renderTable(
       'data-widget-type': 'table',
       'data-state': widgetStateAttr(widget, ctx),
       'data-table-editing': ctx.editing ? '' : undefined,
+      'data-table-fit-width': fitWidth ? '' : undefined,
+      'data-table-fit-height': fitHeight ? '' : undefined,
+      // 声明的宽高另存一份，编辑态内联样式被实时样式覆盖时仍能读到表格的目标尺寸。
+      'data-table-width': fitWidth ? undefined : sizeCss(style!.width!, widgetCssOptions(ctx)),
+      'data-table-height': fitHeight ? undefined : sizeCss(style!.height!, widgetCssOptions(ctx)),
       style: shell,
       onMouseEnter: ctx.hoverFor(widget)?.onMouseEnter,
       onMouseLeave: ctx.hoverFor(widget)?.onMouseLeave,
@@ -341,6 +363,7 @@ export function renderTable(
               width: 'max-content',
               height: headerHeight,
               minHeight: headerHeight,
+              ...(fitWidth ? {} : { minWidth: '100%' }),
               boxSizing: 'border-box',
               position: freeze ? 'sticky' : 'relative',
               top: freeze ? 0 : undefined,

@@ -5,7 +5,7 @@ import { installPageNavigation, renderPage } from '@vanstack/lowcode-runtime';
 import { api } from '../../apis/api';
 import { eventScriptJavaScript } from '../../utils/eventScript';
 import type { PageI18n } from '@vanstack/xml';
-import { isLowcodeMessage, type TableChromeState } from '../../utils/lowcode-protocol';
+import { isLowcodeMessage, type LowcodeWidgetBoxModel, type TableChromeState } from '../../utils/lowcode-protocol';
 import { isBoxGroupShortcut, isTextStyleShortcut, matchWidgetShortcut } from '../../utils/widgetShortcuts';
 import { previewVisualScale, setSpacingActiveEdge, setSpacingDragCursor, setSpacingHeldEdges, setSpacingMirror, setSpacingSnap, setRotateHeldAxes, spacingActionFromTarget, spacingEdgeFromTarget, rotateAxisFromTarget, rotateLayoutClientCenter, syncSpacingGuides, syncSpacingMask, widgetLayoutSize } from '../../utils/spacingGuides';
 import type { BoxDragKind, SpacingEdge } from '../../utils/spacingDrag';
@@ -93,6 +93,7 @@ export function PreviewPage() {
   const tableChromeRef = useRef<TableChromeState | null>(null);
   const tableDragKeyRef = useRef<string | null>(null);
   const tableEditingRef = useRef(false);
+  const tableEditingIdRef = useRef<string | null>(null);
   const scrollEditingRef = useRef(false);
   const swiperEditingRef = useRef(false);
   const componentEditingRef = useRef(false);
@@ -199,6 +200,30 @@ export function PreviewPage() {
     };
   }
 
+  /** readSelectedBoxModel：读取选中控件的实测盒模型（布局 px，clientWidth/getComputedStyle 均不含画布缩放）。 */
+  function readSelectedBoxModel(selected: HTMLElement): LowcodeWidgetBoxModel | undefined {
+    const view = selected.ownerDocument.defaultView;
+    if (!view) {
+      return undefined;
+    }
+    const css = view.getComputedStyle(selected);
+    const px = (raw: string) => {
+      const parsed = Number.parseFloat(raw);
+      if (!Number.isFinite(parsed)) {
+        return 0;
+      }
+      return Math.round(parsed * 10) / 10;
+    };
+    const padding = { top: px(css.paddingTop), right: px(css.paddingRight), bottom: px(css.paddingBottom), left: px(css.paddingLeft) };
+    return {
+      contentWidth: Math.max(0, Math.round((selected.clientWidth - padding.left - padding.right) * 10) / 10),
+      contentHeight: Math.max(0, Math.round((selected.clientHeight - padding.top - padding.bottom) * 10) / 10),
+      margin: { top: px(css.marginTop), right: px(css.marginRight), bottom: px(css.marginBottom), left: px(css.marginLeft) },
+      border: { top: px(css.borderTopWidth), right: px(css.borderRightWidth), bottom: px(css.borderBottomWidth), left: px(css.borderLeftWidth) },
+      padding,
+    };
+  }
+
   /** postSelectedLayoutSize：把选中控件尺寸回传父页（widget-box）。 */
   function postSelectedLayoutSize() {
     const selected = mountRef.current?.querySelector<HTMLElement>('.is-widget-selected');
@@ -207,11 +232,17 @@ export function PreviewPage() {
     if (!widgetId || !size) {
       return;
     }
-    postToParent({ type: 'widget-box', widgetId, width: size.width, height: size.height });
+    postToParent({ type: 'widget-box', widgetId, width: size.width, height: size.height, boxModel: readSelectedBoxModel(selected) });
   }
 
   function refreshTableChrome() {
-    syncTableReveal(hostRef.current, mountRef.current, editingRef.current, tableEditingRef.current);
+    syncTableReveal(
+      hostRef.current,
+      mountRef.current,
+      editingRef.current,
+      tableEditingRef.current,
+      tableEditingIdRef.current,
+    );
     syncScrollReveal(hostRef.current, mountRef.current, editingRef.current, scrollEditingRef.current);
     syncSwiperReveal(hostRef.current, mountRef.current, editingRef.current, swiperEditingRef.current);
     syncComponentSlotFocus(hostRef.current, mountRef.current, editingRef.current, componentEditingRef.current, slotFocusIdRef.current);
@@ -375,7 +406,7 @@ export function PreviewPage() {
             viewScaleRef.current,
             editingRef.current,
             spacingDragRef.current,
-            !tableEditingRef.current && !scrollEditingRef.current && !swiperEditingRef.current,
+            !swiperEditingRef.current,
           );
           refreshTableChrome();
           postSelectedLayoutSize();
@@ -412,6 +443,7 @@ export function PreviewPage() {
         tableLayout,
         tableChrome,
         tableEditing,
+        tableEditingId,
         scrollEditing,
         swiperEditing,
         componentEditing,
@@ -457,6 +489,7 @@ export function PreviewPage() {
       const nextAnimations = Array.isArray(animations) ? animations : [];
       const nextAnimationsKey = JSON.stringify(nextAnimations);
       const nextTableEditing = nextEditing && Boolean(tableEditing);
+      const nextTableEditingId = nextTableEditing && typeof tableEditingId === 'string' ? tableEditingId : null;
       const nextScrollEditing = nextEditing && Boolean(scrollEditing);
       const nextSwiperEditing = nextEditing && Boolean(swiperEditing);
       const nextComponentEditing = nextEditing && Boolean(componentEditing);
@@ -488,6 +521,7 @@ export function PreviewPage() {
         nextAnimationsKey !== animationsKeyRef.current;
       editingRef.current = nextEditing;
       tableEditingRef.current = nextTableEditing;
+      tableEditingIdRef.current = nextTableEditingId;
       setHostTableEditing(nextTableEditing);
       scrollEditingRef.current = nextScrollEditing;
       setHostScrollEditing(nextScrollEditing);
@@ -577,7 +611,7 @@ export function PreviewPage() {
           viewScaleRef.current,
           nextEditing,
           spacingDragRef.current,
-          !nextTableEditing && !nextScrollEditing && !nextSwiperEditing,
+          !nextSwiperEditing,
         );
         refreshTableChrome();
         syncSpacingGuides(
@@ -653,7 +687,7 @@ export function PreviewPage() {
           animations: nextAnimations,
           animationsKey: nextAnimationsKey,
           previewEpoch: nextPreviewEpoch,
-          onCommit: paintChrome,
+          onCommit: () => paintChrome(),
         });
         setError(result.ok ? null : result.error);
       } else {
@@ -821,7 +855,7 @@ export function PreviewPage() {
           viewScaleRef.current,
           editingRef.current,
           spacingDragRef.current,
-          !tableEditingRef.current && !scrollEditingRef.current && !swiperEditingRef.current,
+          !swiperEditingRef.current,
         );
         refreshTableChrome();
       });
@@ -845,7 +879,7 @@ export function PreviewPage() {
         viewScaleRef.current,
         editingRef.current,
         spacingDragRef.current,
-        !tableEditingRef.current && !scrollEditingRef.current && !swiperEditingRef.current,
+        !swiperEditingRef.current,
       );
       refreshTableChrome();
     }
@@ -912,13 +946,15 @@ export function PreviewPage() {
             hit = table;
           }
         }
-        if (!swiperEditingRef.current) {
+        // 表格编辑态下表格往往套在滚动/轮播容器里，不能把点击折叠到外层容器，
+        // 否则选中的是外层的 scroll/swiper，父页会据此退出表格编辑态。
+        if (!swiperEditingRef.current && !tableEditingRef.current) {
           const swiper = hit.closest('.lowcode-swiper');
           if (swiper instanceof HTMLElement) {
             hit = swiper;
           }
         }
-        if (!scrollEditingRef.current) {
+        if (!scrollEditingRef.current && !tableEditingRef.current) {
           const scroll = hit.closest('.lowcode-scroll');
           if (scroll instanceof HTMLElement) {
             hit = scroll;
@@ -956,7 +992,7 @@ export function PreviewPage() {
             viewScaleRef.current,
             editingRef.current,
             spacingDragRef.current,
-            !tableEditingRef.current && !scrollEditingRef.current && !swiperEditingRef.current,
+            !swiperEditingRef.current,
           );
           refreshTableChrome();
           return;
@@ -1133,9 +1169,8 @@ export function PreviewPage() {
       if (!hitId) {
         clearClimbTimer();
         climbAnchorIdRef.current = null;
-        if (!tableEditingRef.current && !scrollEditingRef.current && !swiperEditingRef.current) {
-          postToParent({ type: 'dismiss-toolbar' });
-        }
+        // 点空白一律通知取消节点选中；是否退出表格/容器编辑态由父页决定（编辑态保留）。
+        postToParent({ type: 'dismiss-toolbar' });
         return;
       }
       if (tableEditingRef.current && hit?.dataset.widgetType === 'table') {
@@ -1360,6 +1395,7 @@ export function PreviewPage() {
               ? `column:${tableResize.index ?? ''}`
               : `row:${tableResize.rowId ?? ''}`;
         tableDragKeyRef.current = dragKey;
+        hostRef.current?.classList.add('is-table-track-dragging');
         refreshTableChrome();
         const previousCursor = document.documentElement.style.cursor;
         document.documentElement.style.cursor = tableResize.target === 'column' ? 'col-resize' : 'row-resize';
@@ -1423,6 +1459,7 @@ export function PreviewPage() {
           }
           paintTrack(upEvent.clientX, upEvent.clientY);
           tableDragKeyRef.current = null;
+          hostRef.current?.classList.remove('is-table-track-dragging');
           document.documentElement.style.cursor = previousCursor;
           refreshTableChrome();
           postToParent({

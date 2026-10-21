@@ -42,6 +42,8 @@ export type LowcodePreviewMessage = {
   tableLayout?: boolean;
   tableChrome?: TableChromeState | null;
   tableEditing?: boolean;
+  /** 正在编辑的表格 id：编辑态可能没有任何选中节点，预览据此定位编辑目标。 */
+  tableEditingId?: string | null;
   scrollEditing?: boolean;
   swiperEditing?: boolean;
   componentEditing?: boolean;
@@ -188,12 +190,24 @@ export type LowcodeCanvasPointerMessage = {
   boxHeight?: number;
 };
 
+export type LowcodeWidgetBoxQuad = { top: number; right: number; bottom: number; left: number };
+
+export type LowcodeWidgetBoxModel = {
+  contentWidth: number;
+  contentHeight: number;
+  margin: LowcodeWidgetBoxQuad;
+  border: LowcodeWidgetBoxQuad;
+  padding: LowcodeWidgetBoxQuad;
+};
+
 export type LowcodeWidgetBoxMessage = {
   source: typeof LOWCODE_MESSAGE_SOURCE;
   type: 'widget-box';
   widgetId: string;
   width: number;
   height: number;
+  /** 选中控件的实测盒模型（布局 px，不含画布缩放）。 */
+  boxModel?: LowcodeWidgetBoxModel;
 };
 
 export type LowcodeSpacingCommitMessage = {

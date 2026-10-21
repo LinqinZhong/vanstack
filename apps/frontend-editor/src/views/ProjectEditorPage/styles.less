@@ -2124,6 +2124,126 @@ html:has(.spacing-drag-shield.is-cursor-nesw) {
   overflow-y: auto;
 }
 
+/* 布局概览图（盒模型）：margin → border → padding → 内容尺寸，点击层进入对应编辑分组。 */
+.widget-boxmodel {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 10px;
+  line-height: 1.2;
+  color: rgba(0, 0, 0, 0.65);
+  user-select: none;
+}
+
+.widget-boxmodel-layer {
+  position: relative;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 13px 15px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.widget-boxmodel-layer.is-margin,
+.widget-boxmodel-layer.is-border,
+.widget-boxmodel-layer.is-padding {
+  background: #ffffff;
+}
+
+.widget-boxmodel-layer.is-clickable,
+.widget-boxmodel-content.is-clickable {
+  cursor: pointer;
+}
+
+/* hover 概览图区域：所有层显示浅色。 */
+.widget-boxmodel:hover .widget-boxmodel-layer.is-margin.is-clickable {
+  background: #fdf1e3;
+}
+
+.widget-boxmodel:hover .widget-boxmodel-layer.is-border.is-clickable {
+  background: #fff8e9;
+}
+
+.widget-boxmodel:hover .widget-boxmodel-layer.is-padding.is-clickable {
+  background: #eff3e0;
+}
+
+.widget-boxmodel:hover .widget-boxmodel-content.is-clickable {
+  background: #e6eef6;
+}
+
+/* hover 具体某一层：仅该层显示深色（后代层被 hover 时自身保持浅色）。 */
+.widget-boxmodel-layer.is-margin.is-clickable:hover:not(:has(.widget-boxmodel-layer:hover, .widget-boxmodel-content:hover)) {
+  background: #f6cc9d;
+}
+
+.widget-boxmodel-layer.is-border.is-clickable:hover:not(:has(.widget-boxmodel-layer:hover, .widget-boxmodel-content:hover)) {
+  background: #ffe9b8;
+}
+
+.widget-boxmodel-layer.is-padding.is-clickable:hover:not(:has(.widget-boxmodel-content:hover)) {
+  background: #c3d08b;
+}
+
+.widget-boxmodel-content.is-clickable:hover {
+  background: #9dbbd5;
+}
+
+.widget-boxmodel-layer.is-active,
+.widget-boxmodel-content.is-active {
+  outline: 2px solid #3dba9a;
+  outline-offset: -1px;
+}
+
+.widget-boxmodel-label {
+  position: absolute;
+  top: 1px;
+  left: 4px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+.widget-boxmodel-edge {
+  position: absolute;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.widget-boxmodel-edge.is-top {
+  top: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.widget-boxmodel-edge.is-bottom {
+  bottom: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.widget-boxmodel-edge.is-left {
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.widget-boxmodel-edge.is-right {
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.widget-boxmodel-content {
+  box-sizing: border-box;
+  padding: 5px 4px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.75);
+}
+
 .widget-event-panel {
   display: grid;
   gap: 6px;

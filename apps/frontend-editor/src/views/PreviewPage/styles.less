@@ -1047,7 +1047,7 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
 }
 
 .preview-host.is-editing .lowcode-scroll.is-editing:not(.is-scroll-open) {
-  overflow: hidden !important;
+  overflow: auto !important;
 }
 
 .preview-host.is-editing .lowcode-scroll.is-scroll-open > .lowcode-scroll-port {
@@ -1070,16 +1070,32 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
   display: none !important;
 }
 
-.preview-host.is-table-editing .widget-chrome-frame.is-hover,
-.preview-host.is-scroll-editing .widget-chrome-frame.is-hover,
+/* 表格、滚动容器编辑态保留内部控件的悬停粉框；滑动器编辑态仍不显示。 */
 .preview-host.is-swiper-editing .widget-chrome-frame.is-hover {
   display: none;
 }
 
+/* 拖拽表格行列调整宽高时，藏掉选中彩虹框，避免遮挡列线/行线。 */
+.preview-host.is-table-track-dragging .widget-chrome-frame.is-selected {
+  display: none;
+}
+
 /* 进入表格、滚动或滑动器编辑后，藏起页面壳和其它控件。嵌套时只留最里面那一层。 */
-.preview-host.is-editing:is(.is-scroll-editing, .is-table-editing, .is-swiper-editing) .lowcode-page,
-.preview-host.is-editing:is(.is-scroll-editing, .is-table-editing, .is-swiper-editing) [data-widget-id] {
+.preview-host.is-editing:is(.is-scroll-editing, .is-swiper-editing) .lowcode-page,
+.preview-host.is-editing:is(.is-scroll-editing, .is-swiper-editing) [data-widget-id] {
   visibility: hidden;
+}
+
+/* 表格编辑态时，只隐藏页面壳，不隐藏滚动容器内的其他控件 */
+.preview-host.is-editing.is-table-editing .lowcode-page {
+  visibility: hidden;
+}
+
+/* 表格在抽屉里编辑时，抽屉面板里的其它内容也一并藏起来，只留表格本身。
+   抽屉面板的 visibility 会被后代继承，表格再以自己的 visibility:visible 覆盖。 */
+.preview-host.is-editing.is-table-editing .lowcode-drawer-board,
+.preview-host.is-editing.is-table-editing .lowcode-drawer-panel {
+  visibility: hidden !important;
 }
 
 .preview-host.is-scroll-editing .lowcode-scroll.is-scroll-open:not(:has(.is-scroll-open, .is-table-open, .is-swiper-open)),
@@ -1154,6 +1170,9 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
 .preview-host.is-editing .lowcode-flex:has(.lowcode-scroll.is-scroll-open),
 .preview-host.is-editing .lowcode-scroll:has(.lowcode-scroll.is-scroll-open),
 .preview-host.is-editing .lowcode-scroll.is-scroll-open,
+/* 抽屉里的滚动容器进入编辑后，内容会超出抽屉面板，须同时解除抽屉两层的裁剪。 */
+.preview-host.is-editing .lowcode-drawer-board:has(.lowcode-scroll.is-scroll-open),
+.preview-host.is-editing .lowcode-drawer-panel:has(.lowcode-scroll.is-scroll-open),
 .preview-host.is-editing .lowcode-window:has(.lowcode-scroll.is-scroll-open),
 .preview-host.is-editing .lowcode-windows:has(.lowcode-scroll.is-scroll-open),
 .preview-host.is-editing .lowcode-component:has(.lowcode-scroll.is-scroll-open),
@@ -1171,10 +1190,14 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
 .preview-host.is-editing .lowcode-page:has(.lowcode-table.is-table-open),
 .preview-host.is-editing .lowcode-flex:has(.lowcode-table.is-table-open),
 .preview-host.is-editing .lowcode-scroll:has(.lowcode-table.is-table-open),
+.preview-host.is-editing .lowcode-scroll-port:has(.lowcode-table.is-table-open),
+.preview-host.is-editing .lowcode-scroll-view:has(.lowcode-table.is-table-open),
 .preview-host.is-editing .lowcode-window:has(.lowcode-table.is-table-open),
 .preview-host.is-editing .lowcode-windows:has(.lowcode-table.is-table-open),
 .preview-host.is-editing .lowcode-component:has(.lowcode-table.is-table-open),
 .preview-host.is-editing .lowcode-table-cell:has(.lowcode-table.is-table-open),
+.preview-host.is-editing .lowcode-drawer-board:has(.lowcode-table.is-table-open),
+.preview-host.is-editing .lowcode-drawer-panel:has(.lowcode-table.is-table-open),
 .preview-host.is-editing .lowcode-table.is-table-open {
   overflow: visible !important;
 }
@@ -1182,6 +1205,15 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
 .preview-host.is-table-editing .lowcode-table.is-table-open {
   background: transparent !important;
   background-color: transparent !important;
+  /* 编辑态下只留表格自身，外框必须四边完整地包住整个表格区域。
+     表格壳的 width:100% / height:200px 可能小于实际行列内容（列宽合计超容器、
+     行高合计超出固定高度），此时黑框会落在表格中间。编辑态下直接按内容尺寸
+     取宽高，外框始终贴合整张表格，列宽/行高拖拽缩放也能实时跟随。 */
+  width: max-content !important;
+  height: max-content !important;
+  border-width: 2px !important;
+  border-style: solid !important;
+  border-color: #000 !important;
 }
 
 .table-mode-button {
@@ -1212,6 +1244,16 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
   inset: 0;
   z-index: 12;
   overflow: visible;
+  pointer-events: none;
+}
+
+/* 表格宽/高非自适应时，在表格编辑态画出设定尺寸的蓝色辅助线。 */
+.table-chrome-size {
+  position: absolute;
+  z-index: 1;
+  box-sizing: border-box;
+  border-style: solid;
+  border-color: #91c9f7;
   pointer-events: none;
 }
 

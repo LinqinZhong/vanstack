@@ -13,7 +13,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 import type { AnimationDefinitionDto, ProjectComponentDto, ProjectDto, ProjectPageDto, ProjectPageVersionDto, ProjectVersionDto, UpdateAnimationInput } from '@vanstack/shared';
-import { pageCssText } from '@vanstack/lowcode-runtime';
+import { pageCssText, widgetClassName } from '@vanstack/lowcode-runtime';
 import {
   DEFAULT_DRAWER_PLACE,
   DEFAULT_TABLE_HEADER_HEIGHT,
@@ -26,6 +26,7 @@ import {
   compactPageTestData,
   compactWidgetStyle,
   findOwnedDelta,
+  stripPathPresenceGates,
   normalizeInputModelValue,
   normalizePageDocument,
   PAGE_ROOT_STATE_OWNER_ID,
@@ -69,7 +70,7 @@ import {
   rememberPageId,
   rememberVersionId,
 } from '../../utils/editorSelection';
-import { isLowcodeMessage, LOWCODE_MESSAGE_SOURCE } from '../../utils/lowcode-protocol';
+import { isLowcodeMessage, LOWCODE_MESSAGE_SOURCE, type LowcodeWidgetBoxModel } from '../../utils/lowcode-protocol';
 import { isBoxGroupAllowed, type BoxGroup, type TableBubbleModel, type TableCommand } from '../../components/WidgetStyleBubble';
 import { drawerSizeAxis, drawerStyleFromDrag } from '../../widgets/drawer';
 import {
@@ -139,6 +140,7 @@ import {
   insertWidget,
   moveWidget,
   nextExpandedKeys,
+  nextSelectionAfterRemove,
   nextSiblingWidgetId,
   nextWidgetId,
   parentWidgetId,
@@ -148,6 +150,7 @@ import {
   removeWidget,
   componentSlotSubtree,
   definitionTreeWidgets,
+  containerTreeWidgets,
   toWidgetTreeData,
   updateSlotContentWidget,
   updateWidgetById,
@@ -196,7 +199,7 @@ import { refreshIconCatalog, subscribeIconCatalog } from '../../utils/iconCatalo
 import { refreshAssetCatalog, subscribeAssetCatalog } from '../../utils/assetCatalog';
 import { refreshFontCatalog, subscribeFontCatalog, type FontCatalogEntry } from '../../utils/fontCatalog';
 import { publishEditorI18n } from '../../utils/i18nRuntime';
-import { CANVAS_RASTER_SCALE, canEditPositionInsets, clampScale, closeStyleToolbarPopups, computeFitView, dragLengthPx, edgeBoxLength, EDIT_OVERFLOW_X, EDIT_OVERFLOW_Y, ENTER_DOUBLE_MS, FOCUS_PADDING, HISTORY_LIMIT, iframePointToClient, isAutoLength, isBoxDragGroup, isSpacingNudgeGroup, liveWidgetCss, mapIframePoint, MAX_SCALE, paintCanvasView, SCREEN_HEIGHT, SCREEN_WIDTH, sizeLock, slotContentBox, snapDevicePixel, spacingAllowsNegative, styleBoxQuad, styleFromBoxQuad, zoomViewAt, ZOOM_IDLE_MS, ZOOM_STEP, type CanvasMode, type CenterTab, type HistoryEntry, type SaveStatus, type ViewTransform } from './helpers';
+import { CANVAS_RASTER_SCALE, canEditPositionInsets, clampScale, closeStyleToolbarPopups, computeFitView, dragLengthPx, edgeBoxLength, EDIT_OVERFLOW_X, EDIT_OVERFLOW_Y, ENTER_DOUBLE_MS, FOCUS_PADDING, HISTORY_LIMIT, iframePointToClient, isAutoLength, isBoxDragGroup, isSpacingNudgeGroup, liveWidgetCss, mapIframePoint, MAX_SCALE, paintCanvasView, SCREEN_HEIGHT, SCREEN_WIDTH, setCanvasRasterScale, sizeLock, slotCanvasRasterScale, slotContentBox, snapDevicePixel, spacingAllowsNegative, styleBoxQuad, styleFromBoxQuad, zoomViewAt, ZOOM_IDLE_MS, ZOOM_STEP, type CanvasMode, type CenterTab, type HistoryEntry, type SaveStatus, type ViewTransform } from './helpers';
 import {
   AddWidgetModal,
   AliasModal,
@@ -273,6 +276,22 @@ function asPreviewQuery(value: unknown): Record<string, unknown> {
   return query;
 }
 
+/** sameWidgetBoxModel：widget-box 每次重绘都会回传，值未变时跳过 setState 避免重复渲染。 */
+function sameWidgetBoxModel(a: LowcodeWidgetBoxModel | undefined, b: LowcodeWidgetBoxModel | undefined): boolean {
+  if (!a || !b) {
+    return false;
+  }
+  const quad = (x: { top: number; right: number; bottom: number; left: number }, y: { top: number; right: number; bottom: number; left: number }) =>
+    x.top === y.top && x.right === y.right && x.bottom === y.bottom && x.left === y.left;
+  return (
+    a.contentWidth === b.contentWidth &&
+    a.contentHeight === b.contentHeight &&
+    quad(a.margin, b.margin) &&
+    quad(a.border, b.border) &&
+    quad(a.padding, b.padding)
+  );
+}
+
 export function ProjectEditorPage() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
@@ -344,6 +363,8 @@ export function ProjectEditorPage() {
   const [versionForm] = Form.useForm<VersionFormValues>();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const widgetBoxRef = useRef<{ widgetId: string; width: number; height: number } | null>(null);
+  // 选中控件的实测盒模型（widget-box 消息回传），供气泡工具栏的布局概览图使用。
+  const [widgetBoxModel, setWidgetBoxModel] = useState<{ widgetId: string; model: LowcodeWidgetBoxModel } | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const phoneScreenRef = useRef<HTMLDivElement>(null);
   const phoneFrameRef = useRef<HTMLDivElement>(null);
@@ -368,6 +389,18 @@ export function ProjectEditorPage() {
     userAdjusted: boolean;
     editAdjusted: boolean;
   } | null>(null);
+  /** 插槽会话「一开始的比例」：进入插槽调试 / 插槽使用编辑那一刻的画布缩放。会话内点还原回到它。 */
+  const slotHomeScaleRef = useRef<number | null>(null);
+  /**
+   * 插槽相机对准期间为 true：强制 raster=1（zoom=1 下 iframe 内 gBCR 测量与绘制一致）。
+   * 对准结束 / 用户接管后置 false，栅格恢复跟随缩放（放大时提高栅格化分辨率消除模糊）。
+   * 视觉缩放恒等于 view.scale（zoom×相机=scale），切换栅格本身不引起相机跳动。
+   */
+  const slotAimGuardRef = useRef(false);
+  /** 对准循环结束 / 被打断时手动补发一次预览（应用最新栅格倍率）。 */
+  const sendPreviewRef = useRef<() => void>(() => {});
+  /** 插槽会话内点还原：递增触发对准循环重新居中（比例先由 fitCanvas 拉回 slotHomeScaleRef）。 */
+  const [slotAimNonce, setSlotAimNonce] = useState(0);
   const [panning, setPanning] = useState(false);
   const panningRef = useRef(false);
   const panRafRef = useRef(0);
@@ -1015,6 +1048,18 @@ export function ProjectEditorPage() {
       if (!stage) {
         return;
       }
+      // 插槽会话（插槽调试 / 插槽使用编辑）中的「还原」：回到进入时的比例并把插槽内容重新居中，
+      // 不做整页适配（隔离态下整页适配会把内容缩到看不清）。居中由对准循环执行（它会在
+      // raster=1 下重新测量），这里先把比例拉回「一开始的比例」再触发对准。
+      if (slotDebugIdRef.current || (componentEditIdRef.current && slotUseEditIdRef.current)) {
+        const home = slotHomeScaleRef.current ?? viewRef.current.scale;
+        const current = viewRef.current;
+        if (current.scale !== home) {
+          applyView({ scale: home, x: current.x, y: current.y }, fromUser);
+        }
+        setSlotAimNonce((nonce) => nonce + 1);
+        return;
+      }
       const next = canvasHomeView(stage);
       if (!fromUser) {
         userAdjustedRef.current = false;
@@ -1048,7 +1093,7 @@ export function ProjectEditorPage() {
     [zoomAt],
   );
 
-  const focusWidgetInView = useCallback(
+  const focusWidgetBox = useCallback(
     (box: { left: number; top: number; width: number; height: number }, restoreIfMax = false) => {
       const stage = stageRef.current;
       if (!stage) {
@@ -1101,6 +1146,20 @@ export function ProjectEditorPage() {
     [applyView, fitCanvas],
   );
 
+  // 插槽调试态 / 插槽使用编辑态下相机由「对准循环」接管：控件树 onFocus、循环/事件面板等
+  // 外部 refocus 一律不得劫持视口，否则属性提交引发重渲染时相机会被重新对准到小盒子/
+  // 瞬态盒子上，被夹到最大缩放（500%）落在空点上，表现为「一改属性画布就看不到内容」。
+  // restoreIfMax（Ctrl+双击还原）不受限制。
+  const focusWidgetInView = useCallback(
+    (box: { left: number; top: number; width: number; height: number }, restoreIfMax = false) => {
+      if (!restoreIfMax && (slotDebugId || (componentEditId && slotUseEditId))) {
+        return;
+      }
+      focusWidgetBox(box, restoreIfMax);
+    },
+    [focusWidgetBox, slotDebugId, componentEditId, slotUseEditId],
+  );
+
   /** 进入表格 / 滚动 / 滑动器编辑时，保持当前缩放，把这一层挪到画布中心。 */
   const centerWidgetInView = useCallback(
     (box: { left: number; top: number; width: number; height: number }) => {
@@ -1134,15 +1193,19 @@ export function ProjectEditorPage() {
   useEffect(() => subscribeFontCatalog(setFontCatalog), []);
 
   /**
-   * 插槽使用编辑 / 组件定义编辑器插槽调试：进入/切换插槽后把相机对准该插槽的内容。
-   * 隔离态下画布只剩这一块内容，若仍按整页适配，内容会被缩到看不清（长页面尤甚）。
+   * 插槽使用编辑 / 组件定义编辑器插槽调试：进入/切换插槽后把插槽内容移到画布中心。
+   * 只居中没有自动放大——比例保持用户进入会话时的「一开始的比例」（slotHomeScaleRef），
+   * 会话内点还原也是回到该比例后重新居中（fitCanvas 递增 slotAimNonce 触发本循环）。
    *
    * 这里必须「对准到稳定」而不是对准一次：插槽子树要等预览侧应用 slotFocusId / slotDebugId
    * 后才进入渲染树（模板上可能有存在闸门），内容自身还会二次变化（图片/字体加载、嵌套组件挂载）。
-   * 只对准第一次量到的盒子会停在半成品尺寸上（表现为有的插槽不居中、相机被夹到最大缩放）；
+   * 只对准第一次量到的盒子会停在半成品尺寸上（表现为有的插槽不居中）；
    * 相机也可能在随后被别的写入者（预览回传视图等）改掉。因此持续观察：盒子变了重新对准，
    * 相机被动过也重新对准，直到盒子与相机都稳定；用户一动画布立刻收手。
    * 用 setTimeout 而不是 rAF：预览在后台标签页时 rAF 不推进，轮询会永远等不到。
+   *
+   * 对准期间 slotAimGuardRef=true 强制 raster=1（gBCR 测量与绘制一致）；结束/被打断后恢复
+   * 动态栅格（放大时提高分辨率消模糊），并补发一次预览让新栅格生效。
    */
   useEffect(() => {
     const targetId =
@@ -1150,8 +1213,22 @@ export function ProjectEditorPage() {
         ? `${componentEditId}__${slotUseEditId}`
         : slotDebugId || null;
     if (!targetId) {
+      // 会话结束：清掉「一开始的比例」与对准守卫（栅格由 sendPreview 依赖链自然回到普通编辑态）。
+      slotHomeScaleRef.current = null;
+      slotAimGuardRef.current = false;
       return;
     }
+    slotAimGuardRef.current = true;
+    // 立刻按 raster=1 重发预览：进入/切换/还原时宿主可能还停在 >1 的栅格（上个会话或缩放残留），
+    // 先降下来再开始测量，保证 gBCR 与绘制一致。
+    sendPreviewRef.current();
+    const releaseGuard = () => {
+      if (!slotAimGuardRef.current) {
+        return;
+      }
+      slotAimGuardRef.current = false;
+      sendPreviewRef.current();
+    };
     const cameraTransform = () =>
       iframeRef.current?.contentDocument?.querySelector<HTMLElement>('.preview-camera')?.style
         .transform ?? '';
@@ -1162,31 +1239,72 @@ export function ProjectEditorPage() {
     let applied = '';
     let stopped = false;
     const stop = () => {
+      if (stopped) {
+        return;
+      }
       stopped = true;
       window.clearTimeout(timer);
+      releaseGuard();
     };
     const aim = () => {
       if (stopped) {
         return;
       }
       tries += 1;
+      const stageEl = stageRef.current;
       const slot = iframeRef.current?.contentDocument?.querySelector<HTMLElement>(
         `.lowcode-slot[data-widget-id="${CSS.escape(targetId)}"]`,
       );
       const box = slot ? slotContentBox(slot) : null;
-      const key = box
-        ? `${Math.round(box.left)},${Math.round(box.top)},${Math.round(box.width)},${Math.round(box.height)}`
-        : '';
-      if (box && (key !== boxKey || cameraTransform() !== applied)) {
+      if (!box || !stageEl) {
+        if (tries < 40) {
+          timer = window.setTimeout(aim, 60);
+          return;
+        }
+        releaseGuard();
+        return;
+      }
+      const key = `${Math.round(box.left)},${Math.round(box.top)},${Math.round(box.width)},${Math.round(box.height)}`;
+      // 对准期间预览宿主 zoom=1（守卫强制 raster=1），gBCR 与实际绘制一致，可直接
+      // 用于居中校验；不要在这里做 zoom 坐标换算——宿主 zoom≠1 时此类换算公式
+      // 已实测发散（相机被甩出页面），正确做法是对准时统一降 raster，见 slotAimGuardRef。
+      const stageRect = stageEl.getBoundingClientRect();
+      const topLeft = mapIframePoint(iframeRef.current, box.left, box.top);
+      const bottomRight = mapIframePoint(iframeRef.current, box.left + box.width, box.top + box.height);
+      const centerX = (topLeft.x + bottomRight.x) / 2 - stageRect.left;
+      const centerY = (topLeft.y + bottomRight.y) / 2 - stageRect.top;
+      const errX = stageEl.clientWidth / 2 - centerX;
+      const errY = stageEl.clientHeight / 2 - centerY;
+      const centerOK = Math.abs(errX) <= 2 && Math.abs(errY) <= 2;
+      if (key !== boxKey || cameraTransform() !== applied) {
+        // 内容或相机有变化：保持当前缩放，把内容中心挪到画布中心。
         boxKey = key;
-        focusWidgetInView(box);
+        centerWidgetInView(box);
         applied = cameraTransform();
         stable = 0;
-      } else if (box) {
+      } else if (!centerOK) {
+        // 反馈式兜底：对准后实测仍偏心（渲染链存在模型外扰动）时按量到的偏差平移
+        // view 修正，不依赖换算约定。绘制位置对 view 平移是 1:1 响应，阻尼 0.6 单调收敛；
+        // applyView 同步重画相机，下一轮量到的就是本次修正后的真实结果。
+        boxKey = key;
+        const current = viewRef.current;
+        applyView(
+          {
+            scale: current.scale,
+            x: current.x + errX * 0.6,
+            y: current.y + errY * 0.6,
+          },
+          false,
+        );
+        applied = cameraTransform();
+        stable = 0;
+      } else {
         stable += 1;
       }
       if (stable < 12 && tries < 40) {
         timer = window.setTimeout(aim, 60);
+      } else {
+        releaseGuard();
       }
     };
     timer = window.setTimeout(aim, 0);
@@ -1198,7 +1316,7 @@ export function ProjectEditorPage() {
       stage?.removeEventListener('wheel', stop);
       stage?.removeEventListener('pointerdown', stop);
     };
-  }, [componentEditId, slotUseEditId, slotDebugId, focusWidgetInView]);
+  }, [applyView, componentEditId, slotUseEditId, slotDebugId, centerWidgetInView, slotAimNonce]);
 
   useLayoutEffect(() => {
     publishEditorI18n(pageI18n, previewLocale);
@@ -1294,11 +1412,9 @@ export function ProjectEditorPage() {
       return depth;
     };
     const editLayers: { kind: 'table' | 'scroll' | 'swiper' | 'component'; depth: number }[] = [];
-    if (
-      mode !== 'preview' &&
-      tableEditId != null &&
-      findOwningTable(widgetsRef.current, selectedWidgetId)?.table.id === tableEditId
-    ) {
+    // 表格编辑态与是否选中节点无关：进入后不选中任何节点、点空白也未选中，
+    // 只要 tableEditId 还在就保持编辑层（退出由「退出编辑」/Esc/选中表格外节点处理）。
+    if (mode !== 'preview' && tableEditId != null) {
       editLayers.push({ kind: 'table', depth: depthOf(tableEditId) });
     }
     if (
@@ -1334,6 +1450,16 @@ export function ProjectEditorPage() {
     }
     editLayers.sort((a, b) => b.depth - a.depth);
     const editLeaf = editLayers[0]?.kind ?? null;
+    // 插槽调试态 / 插槽使用编辑态：相机对准期间锁 raster=1（zoom=1 时 iframe 内测量与绘制一致，
+    // 相机对准、点击命中不受 zoom 坐标系分歧影响）；对准结束后栅格跟随画布缩放——放大超过 100%
+    // 时提高预览宿主 zoom 重新栅格化，消除合成器放大模糊。普通编辑态保持 2 倍栅格化。
+    const canvasRaster =
+      slotDebugId || slotUseEditId
+        ? slotAimGuardRef.current
+          ? 1
+          : slotCanvasRasterScale(viewRef.current.scale)
+        : CANVAS_RASTER_SCALE;
+    setCanvasRasterScale(canvasRaster);
     iframeRef.current?.contentWindow?.postMessage(
       {
         source: LOWCODE_MESSAGE_SOURCE,
@@ -1355,7 +1481,7 @@ export function ProjectEditorPage() {
         useComponentTestData: mode === 'edit',
         mode,
         selectedId: selectedWidgetId,
-        scale: CANVAS_RASTER_SCALE,
+        scale: canvasRaster,
         viewScale: viewRef.current.scale,
         viewX: viewRef.current.x,
         viewY: viewRef.current.y,
@@ -1394,6 +1520,7 @@ export function ProjectEditorPage() {
             ? openBoxGroup
             : null,
         tableEditing: editLeaf === 'table',
+        tableEditingId: editLeaf === 'table' ? tableEditId : null,
         scrollEditing: editLeaf === 'scroll',
         swiperEditing: editLeaf === 'swiper',
         componentEditing: componentEditId !== null,
@@ -1404,7 +1531,8 @@ export function ProjectEditorPage() {
         slotDebugId: slotDebugId,
         tableChrome:
           editLeaf === 'table' && !readOnlyRef.current
-            ? tableChromeState(widgetsRef.current, selectedWidgetId, tableRangeRef.current)
+            ? // 编辑态下未选中节点时，操作手柄仍以正在编辑的表格为准，不能因无选中而消失。
+              tableChromeState(widgetsRef.current, selectedWidgetId ?? tableEditId, tableRangeRef.current)
             : null,
         ...(canvasSettlingRef.current ? { settle: settleGenRef.current } : {}),
         centerContent: catalogKindRef.current === 'component',
@@ -1412,6 +1540,7 @@ export function ProjectEditorPage() {
       window.location.origin,
     );
   }, [mode, previewLocale, previewQuery, pageI18n, project?.id, selectedPageId, selectedWidgetId, openBoxGroup, centerTab, viewingOwnerId, viewingState, viewingByOwner, tableRange, tableEditId, scrollEditId, swiperEditId, componentEditId, slotUseEditId, componentDocsKey, iconCatalog, assetCatalog, fontCatalog, animations, slotDebugId]);
+  sendPreviewRef.current = sendPreview;
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -1515,12 +1644,21 @@ export function ProjectEditorPage() {
         return;
       }
       if (event.data.type === 'dismiss-toolbar') {
-        if (tableEditIdRef.current || scrollEditIdRef.current || swiperEditIdRef.current) {
+        // 点空白处：先收起样式操作条，再清空节点选中。
+        dismissStyleToolbarRef.current();
+        if (tableEditIdRef.current) {
+          // 表格编辑态下点空白：只取消节点选中，不退出表格编辑；
+          // 退出表格编辑走「退出编辑」按钮或 Esc。
+          endCoalesce();
+          clearTableRange();
+          selectedWidgetIdRef.current = null;
+          setSelectedWidgetId(null);
           return;
         }
-        if (!dismissStyleToolbarRef.current()) {
-          selectWidgetRef.current(null);
+        if (scrollEditIdRef.current || swiperEditIdRef.current) {
+          return;
         }
+        selectWidgetRef.current(null);
         return;
       }
       if (event.data.type === 'widget-box') {
@@ -1529,6 +1667,16 @@ export function ProjectEditorPage() {
           width: event.data.width,
           height: event.data.height,
         };
+        const nextBoxModel = event.data.boxModel;
+        setWidgetBoxModel((prev) => {
+          if (!nextBoxModel) {
+            return prev;
+          }
+          if (prev && prev.widgetId === event.data.widgetId && sameWidgetBoxModel(prev.model, nextBoxModel)) {
+            return prev;
+          }
+          return { widgetId: event.data.widgetId, model: nextBoxModel };
+        });
         return;
       }
         if (event.data.type === 'focus-widget') {
@@ -2137,6 +2285,14 @@ export function ProjectEditorPage() {
       return;
     }
     if (tableEditIdRef.current) {
+      // 表格编辑态下点画布空白：只取消节点选中，保留表格编辑态。
+      endCoalesce();
+      clearTableRange();
+      selectedWidgetIdRef.current = null;
+      setSelectedWidgetId(null);
+      return;
+    }
+    if (scrollEditIdRef.current || swiperEditIdRef.current) {
       return;
     }
     setSelectedWidgetId(null);
@@ -3250,6 +3406,8 @@ export function ProjectEditorPage() {
         userAdjusted: userAdjustedRef.current,
         editAdjusted: editUserAdjustedRef.current,
       };
+      // 「一开始的比例」：会话内保持当前缩放只居中，点还原回到这个比例。
+      slotHomeScaleRef.current = current.scale;
     }
     componentEditIdRef.current = componentId;
     setComponentEditId(componentId);
@@ -3326,11 +3484,15 @@ export function ProjectEditorPage() {
     if (!target) {
       return;
     }
+    // 进入调试（而非在调试中切换到另一个插槽）时记下「一开始的比例」：保持当前缩放，
+    // 由对准循环把插槽内容居中；会话内点还原回到这个比例。不再 fitCanvas 自动放大。
+    if (!current) {
+      slotHomeScaleRef.current = viewRef.current.scale;
+    }
     slotDebugIdRef.current = target;
     setSlotDebugId(target);
     selectWidgetRef.current(target);
     setExpandedKeys((prev) => Array.from(new Set([...prev, target])));
-    fitCanvas(false);
   }
 
   // -------------------------------------------------------------------------
@@ -3536,12 +3698,12 @@ export function ProjectEditorPage() {
     }
     tableEditIdRef.current = selected.id;
     setTableEditId(selected.id);
-    const headerId = findOwningTable(widgetsRef.current, selected.id)?.headers[0]?.id;
-    if (headerId) {
-      selectWidget(headerId);
-    } else {
-      syncEditOrigin();
-    }
+    // 进入表格编辑时不选中任何节点，避免一进来就带着选中框/行列表头高亮。
+    endCoalesce();
+    clearTableRange();
+    selectedWidgetIdRef.current = null;
+    setSelectedWidgetId(null);
+    syncEditOrigin();
   }
 
   function widgetDepth(id: string) {
@@ -3802,7 +3964,16 @@ export function ProjectEditorPage() {
     if (nextWidgets !== previousWidgets) {
       const sheet = iframeRef.current?.contentDocument?.querySelector('.lowcode-page > style');
       if (sheet) {
-        sheet.textContent = pageCssText(nextWidgets, previewLocaleRef.current ?? undefined, { animations: modeRef.current === 'preview' });
+        const baseCss = pageCssText(nextWidgets, previewLocaleRef.current ?? undefined, { animations: modeRef.current === 'preview' });
+        // 插槽调试态：pageCssText 不含 debugOverflowCss，直接覆盖会丢掉路径上的 overflow:visible 覆盖，
+        // 导致改属性后插槽内容被祖先裁剪消失。这里同步重新生成并追加。
+        let debugCss = '';
+        const debugId = slotDebugIdRef.current;
+        if (debugId) {
+          const pathIds = stripPathPresenceGates(nextWidgets, debugId);
+          debugCss = pathIds.map((id) => `.${widgetClassName(id)} { overflow: visible !important; }`).join('\n');
+        }
+        sheet.textContent = debugCss ? `${baseCss}\n${debugCss}` : baseCss;
       }
     }
     if (editorFlushRef.current) {
@@ -5554,6 +5725,9 @@ export function ProjectEditorPage() {
       return;
     }
     if (virtual?.kind === 'content') {
+      // 删除后激活项：下一个兄弟 → 上一个兄弟 → 所在插槽（父节点）
+      const location = findInSlotContent(virtual.componentWidget, virtual.key);
+      const siblingId = location ? nextSelectionAfterRemove(location.widgets, virtual.key) : null;
       const nextComponent = removeSlotContentWidget(virtual.componentWidget, virtual.key);
       if (!nextComponent) {
         return;
@@ -5567,9 +5741,9 @@ export function ProjectEditorPage() {
       const slotInnerId = collectTemplateSlots(doc?.widgets ?? []).find(
         (slot) => slot.slotId === virtual.slotId,
       )?.id;
-      const nextSelected = slotInnerId
-        ? virtualInnerId(virtual.componentWidget.id, slotInnerId)
-        : virtual.componentWidget.id;
+      const nextSelected =
+        siblingId ??
+        (slotInnerId ? virtualInnerId(virtual.componentWidget.id, slotInnerId) : virtual.componentWidget.id);
       commitWidgets(nextWidgets, nextSelected);
       return;
     }
@@ -6320,7 +6494,11 @@ export function ProjectEditorPage() {
       return label;
     };
     // 组件定义编辑器：未进入插槽调试态时插槽不展开内部调试节点；调试态只显示该插槽子树。
-    const treeWidgets = catalogKind === 'component' ? definitionTreeWidgets(widgets, slotDebugId) : widgets;
+    // 页面编辑器：未进入滚动容器/表格编辑时不展开其子节点；进入后只显示该容器内部。
+    const treeWidgets =
+      catalogKind === 'component'
+        ? definitionTreeWidgets(widgets, slotDebugId)
+        : containerTreeWidgets(widgets, scrollEditId, tableEditId);
     const base = toWidgetTreeData(treeWidgets, treeLabel);
     if (componentEditId && catalogKind === 'page') {
       const componentWidget = findWidget(widgets, componentEditId);
@@ -6583,6 +6761,7 @@ export function ProjectEditorPage() {
               readOnly={readOnly}
               openBoxGroup={openBoxGroup}
               handleOpenBoxGroupChange={handleOpenBoxGroupChange}
+              widgetBoxModel={widgetBoxModel}
               tableBubble={tableBubble}
               projectId={project.id}
               updateWidget={updateWidget}

@@ -1,6 +1,6 @@
 import { LOWCODE_MESSAGE_SOURCE, type TableChromeState } from '../../utils/lowcode-protocol';
 import { previewVisualScale } from '../../utils/spacingGuides';
-import { leafOpenEditor } from './scrollChrome';
+import { leafOpenEditor, paintEditMask } from './scrollChrome';
 
 export type TableChromeLabels = {
   moveLeft: string;
@@ -326,57 +326,77 @@ function clampButtonInView(button: HTMLElement, host: HTMLElement, zoom: number)
   button.style.top = `${top + shiftY / scale}px`;
 }
 
-/** 表格右上角：未进入时显示「编辑表格」，编辑中显示「退出编辑」。 */
+/** 表格：未进入时在控件上画灰色遮罩 + 笔图标（单击选中，再点进入），编辑中显示「退出编辑」。 */
 function paintTableModeButton(
   host: HTMLElement | null,
   root: HTMLElement | null,
   zoom: number,
   editing: boolean,
   labels: TableChromeLabels,
+  hoverWidget: HTMLElement | null = null,
+  hasSpacingDrag = false,
 ) {
-  const remove = () => host?.querySelector(`[${MODE_ATTR}]`)?.remove();
+  const removeButton = () => host?.querySelector(`[${MODE_ATTR}]`)?.remove();
+  const removeMask = () => host?.querySelector('[data-edit-mask="table"]')?.remove();
   if (!host || !root || !editing) {
-    remove();
+    removeButton();
+    removeMask();
     return;
   }
   const open = root.querySelector<HTMLElement>('.lowcode-table.is-table-open');
   const selected = root.querySelector<HTMLElement>('.is-widget-selected');
-  const table = open ?? (selected?.dataset.widgetType === 'table' ? selected : null);
-  if (!table || (open && leafOpenEditor(root) !== table)) {
-    remove();
+  if (open) {
+    removeMask();
+    if (leafOpenEditor(root) !== open) {
+      removeButton();
+      return;
+    }
+    let button = host.querySelector<HTMLButtonElement>(`[${MODE_ATTR}]`);
+    if (!button) {
+      button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'table-mode-button';
+      button.setAttribute(MODE_ATTR, '');
+      host.append(button);
+    }
+    button.dataset.tableMode = 'exit';
+    button.classList.add('is-exit');
+    button.textContent = labels.exitTable || '退出编辑';
+    button.title = 'Esc';
+    button.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      window.parent.postMessage(
+        { source: LOWCODE_MESSAGE_SOURCE, type: 'table-mode', action: 'exit' },
+        window.location.origin,
+      );
+    };
+    const tableBox = hostBox(host, open, zoom);
+    const anchor = gridBox(host, open, zoom) ?? tableBox;
+    const above = COLUMN_TAB + 4;
+    place(button, {
+      left: `${anchor.left + anchor.width}px`,
+      top: `${anchor.top - above}px`,
+      transform: 'translate(-100%, -100%)',
+    });
+    clampButtonInView(button, host, zoom);
     return;
   }
-  const mode = open ? 'exit' : 'enter';
-  let button = host.querySelector<HTMLButtonElement>(`[${MODE_ATTR}]`);
-  if (!button) {
-    button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'table-mode-button';
-    button.setAttribute(MODE_ATTR, '');
-    host.append(button);
+  removeButton();
+  // 间距/尺寸拖拽态：不画遮罩，避免盖住间距手柄。
+  if (hasSpacingDrag) {
+    removeMask();
+    return;
   }
-  button.dataset.tableMode = mode;
-  button.classList.toggle('is-exit', mode === 'exit');
-  button.textContent = mode === 'exit' ? labels.exitTable || '退出编辑' : labels.editTable || '编辑表格';
-  button.title = mode === 'exit' ? 'Esc' : 'Enter';
-  button.onclick = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    window.parent.postMessage(
-      { source: LOWCODE_MESSAGE_SOURCE, type: 'table-mode', action: mode },
-      window.location.origin,
-    );
-  };
-  const tableBox = hostBox(host, table, zoom);
-  const anchor = mode === 'exit' ? (gridBox(host, table, zoom) ?? tableBox) : tableBox;
-  // 编辑时列标高出格子 12px，按钮再离开一截，右缘对齐格子而不是表格外框。
-  const above = mode === 'exit' ? COLUMN_TAB + 4 : 4;
-  place(button, {
-    left: `${anchor.left + anchor.width}px`,
-    top: `${anchor.top - above}px`,
-    transform: 'translate(-100%, -100%)',
-  });
-  clampButtonInView(button, host, zoom);
+  const table =
+    (selected?.dataset.widgetType === 'table' ? selected : null) ??
+    (hoverWidget?.dataset.widgetType === 'table' ? hoverWidget : null);
+  if (!table) {
+    removeMask();
+    return;
+  }
+  const box = hostBox(host, table, zoom);
+  paintEditMask(host, table, box, 'table');
 }
 
 /** 读取表格声明的宽/高，换算成像素；自适应或无法解析时返回 null。 */
@@ -530,14 +550,17 @@ export function syncTableChrome(
   editing: boolean,
   draggingKey: string | null,
   labels: TableChromeLabels,
+  hoverWidget: HTMLElement | null = null,
+  hasSpacingDrag = false,
 ) {
   const openTable = root?.querySelector<HTMLElement>('.lowcode-table.is-table-open');
   if (openTable && leafOpenEditor(root) !== openTable) {
     host?.querySelector(`[${MODE_ATTR}]`)?.remove();
+    host?.querySelector('[data-edit-mask="table"]')?.remove();
     host?.querySelector(`[${CHROME_ATTR}]`)?.remove();
     return;
   }
-  paintTableModeButton(host, root, zoom, editing, labels);
+  paintTableModeButton(host, root, zoom, editing, labels, hoverWidget, hasSpacingDrag);
   if (!host || !editing || !model) {
     host?.querySelector(`[${CHROME_ATTR}]`)?.remove();
     return;

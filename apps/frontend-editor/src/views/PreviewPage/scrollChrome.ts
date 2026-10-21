@@ -1,6 +1,6 @@
 import { LOWCODE_MESSAGE_SOURCE } from '../../utils/lowcode-protocol';
 import { previewVisualScale } from '../../utils/spacingGuides';
-import { resolveWidgetNode } from './helpers';
+import { postToParent, resolveWidgetNode } from './helpers';
 
 export type ScrollChromeLabels = {
   editScroll: string;
@@ -152,7 +152,63 @@ export function syncScrollReveal(
   }
 }
 
-/** 滚动容器上方：未进入时显示「编辑滚动容器」，编辑中显示「退出编辑」。 */
+const PEN_SVG =
+  '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+
+/**
+ * paintEditMask：在控件上方画灰色遮罩 + 居中笔图标。
+ * 单击：未选中则选中控件，已选中则进入对应编辑态（table/scroll/swiper）。
+ * 遮罩带 data-edit-mask-for，供 canvasHit 把指针事件解析回原控件。
+ */
+export function paintEditMask(
+  host: HTMLElement | null,
+  widget: HTMLElement | null,
+  box: Box,
+  modeType: 'table' | 'scroll' | 'swiper',
+) {
+  const selector = `[data-edit-mask="${modeType}"]`;
+  const remove = () => host?.querySelector(selector)?.remove();
+  if (!host || !widget) {
+    remove();
+    return;
+  }
+  const widgetId = widget.dataset.widgetId;
+  if (!widgetId) {
+    remove();
+    return;
+  }
+  let mask = host.querySelector<HTMLDivElement>(selector);
+  if (!mask) {
+    mask = document.createElement('div');
+    mask.className = 'edit-mask';
+    mask.setAttribute('data-edit-mask', modeType);
+    const pen = document.createElement('span');
+    pen.className = 'edit-mask-pen';
+    pen.setAttribute('aria-hidden', 'true');
+    pen.innerHTML = PEN_SVG;
+    mask.append(pen);
+    host.append(mask);
+  }
+  mask.dataset.editMaskFor = widgetId;
+  mask.dataset.widgetType = widget.dataset.widgetType ?? modeType;
+  mask.style.left = `${box.left}px`;
+  mask.style.top = `${box.top}px`;
+  mask.style.width = `${box.width}px`;
+  mask.style.height = `${box.height}px`;
+  // 单击：已选中则进入编辑，否则选中。阻止冒泡避免父级 onclick 把同控件的再次点击当成上钻。
+  mask.onclick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (widget.classList.contains('is-widget-selected')) {
+      postToParent({ type: `${modeType}-mode`, action: 'enter' });
+    } else {
+      postToParent({ type: 'select', widgetId });
+    }
+  };
+  mask.ondblclick = null;
+}
+
+/** 滚动容器：未进入时在控件上画灰色遮罩 + 笔图标（单击选中，再点进入），编辑中显示「退出编辑」。 */
 export function paintScrollModeButton(
   host: HTMLElement | null,
   root: HTMLElement | null,
@@ -160,45 +216,66 @@ export function paintScrollModeButton(
   editing: boolean,
   scrollEditing: boolean,
   labels: ScrollChromeLabels,
+  hoverWidget: HTMLElement | null = null,
+  hasSpacingDrag = false,
 ) {
-  const remove = () => host?.querySelector(`[${MODE_ATTR}]`)?.remove();
+  const removeButton = () => host?.querySelector(`[${MODE_ATTR}]`)?.remove();
+  const removeMask = () => host?.querySelector('[data-edit-mask="scroll"]')?.remove();
   if (!host || !root || !editing) {
-    remove();
+    removeButton();
+    removeMask();
     return;
   }
   const selected = root.querySelector<HTMLElement>('.is-widget-selected');
   const open = scrollEditing ? editingScroll(root) : null;
-  const scroll = open ?? (selected?.dataset.widgetType === 'scroll' ? selected : null);
-  if (!scroll || (open && leafOpenEditor(root) !== scroll)) {
-    remove();
+  if (open) {
+    removeMask();
+    if (leafOpenEditor(root) !== open) {
+      removeButton();
+      return;
+    }
+    let button = host.querySelector<HTMLButtonElement>(`[${MODE_ATTR}]`);
+    if (!button) {
+      button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'table-mode-button';
+      button.setAttribute(MODE_ATTR, '');
+      host.append(button);
+    }
+    button.dataset.scrollMode = 'exit';
+    button.classList.add('is-exit');
+    button.textContent = labels.exitScroll || '退出编辑';
+    button.title = 'Esc';
+    button.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      window.parent.postMessage(
+        { source: LOWCODE_MESSAGE_SOURCE, type: 'scroll-mode', action: 'exit' },
+        window.location.origin,
+      );
+    };
+    const box = hostBox(host, open, zoom);
+    button.style.left = `${box.left + box.width}px`;
+    button.style.top = `${box.top - 4}px`;
+    button.style.transform = 'translate(-100%, -100%)';
+    clampButtonInView(button, host, zoom);
     return;
   }
-  const mode = open ? 'exit' : 'enter';
-  let button = host.querySelector<HTMLButtonElement>(`[${MODE_ATTR}]`);
-  if (!button) {
-    button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'table-mode-button';
-    button.setAttribute(MODE_ATTR, '');
-    host.append(button);
+  removeButton();
+  // 间距/尺寸拖拽态：不画遮罩，避免盖住间距手柄。
+  if (hasSpacingDrag) {
+    removeMask();
+    return;
   }
-  button.dataset.scrollMode = mode;
-  button.classList.toggle('is-exit', mode === 'exit');
-  button.textContent = mode === 'exit' ? labels.exitScroll || '退出编辑' : labels.editScroll || '编辑滚动容器';
-  button.title = mode === 'exit' ? 'Esc' : 'Enter';
-  button.onclick = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    window.parent.postMessage(
-      { source: LOWCODE_MESSAGE_SOURCE, type: 'scroll-mode', action: mode },
-      window.location.origin,
-    );
-  };
+  const scroll =
+    (selected?.dataset.widgetType === 'scroll' ? selected : null) ??
+    (hoverWidget?.dataset.widgetType === 'scroll' ? hoverWidget : null);
+  if (!scroll) {
+    removeMask();
+    return;
+  }
   const box = hostBox(host, scroll, zoom);
-  button.style.left = `${box.left + box.width}px`;
-  button.style.top = `${box.top - 4}px`;
-  button.style.transform = 'translate(-100%, -100%)';
-  clampButtonInView(button, host, zoom);
+  paintEditMask(host, scroll, box, 'scroll');
 }
 
 const SWIPER_MODE_ATTR = 'data-swiper-mode';
@@ -258,7 +335,7 @@ export function syncSwiperReveal(
   }
 }
 
-/** 滑动器右上角：未进入时显示「编辑滑动器」，编辑中显示「退出编辑」。 */
+/** 滑动器：未进入时在控件上画灰色遮罩 + 笔图标（单击选中，再点进入），编辑中显示「退出编辑」。 */
 export function paintSwiperModeButton(
   host: HTMLElement | null,
   root: HTMLElement | null,
@@ -266,45 +343,66 @@ export function paintSwiperModeButton(
   editing: boolean,
   swiperEditing: boolean,
   labels: SwiperChromeLabels,
+  hoverWidget: HTMLElement | null = null,
+  hasSpacingDrag = false,
 ) {
-  const remove = () => host?.querySelector(`[${SWIPER_MODE_ATTR}]`)?.remove();
+  const removeButton = () => host?.querySelector(`[${SWIPER_MODE_ATTR}]`)?.remove();
+  const removeMask = () => host?.querySelector('[data-edit-mask="swiper"]')?.remove();
   if (!host || !root || !editing) {
-    remove();
+    removeButton();
+    removeMask();
     return;
   }
   const selected = root.querySelector<HTMLElement>('.is-widget-selected');
   const open = swiperEditing ? editingSwiper(root) : null;
-  const swiper = open ?? (selected?.dataset.widgetType === 'swiper' ? selected : null);
-  if (!swiper || (open && leafOpenEditor(root) !== swiper)) {
-    remove();
+  if (open) {
+    removeMask();
+    if (leafOpenEditor(root) !== open) {
+      removeButton();
+      return;
+    }
+    let button = host.querySelector<HTMLButtonElement>(`[${SWIPER_MODE_ATTR}]`);
+    if (!button) {
+      button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'table-mode-button';
+      button.setAttribute(SWIPER_MODE_ATTR, '');
+      host.append(button);
+    }
+    button.dataset.swiperMode = 'exit';
+    button.classList.add('is-exit');
+    button.textContent = labels.exitSwiper || '退出编辑';
+    button.title = 'Esc';
+    button.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      window.parent.postMessage(
+        { source: LOWCODE_MESSAGE_SOURCE, type: 'swiper-mode', action: 'exit' },
+        window.location.origin,
+      );
+    };
+    const box = hostBox(host, open, zoom);
+    button.style.left = `${box.left + box.width}px`;
+    button.style.top = `${box.top - 4}px`;
+    button.style.transform = 'translate(-100%, -100%)';
+    clampButtonInView(button, host, zoom);
     return;
   }
-  const mode = open ? 'exit' : 'enter';
-  let button = host.querySelector<HTMLButtonElement>(`[${SWIPER_MODE_ATTR}]`);
-  if (!button) {
-    button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'table-mode-button';
-    button.setAttribute(SWIPER_MODE_ATTR, '');
-    host.append(button);
+  removeButton();
+  // 间距/尺寸拖拽态：不画遮罩，避免盖住间距手柄。
+  if (hasSpacingDrag) {
+    removeMask();
+    return;
   }
-  button.dataset.swiperMode = mode;
-  button.classList.toggle('is-exit', mode === 'exit');
-  button.textContent = mode === 'exit' ? labels.exitSwiper || '退出编辑' : labels.editSwiper || '编辑滑动器';
-  button.title = mode === 'exit' ? 'Esc' : 'Enter';
-  button.onclick = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    window.parent.postMessage(
-      { source: LOWCODE_MESSAGE_SOURCE, type: 'swiper-mode', action: mode },
-      window.location.origin,
-    );
-  };
+  const swiper =
+    (selected?.dataset.widgetType === 'swiper' ? selected : null) ??
+    (hoverWidget?.dataset.widgetType === 'swiper' ? hoverWidget : null);
+  if (!swiper) {
+    removeMask();
+    return;
+  }
   const box = hostBox(host, swiper, zoom);
-  button.style.left = `${box.left + box.width}px`;
-  button.style.top = `${box.top - 4}px`;
-  button.style.transform = 'translate(-100%, -100%)';
-  clampButtonInView(button, host, zoom);
+  paintEditMask(host, swiper, box, 'swiper');
 }
 
 /**

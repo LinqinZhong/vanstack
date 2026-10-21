@@ -236,6 +236,8 @@ export function PreviewPage() {
   }
 
   function refreshTableChrome() {
+    const hoverWidget = chromeTargetRef.current instanceof HTMLElement ? chromeTargetRef.current : null;
+    const hasSpacingDrag = Boolean(spacingDragRef.current);
     syncTableReveal(
       hostRef.current,
       mountRef.current,
@@ -253,6 +255,8 @@ export function PreviewPage() {
     editingRef.current,
     scrollEditingRef.current,
     scrollLabelsRef.current,
+    hoverWidget,
+    hasSpacingDrag,
   );
   paintSwiperModeButton(
     hostRef.current,
@@ -261,6 +265,8 @@ export function PreviewPage() {
     editingRef.current,
     swiperEditingRef.current,
     swiperLabelsRef.current,
+    hoverWidget,
+    hasSpacingDrag,
   );
     syncTableChrome(
       hostRef.current,
@@ -270,6 +276,8 @@ export function PreviewPage() {
       editingRef.current,
       tableDragKeyRef.current,
       chromeLabelsRef.current,
+      hoverWidget,
+      hasSpacingDrag,
     );
     const leaf = editingRef.current ? leafOpenEditor(mountRef.current) : null;
     const leafId = leaf?.dataset.widgetId ?? null;
@@ -929,6 +937,20 @@ export function PreviewPage() {
     /** canvasHit：未进入表格编辑时，表格内部的悬停和点击都算在表格上。 */
     function canvasHit(target: EventTarget | null) {
       if (!(target instanceof Element)) {
+        return null;
+      }
+      // 编辑遮罩（滚动/表格/滑动器）：解析到它覆盖的控件，保证遮罩上的悬停/点击仍命中原控件。
+      const mask = target.closest<HTMLElement>('[data-edit-mask-for]');
+      if (mask) {
+        const id = mask.dataset.editMaskFor;
+        if (id) {
+          const widget = mountRef.current?.querySelector<HTMLElement>(
+            `[data-widget-id="${CSS.escape(id)}"]`,
+          );
+          if (widget) {
+            return widget;
+          }
+        }
         return null;
       }
       const node = target.closest('[data-widget-id]');

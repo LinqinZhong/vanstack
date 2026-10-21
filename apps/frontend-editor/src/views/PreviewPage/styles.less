@@ -1239,6 +1239,31 @@ body:has(.spacing-drag-shield.is-cursor-nesw) #root,
   color: #137a62;
 }
 
+/* 滚动容器/表格/滑动器：未进入编辑时，悬停或选中后在控件上覆盖灰色遮罩 + 居中笔按钮。 */
+.edit-mask {
+  position: absolute;
+  z-index: 13;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.38);
+  border-radius: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+}
+
+.edit-mask-pen {
+  width: 22px;
+  height: 22px;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
 .table-chrome {
   position: absolute;
   inset: 0;

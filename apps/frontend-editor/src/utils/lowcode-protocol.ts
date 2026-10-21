@@ -45,6 +45,8 @@ export type LowcodePreviewMessage = {
   /** 正在编辑的表格 id：编辑态可能没有任何选中节点，预览据此定位编辑目标。 */
   tableEditingId?: string | null;
   scrollEditing?: boolean;
+  /** 正在编辑的滚动容器 id：嵌套滚动容器时预览据此定位编辑目标，不再靠选中项推断。 */
+  scrollEditingId?: string | null;
   swiperEditing?: boolean;
   componentEditing?: boolean;
   /** 插槽使用编辑：正在编辑插槽内容的组件实例 id。 */

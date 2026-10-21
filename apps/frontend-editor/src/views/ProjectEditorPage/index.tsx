@@ -154,6 +154,7 @@ import {
   toWidgetTreeData,
   updateSlotContentWidget,
   updateWidgetById,
+  isWidgetWithin,
   virtualInnerId,
   withComponentVirtualTree,
   widgetTreeLabel,
@@ -1417,10 +1418,12 @@ export function ProjectEditorPage() {
     if (mode !== 'preview' && tableEditId != null) {
       editLayers.push({ kind: 'table', depth: depthOf(tableEditId) });
     }
+    // 滚动编辑层：选中项在正在编辑的滚动容器子树内（含嵌套内层滚动容器）即保持，
+    // 不能按 findOwningScroll 最内层判断——嵌套时选中内层会误丢编辑层。
     if (
       mode !== 'preview' &&
       scrollEditId != null &&
-      findOwningScroll(widgetsRef.current, selectedWidgetId)?.id === scrollEditId
+      isWidgetWithin(widgetsRef.current, scrollEditId, selectedWidgetId)
     ) {
       editLayers.push({ kind: 'scroll', depth: depthOf(scrollEditId) });
     }
@@ -1522,6 +1525,7 @@ export function ProjectEditorPage() {
         tableEditing: editLeaf === 'table',
         tableEditingId: editLeaf === 'table' ? tableEditId : null,
         scrollEditing: editLeaf === 'scroll',
+        scrollEditingId: editLeaf === 'scroll' ? scrollEditId : null,
         swiperEditing: editLeaf === 'swiper',
         componentEditing: componentEditId !== null,
         componentEditId: componentEditId,
@@ -2971,9 +2975,14 @@ export function ProjectEditorPage() {
       return;
     }
     const owning = findOwningTable(widgetsRef.current, id);
-    const owningScroll = findOwningScroll(widgetsRef.current, id);
     const owningSwiper = findOwningSwiper(widgetsRef.current, id);
     const selected = findWidget(widgetsRef.current, id);
+    // 选中项本身是滚动容器时，归属滚动层要取父级链上最近的一层——findOwningScroll 会命中自身，
+    // 否则退出内层嵌套滚动编辑后无法自动回到外层编辑（owningScroll===自身，自动进入条件恒不成立）。
+    const owningScroll =
+      selected?.type === 'scroll'
+        ? findOwningScroll(widgetsRef.current, findParentWidget(widgetsRef.current, id)?.id ?? null)
+        : findOwningScroll(widgetsRef.current, id);
     if (
       id &&
       tableEditIdRef.current &&
@@ -3025,7 +3034,12 @@ export function ProjectEditorPage() {
       tableEditIdRef.current = null;
       setTableEditId(null);
     }
-    if (scrollEditIdRef.current && owningScroll?.id !== scrollEditIdRef.current) {
+    // 嵌套滚动容器：选中项仍在正在编辑的滚动容器子树内（如内层滚动容器 A）时保持编辑层，
+    // 仅当选到子树外才退出。不能按 findOwningScroll 最内层判断，否则选中 A 会误退出 B 的编辑。
+    if (
+      scrollEditIdRef.current &&
+      !isWidgetWithin(widgetsRef.current, scrollEditIdRef.current, id)
+    ) {
       scrollEditIdRef.current = null;
       setScrollEditId(null);
     }
@@ -3041,7 +3055,15 @@ export function ProjectEditorPage() {
       tableEditIdRef.current = owning.table.id;
       setTableEditId(owning.table.id);
     }
-    if (owningScroll && selected && selected.id !== owningScroll.id && scrollEditIdRef.current !== owningScroll.id) {
+    // 自动进入滚动编辑层：仅在未处于其它滚动编辑、或选中项不在当前编辑子树内时切换，
+    // 避免编辑 B 时选中内层滚动容器 A 把编辑目标错误切到 A。
+    if (
+      owningScroll &&
+      selected &&
+      selected.id !== owningScroll.id &&
+      scrollEditIdRef.current !== owningScroll.id &&
+      !isWidgetWithin(widgetsRef.current, scrollEditIdRef.current, selected.id)
+    ) {
       scrollEditIdRef.current = owningScroll.id;
       setScrollEditId(owningScroll.id);
     }

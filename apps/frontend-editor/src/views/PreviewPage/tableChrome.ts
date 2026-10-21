@@ -388,9 +388,8 @@ function paintTableModeButton(
     removeMask();
     return;
   }
-  const table =
-    (selected?.dataset.widgetType === 'table' ? selected : null) ??
-    (hoverWidget?.dataset.widgetType === 'table' ? hoverWidget : null);
+  // 遮罩只在「已选中且悬停」时出现。
+  const table = selected === hoverWidget && selected?.dataset.widgetType === 'table' ? selected : null;
   if (!table) {
     removeMask();
     return;

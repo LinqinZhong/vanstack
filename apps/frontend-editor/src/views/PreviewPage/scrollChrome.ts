@@ -95,7 +95,14 @@ function openScroll(scroll: HTMLElement) {
   view.scrollLeft = 0;
 }
 
-function editingScroll(root: HTMLElement): HTMLElement | null {
+/** 定位正在编辑的滚动容器：优先按父页下发的编辑 id；无 id 时退化为按选中项推断（嵌套时不可靠，仅兜底）。 */
+function editingScroll(root: HTMLElement, editingId: string | null): HTMLElement | null {
+  if (editingId) {
+    const node = resolveWidgetNode(root, editingId);
+    if (node instanceof HTMLElement && node.classList.contains('lowcode-scroll')) {
+      return node;
+    }
+  }
   const selected = root.querySelector('.is-widget-selected');
   if (!(selected instanceof HTMLElement)) {
     return null;
@@ -113,6 +120,7 @@ export function syncScrollReveal(
   root: HTMLElement | null,
   editing: boolean,
   scrollEditing: boolean,
+  scrollEditingId: string | null = null,
 ) {
   const clearOpen = (keep?: ReadonlySet<HTMLElement>) => {
     root?.querySelectorAll('.lowcode-scroll.is-scroll-open').forEach((node) => {
@@ -128,10 +136,19 @@ export function syncScrollReveal(
     return;
   }
   const keep = new Set<HTMLElement>();
-  const scroll = scrollEditing ? editingScroll(root) : null;
+  const scroll = scrollEditing ? editingScroll(root, scrollEditingId) : null;
   if (scroll) {
     openScroll(scroll);
     keep.add(scroll);
+    // 嵌套滚动容器：编辑内层时外层也要保持打开，否则内层随外层一起被裁切/隐藏。
+    let ancestor = scroll.parentElement;
+    while (ancestor) {
+      if (ancestor instanceof HTMLElement && ancestor.classList.contains('lowcode-scroll')) {
+        openScroll(ancestor);
+        keep.add(ancestor);
+      }
+      ancestor = ancestor.parentElement;
+    }
   }
   const table = root.querySelector('.lowcode-table.is-table-open');
   let parent = table?.parentElement ?? null;
@@ -218,6 +235,7 @@ export function paintScrollModeButton(
   labels: ScrollChromeLabels,
   hoverWidget: HTMLElement | null = null,
   hasSpacingDrag = false,
+  scrollEditingId: string | null = null,
 ) {
   const removeButton = () => host?.querySelector(`[${MODE_ATTR}]`)?.remove();
   const removeMask = () => host?.querySelector('[data-edit-mask="scroll"]')?.remove();
@@ -227,11 +245,13 @@ export function paintScrollModeButton(
     return;
   }
   const selected = root.querySelector<HTMLElement>('.is-widget-selected');
-  const open = scrollEditing ? editingScroll(root) : null;
+  const open = scrollEditing ? editingScroll(root, scrollEditingId) : null;
+  // 遮罩只在「已选中且悬停」时出现；嵌套场景下可能是正在编辑层里面的内层容器。
+  const targetScroll = selected === hoverWidget && selected?.dataset.widgetType === 'scroll' ? selected : null;
   if (open) {
-    removeMask();
     if (leafOpenEditor(root) !== open) {
       removeButton();
+      removeMask();
       return;
     }
     let button = host.querySelector<HTMLButtonElement>(`[${MODE_ATTR}]`);
@@ -259,6 +279,12 @@ export function paintScrollModeButton(
     button.style.top = `${box.top - 4}px`;
     button.style.transform = 'translate(-100%, -100%)';
     clampButtonInView(button, host, zoom);
+    // 嵌套滚动容器：编辑外层时，悬停内层滚动容器仍画遮罩（单击选中，再点进入内层编辑）。
+    if (!hasSpacingDrag && targetScroll && targetScroll !== open && open.contains(targetScroll)) {
+      paintEditMask(host, targetScroll, hostBox(host, targetScroll, zoom), 'scroll');
+    } else {
+      removeMask();
+    }
     return;
   }
   removeButton();
@@ -267,15 +293,11 @@ export function paintScrollModeButton(
     removeMask();
     return;
   }
-  const scroll =
-    (selected?.dataset.widgetType === 'scroll' ? selected : null) ??
-    (hoverWidget?.dataset.widgetType === 'scroll' ? hoverWidget : null);
-  if (!scroll) {
+  if (!targetScroll) {
     removeMask();
     return;
   }
-  const box = hostBox(host, scroll, zoom);
-  paintEditMask(host, scroll, box, 'scroll');
+  paintEditMask(host, targetScroll, hostBox(host, targetScroll, zoom), 'scroll');
 }
 
 const SWIPER_MODE_ATTR = 'data-swiper-mode';
@@ -394,9 +416,8 @@ export function paintSwiperModeButton(
     removeMask();
     return;
   }
-  const swiper =
-    (selected?.dataset.widgetType === 'swiper' ? selected : null) ??
-    (hoverWidget?.dataset.widgetType === 'swiper' ? hoverWidget : null);
+  // 遮罩只在「已选中且悬停」时出现。
+  const swiper = selected === hoverWidget && selected?.dataset.widgetType === 'swiper' ? selected : null;
   if (!swiper) {
     removeMask();
     return;

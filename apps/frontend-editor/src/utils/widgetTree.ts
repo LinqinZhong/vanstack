@@ -164,6 +164,25 @@ export function findOwningScroll(
   return null;
 }
 
+/** 判断 id 是否位于 ancestorId 的子树内（含 ancestorId 自身）。嵌套容器归属判断用，区别于 findOwningXxx 只取最内层。 */
+export function isWidgetWithin(
+  widgets: PageWidget[],
+  ancestorId: string | null | undefined,
+  id: string | null | undefined,
+): boolean {
+  if (!ancestorId || !id) {
+    return false;
+  }
+  if (ancestorId === id) {
+    return true;
+  }
+  const ancestor = findWidget(widgets, ancestorId);
+  if (!ancestor || !hasChildren(ancestor)) {
+    return false;
+  }
+  return Boolean(findWidget(ancestor.children, id));
+}
+
 export function findParentWidget(widgets: PageWidget[], id: string | null | undefined): PageWidget | null {
   if (!id) {
     return null;

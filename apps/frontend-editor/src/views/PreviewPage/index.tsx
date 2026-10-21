@@ -11,7 +11,7 @@ import { previewVisualScale, setSpacingActiveEdge, setSpacingDragCursor, setSpac
 import type { BoxDragKind, SpacingEdge } from '../../utils/spacingDrag';
 import { isBoxDragKind, isSpacingNudgeKey, isSpacingValueKey, SPACING_EDGES } from '../../utils/spacingDrag';
 import { pointerAngleDeg, type RotateAxis } from '../../utils/rotateDrag';
-import { applyEditorChromeScale, applyLiveWidgetCss, applyViewport, applyWidgetState, clearLiveInlineStyles, FOCUS_DBLCLICK_MS, focusModifier, paintPreviewCamera, paintWidgetChrome, parentWidgetId, postCanvasPointer, postToParent, postWidgetHover, resolveWidgetNode, setSelectFaded, toRawWidgetId } from './helpers';
+import { applyEditorChromeScale, applyLiveWidgetCss, applyViewport, applyWidgetState, clearLiveInlineStyles, FOCUS_DBLCLICK_MS, focusModifier, paintPreviewCamera, paintWidgetChrome, parentWidgetId, postCanvasPointer, postToParent, postWidgetHover, resolveWidgetNode, setSelectFaded, toRawWidgetId, widgetIdEquals } from './helpers';
 import { applyLiveTableTrack, readTableTrackPair, syncTableChrome, syncTableReveal, type TableChromeLabels } from './tableChrome';
 import { leafOpenEditor, paintScrollModeButton, paintSwiperModeButton, syncComponentSlotFocus, syncScrollReveal, syncSwiperReveal, type ScrollChromeLabels, type SwiperChromeLabels } from './scrollChrome';
 
@@ -95,6 +95,8 @@ export function PreviewPage() {
   const tableEditingRef = useRef(false);
   const tableEditingIdRef = useRef<string | null>(null);
   const scrollEditingRef = useRef(false);
+  /** 正在编辑的滚动容器 id（嵌套滚动容器时据此判断打开层，不能靠选中项推断）。 */
+  const scrollEditingIdRef = useRef<string | null>(null);
   const swiperEditingRef = useRef(false);
   const componentEditingRef = useRef(false);
   const componentEditIdRef = useRef<string | null>(null);
@@ -245,7 +247,7 @@ export function PreviewPage() {
       tableEditingRef.current,
       tableEditingIdRef.current,
     );
-    syncScrollReveal(hostRef.current, mountRef.current, editingRef.current, scrollEditingRef.current);
+    syncScrollReveal(hostRef.current, mountRef.current, editingRef.current, scrollEditingRef.current, scrollEditingIdRef.current);
     syncSwiperReveal(hostRef.current, mountRef.current, editingRef.current, swiperEditingRef.current);
     syncComponentSlotFocus(hostRef.current, mountRef.current, editingRef.current, componentEditingRef.current, slotFocusIdRef.current);
   paintScrollModeButton(
@@ -257,6 +259,7 @@ export function PreviewPage() {
     scrollLabelsRef.current,
     hoverWidget,
     hasSpacingDrag,
+    scrollEditingIdRef.current,
   );
   paintSwiperModeButton(
     hostRef.current,
@@ -453,6 +456,7 @@ export function PreviewPage() {
         tableEditing,
         tableEditingId,
         scrollEditing,
+        scrollEditingId,
         swiperEditing,
         componentEditing,
         componentEditId,
@@ -499,6 +503,7 @@ export function PreviewPage() {
       const nextTableEditing = nextEditing && Boolean(tableEditing);
       const nextTableEditingId = nextTableEditing && typeof tableEditingId === 'string' ? tableEditingId : null;
       const nextScrollEditing = nextEditing && Boolean(scrollEditing);
+      const nextScrollEditingId = nextScrollEditing && typeof scrollEditingId === 'string' ? scrollEditingId : null;
       const nextSwiperEditing = nextEditing && Boolean(swiperEditing);
       const nextComponentEditing = nextEditing && Boolean(componentEditing);
       const nextComponentEditId = nextComponentEditing ? componentEditId ?? null : null;
@@ -532,6 +537,7 @@ export function PreviewPage() {
       tableEditingIdRef.current = nextTableEditingId;
       setHostTableEditing(nextTableEditing);
       scrollEditingRef.current = nextScrollEditing;
+      scrollEditingIdRef.current = nextScrollEditingId;
       setHostScrollEditing(nextScrollEditing);
       swiperEditingRef.current = nextSwiperEditing;
       setHostSwiperEditing(nextSwiperEditing);
@@ -925,8 +931,14 @@ export function PreviewPage() {
       ) {
         return innermostId;
       }
+      // 上钻到「正在编辑的那层滚动容器」即钳制；嵌套内层滚动容器可作为普通父级上钻。
       if (scrollEditingRef.current && parent?.dataset.widgetType === 'scroll') {
-        return innermostId;
+        const openParent = scrollEditingIdRef.current
+          ? widgetIdEquals(parent.dataset.widgetId, scrollEditingIdRef.current)
+          : parent.classList.contains('is-scroll-open');
+        if (openParent) {
+          return innermostId;
+        }
       }
       if (swiperEditingRef.current && parent?.dataset.widgetType === 'swiper') {
         return innermostId;
@@ -976,10 +988,26 @@ export function PreviewPage() {
             hit = swiper;
           }
         }
-        if (!scrollEditingRef.current && !tableEditingRef.current) {
-          const scroll = hit.closest('.lowcode-scroll');
-          if (scroll instanceof HTMLElement) {
-            hit = scroll;
+        // 嵌套滚动容器：折叠到「最外层未在编辑」的滚动容器（未编辑任何滚动容器时即最外层）。
+        // 向上走到正在编辑的那一层即停——其内部内容可直接命中，其外侧不可越级选中。
+        if (!tableEditingRef.current) {
+          const openScrollId = scrollEditingRef.current ? scrollEditingIdRef.current : null;
+          let collapse: HTMLElement | null = null;
+          let current: Element | null = hit;
+          while (current) {
+            if (current instanceof HTMLElement && current.classList.contains('lowcode-scroll')) {
+              if (
+                (openScrollId && widgetIdEquals(current.dataset.widgetId, openScrollId)) ||
+                current.classList.contains('is-scroll-open')
+              ) {
+                break;
+              }
+              collapse = current;
+            }
+            current = current.parentElement;
+          }
+          if (collapse) {
+            hit = collapse;
           }
         }
       }
@@ -1198,8 +1226,14 @@ export function PreviewPage() {
       if (tableEditingRef.current && hit?.dataset.widgetType === 'table') {
         return;
       }
+      // 只吞「正在编辑的那层滚动容器」自身的点击；嵌套的内层滚动容器是普通子控件，可选中。
       if (scrollEditingRef.current && hit?.dataset.widgetType === 'scroll') {
-        return;
+        const openHit = scrollEditingIdRef.current
+          ? widgetIdEquals(hit.dataset.widgetId, scrollEditingIdRef.current)
+          : hit.classList.contains('is-scroll-open');
+        if (openHit) {
+          return;
+        }
       }
       if (swiperEditingRef.current && hit?.dataset.widgetType === 'swiper') {
         return;
